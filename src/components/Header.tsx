@@ -199,18 +199,6 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Right Action Tools */}
         <div className="flex items-center gap-2 shrink-0">
-          
-          {/* Quick Switch to Distributor Portal (Auditors only) */}
-          {onNavigateToIIR && currentUser?.role !== 'Distributor' && !currentUser?.role?.includes('Distributor') && (
-            <button
-              onClick={onNavigateToIIR}
-              className="hidden md:flex items-center gap-1.5 bg-gradient-to-r from-indigo-600/30 to-purple-600/30 hover:from-indigo-600/50 hover:to-purple-600/50 border border-indigo-400/40 text-indigo-200 hover:text-white rounded-lg px-2.5 py-1 text-xs font-semibold transition-all shadow-sm cursor-pointer"
-              title="Open the Distributor Portal"
-            >
-              <UserCheck className="h-3.5 w-3.5 text-indigo-300" />
-              <span>Distributor Portal</span>
-            </button>
-          )}
 
           {/* AI Copilot Button */}
           <button 

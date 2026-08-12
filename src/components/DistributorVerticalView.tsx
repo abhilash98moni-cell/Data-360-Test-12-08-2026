@@ -132,7 +132,16 @@ export const DistributorVerticalView: React.FC<DistributorVerticalViewProps> = (
                   ) : (
                     catRequests.map(item => {
                       const itemComplete = isItemComplete(item);
-                      const isMandatoryNoDoc = item.isMandatory && item.uploadedFiles.length === 0;
+                      const hasUploadedFiles = item.uploadedFiles.length > 0 || Object.values(item.subQuestionResponses || {}).some((r: any) => r.uploadedFiles && r.uploadedFiles.length > 0);
+                      const requiresMainDocument = item.isMandatory && 
+                        item.allowDocumentUpload !== false && 
+                        !item.isYesNoOnly && 
+                        item.responseType !== 'Yes/No Only' && 
+                        item.questionType !== 'yes_no_only' && 
+                        item.questionType !== 'yes_no_conditional' && 
+                        item.responseType !== 'Yes/No Conditional';
+
+                      const isMandatoryNoDoc = requiresMainDocument && !hasUploadedFiles;
                       const hasValidExplanation = item.noUploadExplanation.trim().length >= 50;
                       const isValidationError = isMandatoryNoDoc && !hasValidExplanation;
                       const isConditional = item.questionType === 'yes_no_conditional' || item.responseType === 'Yes/No Conditional';

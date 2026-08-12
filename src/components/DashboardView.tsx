@@ -414,7 +414,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
             >
               <UserCheck className="h-4 w-4" />
-              <span>Open Distributor Portal (IRL)</span>
+              <span>Information Request List (IRL)</span>
             </button>
 
             <button

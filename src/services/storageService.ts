@@ -321,7 +321,7 @@ export class GoogleDriveStorageService implements StorageService {
 
     let targetFolderId = isReference
       ? folderIds['02_Reference_Materials']
-      : folderIds['03_Distributor_Evidence'];
+      : (folderIds['01_IRL'] || folderIds['03_Distributor_Evidence']);
 
     const sanitize = (str: string) => str.trim().replace(/[/\\?%*:|"<>]/g, '_');
     const safeClient = sanitize(metadata.clientName || 'Default_Client');
@@ -330,13 +330,27 @@ export class GoogleDriveStorageService implements StorageService {
     const reqRef = sanitize(metadata.requirementId || 'General');
 
     let folderPath = '';
+    let parentsList: string[] = [];
+
     if (isReference) {
+      targetFolderId = folderIds['02_Reference_Materials'];
+      parentsList = [targetFolderId];
       folderPath = `Data360_Test/Clients/${safeClient}/Audits/${safeAudit}/Distributors/${safeDistributor}/02_Reference_Materials`;
     } else {
-      // Create subfolder inside 03_Distributor_Evidence for requirement e.g. IRL-2.3
-      const reqFolderPath = `Clients/${safeClient}/Audits/${safeAudit}/Distributors/${safeDistributor}/03_Distributor_Evidence/${reqRef}`;
-      targetFolderId = await this.createFolderIfNotExist(reqRef, folderIds['03_Distributor_Evidence'], reqFolderPath);
-      folderPath = `Data360_Test/Clients/${safeClient}/Audits/${safeAudit}/Distributors/${safeDistributor}/03_Distributor_Evidence/${reqRef}`;
+      // Send uploaded evidence files directly to 01_IRL and 03_Distributor_Evidence folders in Google Drive
+      const irlFolderId = folderIds['01_IRL'];
+      const evidenceFolderId = folderIds['03_Distributor_Evidence'];
+      targetFolderId = irlFolderId || evidenceFolderId;
+      
+      if (irlFolderId && evidenceFolderId) {
+        parentsList = [irlFolderId, evidenceFolderId];
+      } else if (irlFolderId) {
+        parentsList = [irlFolderId];
+      } else if (evidenceFolderId) {
+        parentsList = [evidenceFolderId];
+      }
+
+      folderPath = `Data360_Test/Clients/${safeClient}/Audits/${safeAudit}/Distributors/${safeDistributor}/01_IRL`;
     }
 
     let driveFileId = `gdrive-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
@@ -357,7 +371,7 @@ export class GoogleDriveStorageService implements StorageService {
         const fileRes = await this.drive.files.create({
           requestBody: {
             name: fileName,
-            parents: [targetFolderId]
+            parents: parentsList.length > 0 ? parentsList : [targetFolderId]
           },
           media: media,
           fields: 'id, name, webViewLink, webContentLink'

@@ -88,7 +88,7 @@ const getIIRPushedStorageKey = (client: string) =>
 const loadIIRRequestsFromStorage = (client: string, dist: string, fallback: IIRRequestItem[]): IIRRequestItem[] => {
   if (typeof window === 'undefined') return fallback;
   const key = getIIRStorageKey(client, dist);
-  const saved = localStorage.getItem(key);
+  const saved = localStorage.getItem(key) || localStorage.getItem('data360_iir_reqs_latest');
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
@@ -108,6 +108,26 @@ const loadIIRRequestsFromStorage = (client: string, dist: string, fallback: IIRR
       console.error('Failed to parse saved requests:', err);
     }
   }
+
+  // Fallback search across localStorage for any key starting with data360_iir_reqs_ with user responses
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('data360_iir_reqs_')) {
+        const val = localStorage.getItem(k);
+        if (val) {
+          const parsed = JSON.parse(val);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const hasResponses = parsed.some(it => !!it.textResponse || (it.uploadedFiles && it.uploadedFiles.length > 0) || (it.subQuestionResponses && Object.keys(it.subQuestionResponses).length > 0));
+            if (hasResponses) {
+              return parsed;
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {}
+
   return fallback;
 };
 
@@ -115,6 +135,7 @@ const saveIIRRequestsToStorage = (client: string, dist: string, items: IIRReques
   if (typeof window === 'undefined') return;
   const key = getIIRStorageKey(client, dist);
   localStorage.setItem(key, JSON.stringify(items));
+  localStorage.setItem('data360_iir_reqs_latest', JSON.stringify(items));
   
   // Dispatch custom window event for same-tab reactivity
   window.dispatchEvent(new CustomEvent('data360_iir_sync_event', {
@@ -226,17 +247,10 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   const [auditTrail, setAuditTrail] = useState<IIRAuditTrail[]>(initialAuditTrail);
   const [lastSyncedTime, setLastSyncedTime] = useState<string>(() => new Date().toLocaleTimeString());
   
-  // View Role Mode: Distributor Isolated Portal vs Auditor Reviewer Mode
+  // View Role Mode: Auditor Reviewer Mode for Auditors/Admins vs Distributor Portal for Distributors
   const [viewRole, setViewRole] = useState<'Distributor' | 'Auditor'>(() => {
     if (currentUser?.role === 'Distributor') return 'Distributor';
-    if (typeof window !== 'undefined') {
-      const params = new URLSearchParams(window.location.search);
-      const hash = window.location.hash.toLowerCase();
-      if (params.get('role') === 'auditor' || hash.includes('auditor')) {
-        return 'Auditor';
-      }
-    }
-    return 'Distributor';
+    return 'Auditor';
   });
 
   // Sync role and distributor name when currentUser changes
@@ -246,6 +260,8 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       if (currentUser.organization) {
         setSelectedDistributorName(currentUser.organization);
       }
+    } else {
+      setViewRole('Auditor');
     }
   }, [currentUser]);
 
@@ -1359,7 +1375,11 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       (statusFilter === 'Pending' && (item.status === 'Pending' || item.status === 'Partially Completed')) ||
       (statusFilter === 'Completed' && item.status === 'Completed') ||
       (statusFilter === 'Submitted' && item.status === 'Submitted') ||
-      (statusFilter === 'Missing Docs' && item.isMandatory && item.uploadedFiles.length === 0 && item.noUploadExplanation.length < 50) ||
+      (statusFilter === 'Missing Docs' && (() => {
+        const hasFiles = item.uploadedFiles.length > 0 || Object.values(item.subQuestionResponses || {}).some((r: any) => r.uploadedFiles && r.uploadedFiles.length > 0);
+        const reqDoc = item.isMandatory && item.allowDocumentUpload !== false && !item.isYesNoOnly && item.responseType !== 'Yes/No Only' && item.questionType !== 'yes_no_only' && item.questionType !== 'yes_no_conditional' && item.responseType !== 'Yes/No Conditional';
+        return reqDoc && !hasFiles && item.noUploadExplanation.length < 50;
+      })()) ||
       (statusFilter === 'Clarification' && item.reviewerStatus === 'Clarification Required') ||
       (statusFilter === 'Accepted' && item.reviewerStatus === 'Accepted');
 
@@ -1423,49 +1443,6 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                 </span>
               )}
             </div>
-
-            {/* Auditor Portal Switcher (For Auditor preview only) */}
-            <div className="flex items-center gap-2 bg-slate-900 p-1 rounded-lg border border-slate-800 shrink-0">
-              <span className="text-[10px] uppercase font-bold text-slate-500 px-2 hidden sm:inline">Portal View:</span>
-              <button
-                onClick={() => setViewRole('Auditor')}
-                className={`px-3 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  viewRole === 'Auditor' 
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <ShieldCheck className="h-3.5 w-3.5" />
-                <span>Auditor Mode</span>
-              </button>
-              <button
-                onClick={() => setViewRole('Distributor')}
-                className={`px-3 py-1 rounded-md text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                  viewRole === 'Distributor' 
-                    ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30' 
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                <UserCheck className="h-3.5 w-3.5" />
-                <span>Distributor Portal</span>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* If Auditor is previewing the Distributor view, provide an Exit Preview button */}
-        {viewRole === 'Distributor' && (currentUser?.role === 'Auditor' || currentUser?.role === 'Admin') && (
-          <div className="flex items-center justify-between bg-indigo-950/40 border border-indigo-500/30 rounded-xl px-4 py-2 text-xs text-indigo-300">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-indigo-400" />
-              <span className="font-semibold">Auditor Preview Mode: Viewing the portal as {activeDistributorName}</span>
-            </div>
-            <button
-              onClick={() => setViewRole('Auditor')}
-              className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg text-xs transition-all cursor-pointer shadow-sm"
-            >
-              Return to Auditor Workspace
-            </button>
           </div>
         )}
 
@@ -1865,7 +1842,16 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                   ) : (
                     catRequests.map(item => {
                       const itemComplete = isItemComplete(item);
-                      const isMandatoryNoDoc = item.isMandatory && item.uploadedFiles.length === 0;
+                      const hasUploadedFiles = item.uploadedFiles.length > 0 || Object.values(item.subQuestionResponses || {}).some((r: any) => r.uploadedFiles && r.uploadedFiles.length > 0);
+                      const requiresMainDocument = item.isMandatory && 
+                        item.allowDocumentUpload !== false && 
+                        !item.isYesNoOnly && 
+                        item.responseType !== 'Yes/No Only' && 
+                        item.questionType !== 'yes_no_only' && 
+                        item.questionType !== 'yes_no_conditional' && 
+                        item.responseType !== 'Yes/No Conditional';
+
+                      const isMandatoryNoDoc = requiresMainDocument && !hasUploadedFiles;
                       const hasValidExplanation = item.noUploadExplanation.trim().length >= 50;
                       const isValidationError = isMandatoryNoDoc && !hasValidExplanation;
 
