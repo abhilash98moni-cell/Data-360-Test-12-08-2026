@@ -83,6 +83,20 @@ CREATE TABLE IF NOT EXISTS public.audit_assignments (
 );
 
 -- 7. Initial Information Request List (IRL) Items
+CREATE TABLE IF NOT EXISTS public.irl_submissions (
+  id VARCHAR(255) PRIMARY KEY,
+  client_name VARCHAR(255) NOT NULL,
+  distributor_name VARCHAR(255) NOT NULL,
+  audit_id VARCHAR(255) DEFAULT 'eng-101',
+  status VARCHAR(50) DEFAULT 'Submitted',
+  is_locked BOOLEAN DEFAULT TRUE,
+  submission_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  completion_percentage NUMERIC DEFAULT 100,
+  submitted_by VARCHAR(255),
+  requests_json JSONB,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS public.irl_request_items (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   audit_id UUID REFERENCES public.audits(id) ON DELETE CASCADE,
@@ -103,22 +117,57 @@ CREATE TABLE IF NOT EXISTS public.irl_request_items (
 -- 8. Evidence Files Table (Supabase Storage Metadata)
 CREATE TABLE IF NOT EXISTS public.evidence_files (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  audit_id UUID REFERENCES public.audits(id) ON DELETE CASCADE,
-  request_item_id UUID REFERENCES public.irl_request_items(id) ON DELETE CASCADE,
+  client_name VARCHAR(255) DEFAULT 'Apex Electronics Corp',
+  audit_id VARCHAR(255) DEFAULT 'eng-101',
+  audit_code VARCHAR(100) DEFAULT 'AUD-2026-001',
+  request_item_id VARCHAR(255),
+  requirement_ref VARCHAR(50),
+  requirement_title VARCHAR(255),
+  section VARCHAR(100),
   distributor_name VARCHAR(255) NOT NULL,
   file_name VARCHAR(255) NOT NULL,
-  file_size_mb NUMERIC(8,2) NOT NULL,
-  file_type VARCHAR(50) NOT NULL,
-  storage_path TEXT NOT NULL,
-  file_hash VARCHAR(64) NOT NULL,
+  file_size_mb NUMERIC(8,2) NOT NULL DEFAULT 1.0,
+  file_type VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+  google_drive_file_id VARCHAR(255),
+  google_drive_folder_id VARCHAR(255),
+  storage_path TEXT,
+  file_hash VARCHAR(64),
   version INT DEFAULT 1,
   uploaded_by VARCHAR(255) NOT NULL,
   uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  status VARCHAR(50) DEFAULT 'Pending Review' CHECK (status IN ('Pending Review', 'Accepted', 'Rejected', 'Clarification Required')),
+  status VARCHAR(50) DEFAULT 'PENDING_REVIEW',
+  review_status VARCHAR(50) DEFAULT 'PENDING_REVIEW',
   reviewer_comment TEXT,
   reviewed_by VARCHAR(255),
-  reviewed_at TIMESTAMP WITH TIME ZONE
+  reviewed_at TIMESTAMP WITH TIME ZONE,
+  -- AI-ready metadata fields (nullable for future AI integration)
+  ai_status VARCHAR(50),
+  ai_summary TEXT,
+  ai_flags JSONB,
+  ai_risk_score NUMERIC(4,2),
+  ai_extracted_data JSONB,
+  ai_analysis_timestamp TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Idempotent column updates for evidence_files
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS client_name VARCHAR(255) DEFAULT 'Apex Electronics Corp';
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS audit_code VARCHAR(100) DEFAULT 'AUD-2026-001';
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS requirement_ref VARCHAR(50);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS requirement_title VARCHAR(255);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS section VARCHAR(100);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS google_drive_file_id VARCHAR(255);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS google_drive_folder_id VARCHAR(255);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS review_status VARCHAR(50) DEFAULT 'PENDING_REVIEW';
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_status VARCHAR(50);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_summary TEXT;
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_flags JSONB;
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_risk_score NUMERIC(4,2);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_extracted_data JSONB;
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_analysis_timestamp TIMESTAMP WITH TIME ZONE;
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 
 -- 9. Threaded Communication Messages
 CREATE TABLE IF NOT EXISTS public.threaded_messages (
@@ -219,3 +268,40 @@ CREATE POLICY "Distributor IRL Isolation Policy" ON public.irl_request_items
 -- Policy: System Audit Logs insertion policy
 CREATE POLICY "Allow system log creation" ON public.system_audit_logs
   FOR INSERT WITH CHECK (true);
+
+-- 12. Initial Information Request List (IRL) Edit Access Requests
+CREATE TABLE IF NOT EXISTS public.irl_edit_requests (
+  id VARCHAR(255) PRIMARY KEY,
+  client_name VARCHAR(255) NOT NULL,
+  distributor_name VARCHAR(255) NOT NULL,
+  audit_id VARCHAR(255) DEFAULT 'eng-101',
+  irl_submission_id VARCHAR(255),
+  scope VARCHAR(50) DEFAULT 'Entire IRL',
+  affected_requirements JSONB,
+  requested_by VARCHAR(255) NOT NULL,
+  request_reason TEXT NOT NULL,
+  status VARCHAR(50) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED')),
+  reviewer_comment TEXT,
+  reviewed_by VARCHAR(255),
+  requested_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  reviewed_at TIMESTAMP WITH TIME ZONE,
+  approved_at TIMESTAMP WITH TIME ZONE,
+  rejected_at TIMESTAMP WITH TIME ZONE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_edit_req_distributor ON public.irl_edit_requests(distributor_name);
+CREATE INDEX IF NOT EXISTS idx_edit_req_client ON public.irl_edit_requests(client_name);
+CREATE INDEX IF NOT EXISTS idx_edit_req_status ON public.irl_edit_requests(status);
+
+ALTER TABLE public.irl_edit_requests ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Distributor Edit Requests Isolation Policy" ON public.irl_edit_requests
+  FOR ALL USING (
+    distributor_name = (
+      SELECT organization_name FROM public.users WHERE id = auth.uid()
+    ) OR (
+      SELECT role FROM public.users WHERE id = auth.uid()
+    ) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Auditor', 'Reviewer', 'service_role')
+  );

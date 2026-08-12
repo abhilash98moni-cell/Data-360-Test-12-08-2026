@@ -283,10 +283,21 @@ const SupabaseHeaderChecker: React.FC = () => {
     setStatus(null);
     try {
       const res = await fetch('/api/supabase/health');
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        setStatus({
+          connected: false,
+          error: `Unable to connect to the Data360 database. Server returned non-JSON response (${res.status}).`
+        });
+        return;
+      }
       const data = await res.json();
+      if (!res.ok && !data.error) {
+        data.error = `HTTP Error ${res.status}`;
+      }
       setStatus(data);
     } catch (err: any) {
-      setStatus({ connected: false, error: err.message || 'Failed to query /api/supabase/health' });
+      setStatus({ connected: false, error: err.message || 'Unable to connect to the Data360 database.' });
     } finally {
       setTesting(false);
     }

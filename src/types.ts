@@ -53,22 +53,34 @@ export interface ThreadedMessage {
 
 export interface EvidenceRecord {
   id: string;
+  clientName?: string;
   auditId: string;
   auditCode: string;
+  auditName?: string;
   distributorName: string;
   requestRef: string;
   requestTitle: string;
+  section?: string;
   fileName: string;
   fileSizeMB: number;
   fileType: string;
+  googleDriveFileId?: string;
+  googleDriveFolderId?: string;
   version: number;
-  hash: string;
+  hash?: string;
   uploadedBy: string;
   uploadedDate: string;
-  status: 'Pending Review' | 'Accepted' | 'Rejected' | 'Clarification Required';
+  status: 'PENDING_REVIEW' | 'ACCEPTED' | 'REJECTED' | 'CLARIFICATION_REQUIRED' | 'Pending Review' | 'Accepted' | 'Rejected' | 'Clarification Required';
   reviewerComment?: string;
   reviewedBy?: string;
   reviewedDate?: string;
+  // AI-ready data structure fields (nullable/optional for future AI integration)
+  aiStatus?: string;
+  aiSummary?: string;
+  aiFlags?: Record<string, any>;
+  aiRiskScore?: number;
+  aiExtractedData?: Record<string, any>;
+  aiAnalysisTimestamp?: string;
 }
 
 export interface SystemAuditLog {

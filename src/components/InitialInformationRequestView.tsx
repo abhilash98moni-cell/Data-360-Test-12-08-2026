@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { 
   IIRRequestItem, 
   IIRFile, 
@@ -275,10 +275,34 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     setPushedDistributorNames(pushed);
     setLastSyncedTime(new Date().toLocaleTimeString());
 
+    // Fetch authoritative state from Supabase PostgreSQL API
+    const fetchServerState = async () => {
+      try {
+        const res = await fetch(`/api/iir/sync?client=${encodeURIComponent(selectedClientProp)}&distributor=${encodeURIComponent(targetDist)}`);
+        const contentType = res.headers.get('content-type') || '';
+        if (res.ok && contentType.includes('application/json')) {
+          const data = await res.json();
+          if (data.success && data.found && Array.isArray(data.requests) && data.requests.length > 0) {
+            setRequests(data.requests);
+            setIsLocked(Boolean(data.isLocked));
+            if (data.submissionDate) setSubmissionDate(data.submissionDate);
+            saveIIRRequestsToStorage(selectedClientProp, targetDist, data.requests);
+          }
+        }
+      } catch (err) {
+        console.warn('Sync from Supabase backend warning:', err);
+      }
+    };
+
+    fetchServerState();
+    fetchEditRequests();
+
     const handleCustomSync = (e: any) => {
       if (e.detail?.client === selectedClientProp) {
         if (e.detail?.distributor === targetDist && e.detail?.requests) {
           setRequests(e.detail.requests);
+          if (e.detail.isLocked !== undefined) setIsLocked(Boolean(e.detail.isLocked));
+          if (e.detail.submissionDate) setSubmissionDate(e.detail.submissionDate);
         } else {
           const reloaded = loadIIRRequestsFromStorage(selectedClientProp, targetDist, initialRequests);
           setRequests(reloaded);
@@ -338,6 +362,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   // Form Submission Lock State
   const [isLocked, setIsLocked] = useState<boolean>(false);
   const [submissionDate, setSubmissionDate] = useState<string | null>(null);
+  const [isSubmittingApi, setIsSubmittingApi] = useState<boolean>(false);
 
   // Accordion Expand/Collapse State (Category 1 to 6)
   const [expandedCategories, setExpandedCategories] = useState<number[]>([1, 2, 3, 4, 5, 6]);
@@ -348,6 +373,37 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   const [isAuditTrailOpen, setIsAuditTrailOpen] = useState<boolean>(false);
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState<boolean>(false);
   const [isRequestEditModalOpen, setIsRequestEditModalOpen] = useState<boolean>(false);
+
+  // Stage 3 Edit Request Workflow States
+  const [editRequestScope, setEditRequestScope] = useState<'Entire IRL' | 'Specific Requirements'>('Entire IRL');
+  const [selectedAffectedRequirementIds, setSelectedAffectedRequirementIds] = useState<string[]>([]);
+  const [isSubmittingEditRequest, setIsSubmittingEditRequest] = useState<boolean>(false);
+  const [editRequestsList, setEditRequestsList] = useState<any[]>([]);
+
+  // Auditor Review Modal State
+  const [isAuditorReviewModalOpen, setIsAuditorReviewModalOpen] = useState<boolean>(false);
+  const [selectedEditRequestForReview, setSelectedEditRequestForReview] = useState<any | null>(null);
+  const [auditorReviewComment, setAuditorReviewComment] = useState<string>('');
+  const [isProcessingAuditorAction, setIsProcessingAuditorAction] = useState<boolean>(false);
+
+  // Fetch Edit Requests List
+  const fetchEditRequests = useCallback(async () => {
+    try {
+      const query = new URLSearchParams();
+      if (selectedClientProp) query.append('client', selectedClientProp);
+      if (selectedDistributorName) query.append('distributor', selectedDistributorName);
+
+      const res = await fetch(`/api/iir/edit-requests?${query.toString()}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success && Array.isArray(data.requests)) {
+          setEditRequestsList(data.requests);
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to fetch edit requests:', err);
+    }
+  }, [selectedClientProp, selectedDistributorName]);
   
   // Reference Material Modal States & Logs
   const [selectedItemForReference, setSelectedItemForReference] = useState<IIRRequestItem | null>(null);
@@ -1299,41 +1355,214 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   };
 
   // Handler: Final Submission
-  const handleFinalSubmit = () => {
+  const handleFinalSubmit = async () => {
     if (missingMandatoryCount > 0) {
       showToast(`Cannot submit! ${missingMandatoryCount} mandatory requests are missing required files or >=50 character explanations.`, 'error');
       return;
     }
 
+    setIsSubmittingApi(true);
     const now = new Date().toISOString().substring(0, 19).replace('T', ' ');
-    setRequestsAndSave(prev => prev.map(item => ({
+    const updatedRequests: IIRRequestItem[] = requests.map(item => ({
       ...item,
       status: item.reviewerStatus === 'Accepted' ? 'Accepted' : 'Submitted'
-    })));
+    }));
 
-    setIsLocked(true);
-    setSubmissionDate(now);
-    setIsSubmitModalOpen(false);
+    try {
+      const res = await fetch('/api/iir/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client: selectedClientProp || 'Apex Electronics Corp',
+          distributor: selectedDistributorName || 'Midwest Trading Co.',
+          auditId: 'eng-101',
+          requests: updatedRequests,
+          isLocked: true,
+          submissionDate: now,
+          submittedBy: currentUser?.name || currentUser?.email || selectedDistributorName
+        })
+      });
 
-    addAuditLog('Submitted', `Final submission completed. Lock engaged. ${completedItemsCount} items submitted.`);
-    showToast('Initial Information Request successfully submitted to Audit Team! Real-time sync engaged.', 'success');
+      const contentType = res.headers.get('content-type') || '';
+      let data: any = {};
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      }
+
+      if (!res.ok || data.success === false) {
+        const errorMsg = data.error || `Server error (${res.status}). Submission failed.`;
+        showToast(`Submission failed: ${errorMsg}. Your form has NOT been locked. Please try again.`, 'error');
+        setIsSubmittingApi(false);
+        return;
+      }
+
+      // API and Supabase database persistence succeeded!
+      setRequestsAndSave(() => updatedRequests);
+      setIsLocked(true);
+      setSubmissionDate(data.submissionDate || now);
+      setIsSubmitModalOpen(false);
+
+      addAuditLog('Submitted', `Final submission completed and stored in Supabase database. Lock engaged. ${completedItemsCount} items submitted.`);
+      showToast('Initial Information Request successfully submitted and persisted to Supabase database! Real-time sync engaged.', 'success');
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('data360_iir_sync_event', {
+          detail: {
+            client: selectedClientProp,
+            distributor: selectedDistributorName,
+            requests: updatedRequests,
+            isLocked: true,
+            submissionDate: now
+          }
+        }));
+      }
+    } catch (err: any) {
+      showToast(`Network error: ${err.message || 'Unable to communicate with Supabase server'}. Submission NOT saved.`, 'error');
+    } finally {
+      setIsSubmittingApi(false);
+    }
   };
 
-  // Handler: Request Edit
-  const handleRequestEdit = () => {
-    if (!editRequestReason.trim()) return;
-    
-    addAuditLog('Edit Requested', `Distributor requested edit access. Reason: "${editRequestReason}"`);
-    showToast('Edit request submitted to Auditor for approval.', 'info');
-    setEditRequestReason('');
-    setIsRequestEditModalOpen(false);
+  // Handler: Request Edit (Distributor API call)
+  const handleRequestEdit = async () => {
+    const trimmed = editRequestReason.trim();
+    if (trimmed.length < 50) {
+      showToast(`Request reason must be at least 50 characters long (${trimmed.length}/50).`, 'error');
+      return;
+    }
+
+    setIsSubmittingEditRequest(true);
+    try {
+      const res = await fetch('/api/iir/request-edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client: selectedClientProp || 'Apex Electronics Corp',
+          distributor: selectedDistributorName || 'Midwest Trading Co.',
+          auditId: 'eng-101',
+          scope: editRequestScope,
+          affectedRequirements: editRequestScope === 'Specific Requirements' ? selectedAffectedRequirementIds : [],
+          reason: trimmed,
+          requestedBy: currentUser?.name || currentUser?.email || selectedDistributorName,
+          userRole: viewRole
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Failed to submit edit access request.', 'error');
+        setIsSubmittingEditRequest(false);
+        return;
+      }
+
+      showToast('Edit access request submitted to APEX Auditor team for review.', 'success');
+      addAuditLog('Edit Requested', `Requested edit access. Scope: ${editRequestScope}. Reason: "${trimmed}"`);
+      setEditRequestReason('');
+      setSelectedAffectedRequirementIds([]);
+      setEditRequestScope('Entire IRL');
+      setIsRequestEditModalOpen(false);
+
+      fetchEditRequests();
+    } catch (err: any) {
+      showToast(`Network error: ${err.message || 'Failed to submit request'}`, 'error');
+    } finally {
+      setIsSubmittingEditRequest(false);
+    }
   };
 
-  // Handler: Unlock Form (Auditor Action)
-  const handleApproveUnlock = () => {
-    setIsLocked(false);
-    addAuditLog('Edit Approved', 'Auditor unlocked IIR form for Distributor updates');
-    showToast('Form unlocked. Distributor can now make changes.', 'success');
+  // Handler: Direct Unlock (Auditor Action)
+  const handleApproveUnlock = async () => {
+    const pending = editRequestsList.find(r => r.status === 'PENDING');
+    if (pending) {
+      setSelectedEditRequestForReview(pending);
+      setIsAuditorReviewModalOpen(true);
+    } else {
+      setIsLocked(false);
+      addAuditLog('Edit Approved', 'Auditor unlocked IIR form for Distributor updates');
+      showToast('Form unlocked. Distributor can now make changes.', 'success');
+    }
+  };
+
+  // Handler: Approve Edit Request (Auditor Action API call)
+  const handleApproveEditRequest = async (reqId: string) => {
+    setIsProcessingAuditorAction(true);
+    try {
+      const res = await fetch('/api/iir/request-edit/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: reqId,
+          comment: auditorReviewComment.trim() || 'Edit access approved by APEX Lead Auditor.',
+          reviewedBy: currentUser?.name || currentUser?.email || 'Sarah Jenkins (Auditor)',
+          userRole: viewRole,
+          client: selectedClientProp,
+          distributor: selectedDistributorName
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Failed to approve edit request.', 'error');
+        setIsProcessingAuditorAction(false);
+        return;
+      }
+
+      setIsLocked(false);
+      showToast('Edit access approved! Submission unlocked for Distributor updates.', 'success');
+      addAuditLog('Edit Approved', `Auditor approved edit access request ${reqId}. Form unlocked.`);
+      setAuditorReviewComment('');
+      setSelectedEditRequestForReview(null);
+      setIsAuditorReviewModalOpen(false);
+
+      fetchEditRequests();
+    } catch (err: any) {
+      showToast(`Error approving request: ${err.message}`, 'error');
+    } finally {
+      setIsProcessingAuditorAction(false);
+    }
+  };
+
+  // Handler: Reject Edit Request (Auditor Action API call)
+  const handleRejectEditRequest = async (reqId: string) => {
+    if (!auditorReviewComment.trim()) {
+      showToast('A rejection comment/reason is required.', 'error');
+      return;
+    }
+
+    setIsProcessingAuditorAction(true);
+    try {
+      const res = await fetch('/api/iir/request-edit/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requestId: reqId,
+          comment: auditorReviewComment.trim(),
+          reviewedBy: currentUser?.name || currentUser?.email || 'Sarah Jenkins (Auditor)',
+          userRole: viewRole,
+          client: selectedClientProp,
+          distributor: selectedDistributorName
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        showToast(data.error || 'Failed to reject edit request.', 'error');
+        setIsProcessingAuditorAction(false);
+        return;
+      }
+
+      showToast('Edit access request rejected. Form remains locked.', 'info');
+      addAuditLog('Edit Approved', `Auditor rejected edit request ${reqId}. Reason: "${auditorReviewComment.trim()}"`);
+      setAuditorReviewComment('');
+      setSelectedEditRequestForReview(null);
+      setIsAuditorReviewModalOpen(false);
+
+      fetchEditRequests();
+    } catch (err: any) {
+      showToast(`Error rejecting request: ${err.message}`, 'error');
+    } finally {
+      setIsProcessingAuditorAction(false);
+    }
   };
 
   // Handler: Post Threaded Comment
@@ -1630,6 +1859,104 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
         </div>
 
       </div>
+
+      {/* SECTION 1.5: Stage 3 Request Edit Access Workflow Banners */}
+      {viewRole === 'Auditor' && editRequestsList.filter(r => r.status === 'PENDING').length > 0 && (
+        <div className="bg-slate-900 border border-amber-500/40 rounded-2xl p-4 shadow-xl space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+            <div className="flex items-center gap-2">
+              <Unlock className="h-5 w-5 text-amber-400" />
+              <h3 className="text-sm font-bold text-white">Pending Edit Access Requests</h3>
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold">
+                {editRequestsList.filter(r => r.status === 'PENDING').length} Pending
+              </span>
+            </div>
+            <button
+              onClick={fetchEditRequests}
+              className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Refresh Requests</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {editRequestsList.filter(r => r.status === 'PENDING').map((req) => (
+              <div key={req.id} className="bg-slate-950 border border-amber-500/30 rounded-xl p-3.5 space-y-2 text-xs relative">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono font-bold text-amber-400 text-[11px]">{req.id}</span>
+                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px] uppercase">
+                    {req.status}
+                  </span>
+                </div>
+                <div>
+                  <p className="font-bold text-white">{req.distributor} ({req.client})</p>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    <strong>Scope:</strong> {req.scope} &bull; <strong>Requested:</strong> {new Date(req.requestedAt).toLocaleString()}
+                  </p>
+                </div>
+                <p className="text-slate-300 bg-slate-900/80 p-2 rounded-lg border border-slate-800 italic text-[11px] line-clamp-2">
+                  "{req.requestReason}"
+                </p>
+                <div className="pt-1 flex justify-end">
+                  <button
+                    onClick={() => {
+                      setSelectedEditRequestForReview(req);
+                      setAuditorReviewComment('');
+                      setIsAuditorReviewModalOpen(true);
+                    }}
+                    className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-lg shadow-md flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    <span>Review & Respond</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {viewRole === 'Distributor' && editRequestsList.some(r => r.distributor === selectedDistributorName) && (
+        <div className="space-y-2">
+          {editRequestsList
+            .filter(r => r.distributor === selectedDistributorName)
+            .slice(0, 3)
+            .map((req) => (
+              <div
+                key={req.id}
+                className={`rounded-xl p-3.5 text-xs flex items-start justify-between gap-3 border shadow-md ${
+                  req.status === 'PENDING' ? 'bg-amber-950/40 border-amber-500/40 text-amber-200' :
+                  req.status === 'APPROVED' ? 'bg-emerald-950/40 border-emerald-500/40 text-emerald-200' :
+                  'bg-rose-950/40 border-rose-500/40 text-rose-200'
+                }`}
+              >
+                <div className="flex items-start gap-3">
+                  <Unlock className="h-5 w-5 mt-0.5 shrink-0" />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <p className="font-bold text-white text-sm">
+                        Edit Access Request ({req.id}): {req.status}
+                      </p>
+                      <span className="text-[10px] uppercase font-mono px-2 py-0.5 rounded bg-black/40 border border-white/10">
+                        {req.scope}
+                      </span>
+                    </div>
+                    <p className="text-[11px] opacity-90 mt-1 italic">Reason: "{req.requestReason}"</p>
+                    {req.reviewerComment && (
+                      <p className="text-[11px] font-semibold mt-1.5 p-2 rounded-lg bg-black/40 border border-white/10 text-slate-100">
+                        <strong>Auditor Comment:</strong> {req.reviewerComment}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <span className="text-[10px] opacity-75 font-mono shrink-0">
+                  {new Date(req.requestedAt).toLocaleDateString()}
+                </span>
+              </div>
+            ))}
+        </div>
+      )}
 
       {/* KPI Stats Cards Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
@@ -2621,61 +2948,292 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
             <div className="flex justify-end gap-3 pt-2">
               <button
                 onClick={() => setIsSubmitModalOpen(false)}
-                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold"
+                disabled={isSubmittingApi}
+                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 onClick={handleFinalSubmit}
-                disabled={missingMandatoryCount > 0}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/30"
+                disabled={missingMandatoryCount > 0 || isSubmittingApi}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2"
               >
-                Confirm & Submit Lock
+                {isSubmittingApi ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    <span>Persisting to Supabase...</span>
+                  </>
+                ) : (
+                  <span>Confirm & Submit Lock</span>
+                )}
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL 4: Request Edit Modal */}
+      {/* MODAL 4: Request Edit Modal (Distributor) */}
       {isRequestEditModalOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full space-y-4 shadow-2xl relative">
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
-              <div className="p-2.5 rounded-xl bg-amber-600/20 text-amber-400 border border-amber-500/30">
-                <Unlock className="h-6 w-6" />
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl relative">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-amber-600/20 text-amber-400 border border-amber-500/30">
+                  <Unlock className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Request Edit Access</h3>
+                  <p className="text-xs text-slate-400">Submit justification to APEX Auditor team for review</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-bold text-white">Request Edit Access</h3>
-                <p className="text-xs text-slate-400">Re-open locked IRL submission</p>
+              <button
+                onClick={() => setIsRequestEditModalOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Scope Selection */}
+            <div className="space-y-2 text-xs">
+              <label className="text-slate-300 font-semibold block">Edit Request Scope:</label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditRequestScope('Entire IRL');
+                    setSelectedAffectedRequirementIds([]);
+                  }}
+                  className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                    editRequestScope === 'Entire IRL'
+                      ? 'bg-indigo-950/60 border-indigo-500 text-white'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <span className="font-bold flex items-center gap-1.5 text-xs">
+                    <FileText className="h-3.5 w-3.5 text-indigo-400" /> Entire IRL Form
+                  </span>
+                  <span className="text-[10px] opacity-80">Request unlock for all requirement items</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setEditRequestScope('Specific Requirements')}
+                  className={`p-3 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                    editRequestScope === 'Specific Requirements'
+                      ? 'bg-indigo-950/60 border-indigo-500 text-white'
+                      : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                  }`}
+                >
+                  <span className="font-bold flex items-center gap-1.5 text-xs">
+                    <CheckSquare className="h-3.5 w-3.5 text-indigo-400" /> Specific Requirements
+                  </span>
+                  <span className="text-[10px] opacity-80">Select individual requirement sections</span>
+                </button>
               </div>
             </div>
 
-            <div className="space-y-2 text-xs">
-              <label className="text-slate-300 font-semibold block">Reason for Edit Request (Mandatory):</label>
+            {/* Affected Requirements Checklist if Specific */}
+            {editRequestScope === 'Specific Requirements' && (
+              <div className="space-y-2 text-xs">
+                <label className="text-slate-300 font-semibold block">Select Affected Requirement Items:</label>
+                <div className="max-h-40 overflow-y-auto space-y-1 bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                  {requests.map((item) => {
+                    const isChecked = selectedAffectedRequirementIds.includes(item.referenceNumber);
+                    return (
+                      <label key={item.id} className="flex items-start gap-2 p-1.5 hover:bg-slate-900 rounded cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedAffectedRequirementIds(prev => [...prev, item.referenceNumber]);
+                            } else {
+                              setSelectedAffectedRequirementIds(prev => prev.filter(ref => ref !== item.referenceNumber));
+                            }
+                          }}
+                          className="mt-0.5 rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-900"
+                        />
+                        <span className="text-slate-300 text-[11px]">
+                          <strong className="text-white font-mono">{item.referenceNumber}</strong> - {item.requirementName}
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Reason Textarea with 50-char validation */}
+            <div className="space-y-1.5 text-xs">
+              <div className="flex justify-between items-center">
+                <label className="text-slate-300 font-semibold block">Reason for Edit Request (Mandatory, min 50 chars):</label>
+                <span className={`font-mono text-[10px] ${
+                  editRequestReason.trim().length < 50 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'
+                }`}>
+                  {editRequestReason.trim().length} / 50 min chars
+                </span>
+              </div>
               <textarea
                 value={editRequestReason}
                 onChange={(e) => setEditRequestReason(e.target.value)}
-                placeholder="State why responses or documents need updating (e.g., updated Q2 sales register available)..."
-                rows={3}
-                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                placeholder="State why responses or documents need updating (e.g., Updated Q2 Sales Register available, corrected inventory log uploaded, additional supporting documentation ready)..."
+                rows={4}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
               />
+              {editRequestReason.trim().length > 0 && editRequestReason.trim().length < 50 && (
+                <p className="text-[11px] text-amber-400">
+                  Please provide at least {50 - editRequestReason.trim().length} more characters explaining your request.
+                </p>
+              )}
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
               <button
                 onClick={() => setIsRequestEditModalOpen(false)}
-                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold"
+                disabled={isSubmittingEditRequest}
+                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleRequestEdit}
-                disabled={!editRequestReason.trim()}
-                className="px-4 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-md"
+                disabled={editRequestReason.trim().length < 50 || isSubmittingEditRequest}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5 cursor-pointer"
               >
-                Send Request
+                {isSubmittingEditRequest ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    <span>Submitting Request...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-3.5 w-3.5" />
+                    <span>Submit Edit Request</span>
+                  </>
+                )}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 5: Auditor Review Edit Request Modal */}
+      {isAuditorReviewModalOpen && selectedEditRequestForReview && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-xl w-full space-y-4 shadow-2xl relative">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+                  <Eye className="h-6 w-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Review Edit Access Request</h3>
+                  <p className="text-xs text-slate-400">Request ID: {selectedEditRequestForReview.id}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAuditorReviewModalOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Audit & Distributor Details Grid */}
+            <div className="grid grid-cols-2 gap-3 text-xs bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+              <div>
+                <span className="text-slate-500 block text-[10px] uppercase font-bold">Distributor</span>
+                <span className="text-white font-bold">{selectedEditRequestForReview.distributor}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block text-[10px] uppercase font-bold">Client / Audit</span>
+                <span className="text-white font-bold">{selectedEditRequestForReview.client}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block text-[10px] uppercase font-bold">Scope</span>
+                <span className="text-indigo-400 font-bold">{selectedEditRequestForReview.scope}</span>
+              </div>
+              <div>
+                <span className="text-slate-500 block text-[10px] uppercase font-bold">Requested Date</span>
+                <span className="text-slate-300 font-mono text-[11px]">
+                  {new Date(selectedEditRequestForReview.requestedAt).toLocaleString()}
+                </span>
+              </div>
+            </div>
+
+            {/* Affected Requirements List if Specific Scope */}
+            {selectedEditRequestForReview.scope === 'Specific Requirements' && Array.isArray(selectedEditRequestForReview.affectedRequirements) && (
+              <div className="space-y-1 text-xs">
+                <span className="text-slate-400 font-bold">Affected Requirement Items:</span>
+                <div className="flex flex-wrap gap-1.5 p-2 bg-slate-950 rounded-lg border border-slate-800">
+                  {selectedEditRequestForReview.affectedRequirements.map((refNum: string) => (
+                    <span key={refNum} className="px-2 py-0.5 bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 rounded font-mono font-bold text-[10px]">
+                      {refNum}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Request Reason */}
+            <div className="space-y-1 text-xs">
+              <span className="text-slate-400 font-bold">Distributor's Justification:</span>
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-slate-200 leading-relaxed italic text-xs">
+                "{selectedEditRequestForReview.requestReason}"
+              </div>
+            </div>
+
+            {/* Reviewer Comment Textarea */}
+            <div className="space-y-1.5 text-xs">
+              <label className="text-slate-300 font-semibold block">Auditor Decision Comment / Instructions:</label>
+              <textarea
+                value={auditorReviewComment}
+                onChange={(e) => setAuditorReviewComment(e.target.value)}
+                placeholder="Enter feedback or instructions for Distributor (e.g. Approved for update of item 2.1 sales register. Please re-submit once completed)..."
+                rows={3}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+
+            {/* Action Buttons: Approve (Unlock) vs Reject (Keep Locked) */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setIsAuditorReviewModalOpen(false)}
+                disabled={isProcessingAuditorAction}
+                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold cursor-pointer"
+              >
+                Close
+              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleRejectEditRequest(selectedEditRequestForReview.id)}
+                  disabled={isProcessingAuditorAction || !auditorReviewComment.trim()}
+                  className="px-4 py-2 bg-rose-600/90 hover:bg-rose-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                  <span>Reject Request</span>
+                </button>
+
+                <button
+                  onClick={() => handleApproveEditRequest(selectedEditRequestForReview.id)}
+                  disabled={isProcessingAuditorAction}
+                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-lg shadow-emerald-600/30"
+                >
+                  {isProcessingAuditorAction ? (
+                    <>
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Unlock className="h-3.5 w-3.5" />
+                      <span>Approve & Unlock IRL</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

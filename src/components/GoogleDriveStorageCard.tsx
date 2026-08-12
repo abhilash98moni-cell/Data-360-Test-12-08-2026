@@ -130,18 +130,23 @@ export const GoogleDriveStorageCard: React.FC = () => {
     setSupabaseResult(null);
     try {
       const res = await fetch('/api/supabase/health');
-      const text = await res.text();
-      let data;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { connected: false, error: `Server returned non-JSON response (${res.status})` };
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        setSupabaseResult({
+          connected: false,
+          error: `Unable to connect to the Data360 database. Server returned non-JSON response (${res.status}).`
+        });
+        return;
+      }
+      const data = await res.json();
+      if (!res.ok && !data.error) {
+        data.error = `HTTP Error ${res.status}`;
       }
       setSupabaseResult(data);
     } catch (err: any) {
       setSupabaseResult({
         connected: false,
-        error: err.message || 'Failed to query /api/supabase/health'
+        error: err.message || 'Unable to connect to the Data360 database.'
       });
     } finally {
       setSupabaseTesting(false);
