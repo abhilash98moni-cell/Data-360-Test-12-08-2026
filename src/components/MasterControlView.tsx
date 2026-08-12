@@ -133,7 +133,7 @@ const INITIAL_SYSTEM_USERS: SystemUser[] = [
 ];
 
 export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUser, onOpenAuth }) => {
-  const [activeTab, setActiveTab] = useState<'users' | 'hierarchy' | 'rbac' | 'system'>('system');
+  const [activeTab, setActiveTab] = useState<'storage' | 'users' | 'hierarchy' | 'rbac' | 'system'>('storage');
   const [users, setUsers] = useState<SystemUser[]>(INITIAL_SYSTEM_USERS);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRoleFilter, setSelectedRoleFilter] = useState<string>('ALL');
@@ -228,6 +228,16 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
       {/* Control Tabs */}
       <div className="flex bg-slate-900 p-1.5 rounded-2xl border border-slate-800 gap-1 text-xs font-bold overflow-x-auto">
         <button
+          onClick={() => setActiveTab('storage')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap ${
+            activeTab === 'storage' ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30' : 'text-slate-400 hover:text-slate-200'
+          }`}
+        >
+          <Database className="h-4 w-4 text-purple-300" />
+          <span>Storage & Supabase DB (Live Diagnostics)</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('users')}
           className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all cursor-pointer whitespace-nowrap ${
             activeTab === 'users' ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'
@@ -267,6 +277,13 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
           <span>Tenant & System Status</span>
         </button>
       </div>
+
+      {/* TAB 0: STORAGE & SUPABASE DB */}
+      {activeTab === 'storage' && (
+        <div className="space-y-5">
+          <GoogleDriveStorageCard />
+        </div>
+      )}
 
       {/* TAB 1: ACTIVE USERS DIRECTORY */}
       {activeTab === 'users' && (

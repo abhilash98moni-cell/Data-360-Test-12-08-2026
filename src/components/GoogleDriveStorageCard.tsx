@@ -122,6 +122,32 @@ export const GoogleDriveStorageCard: React.FC = () => {
   // Storage Info Accordion / Tab
   const [showFolderDetails, setShowFolderDetails] = useState(true);
 
+  const [supabaseTesting, setSupabaseTesting] = useState<boolean>(false);
+  const [supabaseResult, setSupabaseResult] = useState<{ connected: boolean; latencyMs?: number; url?: string; error?: string; message?: string } | null>(null);
+
+  const handleTestSupabase = async () => {
+    setSupabaseTesting(true);
+    setSupabaseResult(null);
+    try {
+      const res = await fetch('/api/supabase/health');
+      const text = await res.text();
+      let data;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { connected: false, error: `Server returned non-JSON response (${res.status})` };
+      }
+      setSupabaseResult(data);
+    } catch (err: any) {
+      setSupabaseResult({
+        connected: false,
+        error: err.message || 'Failed to query /api/supabase/health'
+      });
+    } finally {
+      setSupabaseTesting(false);
+    }
+  };
+
   const addLog = (
     level: SystemLogEntry['level'],
     category: SystemLogEntry['category'],
@@ -520,6 +546,43 @@ export const GoogleDriveStorageCard: React.FC = () => {
                 <div>• <strong className="text-amber-300">FR-112:</strong> 6-Step API automated diagnostic suite for backup verification.</div>
               </div>
             </div>
+
+            {/* Supabase Live Connection Tester Widget */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3 bg-purple-950/20 border border-purple-500/20 rounded-lg">
+              <div className="space-y-0.5">
+                <div className="flex items-center gap-2">
+                  <Database className="w-4 h-4 text-purple-400" />
+                  <span className="text-xs font-bold text-purple-200 uppercase tracking-wider">Supabase DB Health Verification</span>
+                </div>
+                <p className="text-[11px] text-slate-400">Ping your Supabase PostgreSQL project (<span className="text-purple-300 font-mono">jellfdqrymlnvebdcwpj</span>) to confirm live queries and table accessibility.</p>
+              </div>
+              <button
+                onClick={handleTestSupabase}
+                disabled={supabaseTesting}
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-800 text-white rounded text-xs font-semibold flex items-center gap-2 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                {supabaseTesting ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                {supabaseTesting ? 'Pinging DB...' : 'Test Supabase Connection'}
+              </button>
+            </div>
+
+            {supabaseResult && (
+              <div className={`p-3 rounded-lg border text-xs font-mono space-y-1 ${
+                supabaseResult.connected 
+                  ? 'bg-emerald-950/40 border-emerald-500/30 text-emerald-200' 
+                  : 'bg-rose-950/40 border-rose-500/30 text-rose-200'
+              }`}>
+                <div className="flex items-center justify-between font-bold">
+                  <span className="flex items-center gap-1.5">
+                    {supabaseResult.connected ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertTriangle className="w-4 h-4 text-rose-400" />}
+                    {supabaseResult.connected ? 'SUPABASE CONNECTED & LIVE' : 'SUPABASE CONNECTION FAILED'}
+                  </span>
+                  {supabaseResult.latencyMs !== undefined && <span className="text-[10px] text-slate-400">{supabaseResult.latencyMs}ms</span>}
+                </div>
+                <p className="text-[11px]">{supabaseResult.message || supabaseResult.error}</p>
+                {supabaseResult.url && <p className="text-[10px] opacity-75">Target URL: {supabaseResult.url}</p>}
+              </div>
+            )}
           </div>
         )}
       </div>

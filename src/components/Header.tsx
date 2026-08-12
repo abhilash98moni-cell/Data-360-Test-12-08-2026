@@ -13,7 +13,11 @@ import {
   Sun,
   Moon,
   Database,
-  LogIn
+  LogIn,
+  CheckCircle2,
+  AlertTriangle,
+  RefreshCw,
+  X
 } from 'lucide-react';
 
 import { CurrencyMode } from '../utils/currencyFormatter';
@@ -217,6 +221,9 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="hidden sm:inline">AI Copilot</span>
           </button>
 
+          {/* Supabase DB Connection Checker Badge */}
+          <SupabaseHeaderChecker />
+
           {/* New Audit Launch Button (Auditors only) */}
           {currentUser?.role !== 'Distributor' && !currentUser?.role?.includes('Distributor') && (
             <button 
@@ -275,5 +282,115 @@ export const Header: React.FC<HeaderProps> = ({
 
       </div>
     </header>
+  );
+};
+
+const SupabaseHeaderChecker: React.FC = () => {
+  const [isOpen, setIsOpen] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [status, setStatus] = useState<{ connected: boolean; latencyMs?: number; url?: string; error?: string; message?: string } | null>(null);
+
+  const runTest = async () => {
+    setTesting(true);
+    setStatus(null);
+    try {
+      const res = await fetch('/api/supabase/health');
+      const data = await res.json();
+      setStatus(data);
+    } catch (err: any) {
+      setStatus({ connected: false, error: err.message || 'Failed to query /api/supabase/health' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  const handleOpen = () => {
+    setIsOpen(true);
+    if (!status && !testing) {
+      runTest();
+    }
+  };
+
+  return (
+    <>
+      <button
+        onClick={handleOpen}
+        className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 hover:text-white rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-sm"
+        title="Check Supabase Connection Status"
+      >
+        <Database className="h-3.5 w-3.5 text-purple-400" />
+        <span className="hidden md:inline">Supabase DB</span>
+        <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+      </button>
+
+      {isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-purple-500/30 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-5 space-y-4 text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-purple-500/20 border border-purple-500/30 rounded-lg">
+                  <Database className="h-5 w-5 text-purple-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-sm">Supabase PostgreSQL Health Check</h3>
+                  <p className="text-[11px] text-slate-400 font-mono">jellfdqrymlnvebdcwpj.supabase.co</p>
+                </div>
+              </div>
+              <button onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-white p-1 rounded-lg">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-xs text-slate-300">
+                Pings your Supabase PostgreSQL server to test read/write permissions for core tables (<span className="font-mono text-purple-300">pending_signup_requests</span>, <span className="font-mono text-purple-300">profiles</span>, <span className="font-mono text-purple-300">evidence_files</span>).
+              </p>
+
+              {testing && (
+                <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl flex items-center justify-center gap-2 text-xs font-medium text-purple-300">
+                  <RefreshCw className="h-4 w-4 animate-spin text-purple-400" />
+                  <span>Connecting to Supabase Cloud DB...</span>
+                </div>
+              )}
+
+              {status && !testing && (
+                <div className={`p-4 rounded-xl border text-xs font-mono space-y-2 ${
+                  status.connected 
+                    ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-200' 
+                    : 'bg-rose-950/50 border-rose-500/40 text-rose-200'
+                }`}>
+                  <div className="flex items-center justify-between font-bold text-sm">
+                    <span className="flex items-center gap-2">
+                      {status.connected ? <CheckCircle2 className="h-5 w-5 text-emerald-400" /> : <AlertTriangle className="h-5 w-5 text-rose-400" />}
+                      {status.connected ? 'SUPABASE CONNECTED (LIVE)' : 'CONNECTION FAILED'}
+                    </span>
+                    {status.latencyMs !== undefined && <span className="text-xs text-slate-300 font-bold">{status.latencyMs} ms</span>}
+                  </div>
+                  <p className="text-xs">{status.message || status.error}</p>
+                  {status.url && <p className="text-[10px] text-slate-400 opacity-80 break-all">URL: {status.url}</p>}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+              <button
+                onClick={runTest}
+                disabled={testing}
+                className="px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:bg-purple-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                {testing ? <RefreshCw className="h-3.5 w-3.5 animate-spin text-white" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                <span>Re-Test Live Connection</span>
+              </button>
+              <button
+                onClick={() => setIsOpen(false)}
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 };

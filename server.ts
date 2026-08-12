@@ -56,6 +56,42 @@ async function startServer() {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
+  // Supabase health check endpoint
+  app.get('/api/supabase/health', async (req, res) => {
+    const startTime = Date.now();
+    try {
+      const supabase = getSupabaseServerClient();
+      const { error } = await supabase
+        .from('pending_signup_requests')
+        .select('*', { count: 'exact', head: true });
+
+      const latencyMs = Date.now() - startTime;
+
+      if (error) {
+        return res.status(400).json({
+          connected: false,
+          error: error.message,
+          latencyMs,
+          url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+        });
+      }
+
+      return res.json({
+        connected: true,
+        latencyMs,
+        url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
+        message: 'Successfully connected to Supabase PostgreSQL database!',
+        timestamp: new Date().toISOString()
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        connected: false,
+        error: err.message || 'Failed to ping Supabase database',
+        latencyMs: Date.now() - startTime
+      });
+    }
+  });
+
   // Multer upload config for Google Drive storage
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
 
