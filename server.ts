@@ -597,67 +597,23 @@ async function startServer() {
 
     const cleanEmail = email.trim().toLowerCase();
 
-    // Check if user is Admin preset
-    if (cleanEmail === 'admin@data360-platform.com' || cleanEmail === 'admin@data360.io' || cleanEmail === 'admin@data360.com') {
-      // Validate Admin password
-      const validAdminPasswords = ['adminpassword123!', 'admin123', 'admin', 'password123!'];
-      if (!validAdminPasswords.includes(password.trim().toLowerCase())) {
-        return res.status(401).json({ error: 'Invalid email or password for Admin account' });
+    // Check Production Admin Credentials
+    if (cleanEmail === 'abhilash98moni@gmail.com') {
+      if (password !== 'Ey@2026@test') {
+        return res.status(401).json({ error: 'Invalid email or password' });
       }
 
       return res.json({
         success: true,
-        message: 'Welcome back, Platform Admin!',
+        message: 'Welcome back, Production System Admin!',
         user: {
-          id: 'usr-admin-0',
-          name: 'Platform Owner (Admin)',
-          email: cleanEmail,
+          id: 'usr-admin-prod',
+          name: 'Abhilash Moni',
+          email: 'abhilash98moni@gmail.com',
           role: 'Admin',
           title: 'System Owner & Super Admin',
           organization: 'Data360 Platform Core',
-          avatarInitials: 'AD'
-        }
-      });
-    }
-
-    // Check preset demo auditor account
-    if (cleanEmail === 's.jenkins@apex-audit.com') {
-      const validPasswords = ['auditor123!', 'auditor123', 'password123!'];
-      if (!validPasswords.includes(password.trim().toLowerCase())) {
-        return res.status(401).json({ error: 'Invalid email or password' });
-      }
-      return res.json({
-        success: true,
-        message: 'Welcome back, Lead Auditor!',
-        user: {
-          id: 'usr-1',
-          name: 'Sarah Jenkins',
-          email: 's.jenkins@apex-audit.com',
-          role: 'Auditor',
-          title: 'Lead Forensic Auditor',
-          organization: 'Apex Audit Practice',
-          avatarInitials: 'SJ'
-        }
-      });
-    }
-
-    // Check preset demo distributor account
-    if (cleanEmail === 'd.vance@midwesttrading.com') {
-      const validPasswords = ['distributor123!', 'distributor123', 'password123!'];
-      if (!validPasswords.includes(password.trim().toLowerCase())) {
-        return res.status(401).json({ error: 'Invalid email or password' });
-      }
-      return res.json({
-        success: true,
-        message: 'Welcome back, Distributor Compliance Manager!',
-        user: {
-          id: 'usr-2',
-          name: 'David Vance',
-          email: 'd.vance@midwesttrading.com',
-          role: 'Distributor',
-          title: 'Compliance & Audit Manager',
-          organization: 'Midwest Trading Co.',
-          avatarInitials: 'DV'
+          avatarInitials: 'AM'
         }
       });
     }

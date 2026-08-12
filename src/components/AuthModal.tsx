@@ -59,26 +59,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleFillCredentials = (preset: 'admin' | 'auditor' | 'distributor') => {
-    setMode('login');
-    if (preset === 'admin') {
-      setEmail('admin@data360-platform.com');
-      setPassword('AdminPassword123!');
-      setSuccessMessage('Admin credentials filled. Click "Sign In" below to authenticate.');
-    } else if (preset === 'auditor') {
-      setEmail('s.jenkins@apex-audit.com');
-      setPassword('Auditor123!');
-      setSuccessMessage('Auditor credentials filled. Click "Sign In" below to authenticate.');
-    } else {
-      setEmail('d.vance@midwesttrading.com');
-      setPassword('Distributor123!');
-      setSuccessMessage('Distributor credentials filled. Click "Sign In" below to authenticate.');
-    }
-    setTimeout(() => {
-      setSuccessMessage('');
-    }, 4000);
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) return;
@@ -244,47 +224,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           ) : (
             /* Login / Register Form */
             <div>
-              {/* Preset Demo Credentials Fill */}
-              <div className="mb-3 p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
-                  <span className="flex items-center gap-1">
-                    <span className="text-amber-400 font-bold">⚡</span> AUTOFILL DEMO CREDENTIALS:
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-normal">Requires password submission</span>
-                </p>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleFillCredentials('admin')}
-                    className="flex flex-col items-center justify-center p-2 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 rounded-xl transition-all cursor-pointer group text-center"
-                  >
-                    <Key className="h-4 w-4 text-purple-400 mb-0.5" />
-                    <span className="font-bold text-[11px] text-purple-200 group-hover:text-white">Admin</span>
-                    <span className="text-[9px] text-slate-400">Super Admin</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleFillCredentials('auditor')}
-                    className="flex flex-col items-center justify-center p-2 bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-500/40 rounded-xl transition-all cursor-pointer group text-center"
-                  >
-                    <ShieldCheck className="h-4 w-4 text-indigo-400 mb-0.5" />
-                    <span className="font-bold text-[11px] text-indigo-200 group-hover:text-white">Auditor</span>
-                    <span className="text-[9px] text-slate-400">Full Workspace</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleFillCredentials('distributor')}
-                    className="flex flex-col items-center justify-center p-2 bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/40 rounded-xl transition-all cursor-pointer group text-center"
-                  >
-                    <UserCheck className="h-4 w-4 text-emerald-400 mb-0.5" />
-                    <span className="font-bold text-[11px] text-emerald-200 group-hover:text-white">Distributor</span>
-                    <span className="text-[9px] text-slate-400">Isolated Portal</span>
-                  </button>
-                </div>
-              </div>
-
               {/* Mode Toggle Tabs */}
               <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 mb-4 text-xs font-semibold">
                 <button
