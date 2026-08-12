@@ -108,19 +108,53 @@ async function startServer() {
         return res.status(400).json({ success: false, error: 'Client, distributor, and requests array are required.' });
       }
 
+      // Mirror frontend completion logic on server
+      const isItemCompleteServer = (item: any): boolean => {
+        if (item.questionType === 'yes_no_conditional') {
+          if (item.textResponse !== 'Yes' && item.textResponse !== 'No') {
+            return !item.isMandatory;
+          }
+          const activeSubs = item.textResponse === 'Yes' 
+            ? item.conditionalRules?.yesSubQuestions || [] 
+            : item.conditionalRules?.noSubQuestions || [];
+          
+          for (const sub of activeSubs) {
+            if (sub.isMandatory) {
+              const resp = item.subQuestionResponses?.[sub.id];
+              if (!resp) return false;
+              if (sub.responseFormat === 'file') {
+                if (!resp.uploadedFiles || resp.uploadedFiles.length === 0) return false;
+              } else if (sub.responseFormat === 'text_and_file') {
+                const hasText = !!resp.textResponse && resp.textResponse.trim().length > 0;
+                const hasFile = !!resp.uploadedFiles && resp.uploadedFiles.length > 0;
+                if (!hasText || !hasFile) return false;
+              } else if (sub.responseFormat === 'dropdown') {
+                if (!resp.selectedOption) return false;
+              } else {
+                if (!resp.textResponse || resp.textResponse.trim().length === 0) return false;
+              }
+            }
+          }
+          return true;
+        }
+
+        if (item.questionType === 'yes_no_only' || item.isYesNoOnly || item.responseType === 'Yes/No Only') {
+          if (item.textResponse === 'Yes' || item.textResponse === 'No') return true;
+          return !item.isMandatory;
+        }
+
+        if (item.uploadedFiles && item.uploadedFiles.length > 0) return true;
+        if (item.isMandatory) {
+          return Boolean(item.noUploadExplanation && item.noUploadExplanation.trim().length >= 50);
+        }
+        return true; // Non-mandatory item is complete
+      };
+
       // Backend validation check: verify mandatory items
       let missingMandatoryCount = 0;
       requests.forEach((item: any) => {
-        if (item.isMandatory) {
-          const hasText = Boolean(item.textResponse && item.textResponse.trim().length >= 10);
-          const hasExplanation = Boolean(item.noUploadExplanation && item.noUploadExplanation.trim().length >= 20);
-          const hasFiles = Boolean(item.uploadedFiles && item.uploadedFiles.length > 0);
-          const hasSubResp = Object.values(item.subQuestionResponses || {}).some((r: any) =>
-            (r.textResponse && r.textResponse.trim().length > 0) || (r.uploadedFiles && r.uploadedFiles.length > 0)
-          );
-          if (!hasText && !hasExplanation && !hasFiles && !hasSubResp) {
-            missingMandatoryCount++;
-          }
+        if (item.isMandatory && !isItemCompleteServer(item)) {
+          missingMandatoryCount++;
         }
       });
 
@@ -132,7 +166,7 @@ async function startServer() {
       }
 
       const totalItems = requests.length;
-      const completedItems = requests.filter((r: any) => r.status === 'Completed' || r.status === 'Submitted' || r.status === 'Accepted').length;
+      const completedItems = requests.filter((r: any) => isItemCompleteServer(r)).length;
       const completionPercentage = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 100;
       const finalSubmissionDate = submissionDate || new Date().toISOString().substring(0, 19).replace('T', ' ');
 
@@ -171,10 +205,13 @@ async function startServer() {
         dbErrorMsg = e.message;
       }
 
+      // Safe UUID validator for optional foreign keys
+      const isValidUuid = (str: string) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+
       // 2. Secondary DB Persistence: Upsert rows in `irl_request_items`
       try {
         const itemRows = requests.map((item: any) => ({
-          audit_id: auditId || 'eng-101',
+          audit_id: isValidUuid(auditId) ? auditId : null,
           distributor_name: distributor,
           ref_number: String(item.refNumber || item.id),
           category: item.category || 'General',
@@ -242,6 +279,14 @@ async function startServer() {
         updatedAt: new Date().toISOString()
       });
 
+      if (!dbSuccess && dbErrorMsg) {
+        console.error('Database persistence failed:', dbErrorMsg);
+        return res.status(500).json({
+          success: false,
+          error: 'Unable to submit the IRL. Please try again or contact the administrator.'
+        });
+      }
+
       return res.json({
         success: true,
         message: 'Initial Information Request List successfully submitted and persisted to Supabase database!',
@@ -249,14 +294,13 @@ async function startServer() {
         completionPercentage,
         status: 'Submitted',
         isLocked: true,
-        dbPersisted: dbSuccess,
-        dbNote: dbErrorMsg || undefined
+        dbPersisted: dbSuccess
       });
     } catch (err: any) {
       console.error('Error in /api/iir/submit:', err);
       return res.status(500).json({
         success: false,
-        error: `Submission error: ${err.message || 'Failed to save submission to Supabase database.'}`
+        error: 'Unable to submit the IRL. Please try again or contact the administrator.'
       });
     }
   });

@@ -1140,10 +1140,12 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   
   // Item completion criteria:
   // For Yes/No items: must have answered 'Yes' or 'No'
-  // For standard items: (Uploaded file exists) OR (If mandatory with no file, noUploadExplanation >= 50 chars) OR (isMandatory is false with text response)
+  // For standard items: (Uploaded file exists) OR (If mandatory with no file, noUploadExplanation >= 50 chars) OR (isMandatory is false)
   const isItemComplete = (item: IIRRequestItem): boolean => {
     if (item.questionType === 'yes_no_conditional') {
-      if (item.textResponse !== 'Yes' && item.textResponse !== 'No') return false;
+      if (item.textResponse !== 'Yes' && item.textResponse !== 'No') {
+        return !item.isMandatory;
+      }
       const activeSubs = item.textResponse === 'Yes' 
         ? item.conditionalRules?.yesSubQuestions || [] 
         : item.conditionalRules?.noSubQuestions || [];
@@ -1169,14 +1171,15 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     }
 
     if (item.questionType === 'yes_no_only' || item.isYesNoOnly || item.responseType === 'Yes/No Only') {
-      return item.textResponse === 'Yes' || item.textResponse === 'No';
+      if (item.textResponse === 'Yes' || item.textResponse === 'No') return true;
+      return !item.isMandatory;
     }
 
     if (item.uploadedFiles.length > 0) return true;
     if (item.isMandatory) {
       return item.noUploadExplanation.trim().length >= 50;
     }
-    return item.textResponse.trim().length > 0 || item.noUploadExplanation.trim().length > 0;
+    return true; // Optional items are complete if not mandatory
   };
 
   const completedItemsCount = requests.filter(isItemComplete).length;
@@ -1601,16 +1604,12 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       item.description.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesStatus = statusFilter === 'All' || 
-      (statusFilter === 'Pending' && (item.status === 'Pending' || item.status === 'Partially Completed')) ||
-      (statusFilter === 'Completed' && item.status === 'Completed') ||
+      (statusFilter === 'Pending' && (!isItemComplete(item) || item.status === 'Pending' || item.status === 'Partially Completed')) ||
+      (statusFilter === 'Completed' && (isItemComplete(item) || item.status === 'Completed' || item.status === 'Submitted' || item.status === 'Accepted')) ||
       (statusFilter === 'Submitted' && item.status === 'Submitted') ||
-      (statusFilter === 'Missing Docs' && (() => {
-        const hasFiles = item.uploadedFiles.length > 0 || Object.values(item.subQuestionResponses || {}).some((r: any) => r.uploadedFiles && r.uploadedFiles.length > 0);
-        const reqDoc = item.isMandatory && item.allowDocumentUpload !== false && !item.isYesNoOnly && item.responseType !== 'Yes/No Only' && item.questionType !== 'yes_no_only' && item.questionType !== 'yes_no_conditional' && item.responseType !== 'Yes/No Conditional';
-        return reqDoc && !hasFiles && item.noUploadExplanation.length < 50;
-      })()) ||
-      (statusFilter === 'Clarification' && item.reviewerStatus === 'Clarification Required') ||
-      (statusFilter === 'Accepted' && item.reviewerStatus === 'Accepted');
+      (statusFilter === 'Missing Docs' && (item.isMandatory && !isItemComplete(item))) ||
+      (statusFilter === 'Clarification' && (item.reviewerStatus === 'Clarification Required' || item.status === 'Clarification Required')) ||
+      (statusFilter === 'Accepted' && (item.reviewerStatus === 'Accepted' || item.status === 'Accepted'));
 
     const matchesCategory = categoryFilter === 'All' || item.category === categoryFilter;
 
