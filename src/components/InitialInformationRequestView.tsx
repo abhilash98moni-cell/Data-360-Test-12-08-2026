@@ -1359,11 +1359,6 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
   // Handler: Final Submission
   const handleFinalSubmit = async () => {
-    if (missingMandatoryCount > 0) {
-      showToast(`Cannot submit! ${missingMandatoryCount} mandatory requests are missing required files or >=50 character explanations.`, 'error');
-      return;
-    }
-
     setIsSubmittingApi(true);
     const now = new Date().toISOString().substring(0, 19).replace('T', ' ');
     const updatedRequests: IIRRequestItem[] = requests.map(item => ({
@@ -2954,7 +2949,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
               </button>
               <button
                 onClick={handleFinalSubmit}
-                disabled={missingMandatoryCount > 0 || isSubmittingApi}
+                disabled={isSubmittingApi}
                 className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2"
               >
                 {isSubmittingApi ? (

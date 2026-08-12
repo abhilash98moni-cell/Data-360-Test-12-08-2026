@@ -158,13 +158,6 @@ async function startServer() {
         }
       });
 
-      if (missingMandatoryCount > 0) {
-        return res.status(400).json({
-          success: false,
-          error: `Submission rejected: ${missingMandatoryCount} mandatory requirement(s) are incomplete or missing required explanations.`
-        });
-      }
-
       const totalItems = requests.length;
       const completedItems = requests.filter((r: any) => isItemCompleteServer(r)).length;
       const completionPercentage = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 100;
