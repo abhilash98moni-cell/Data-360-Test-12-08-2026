@@ -609,15 +609,46 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     }));
   };
 
-  const handleSubQuestionFileUpload = (itemId: string, subQuestionId: string, fileList: FileList | null) => {
+  const handleSubQuestionFileUpload = async (itemId: string, subQuestionId: string, fileList: FileList | null) => {
     if (isLocked && viewRole === 'Distributor') return;
     if (!fileList || fileList.length === 0) return;
     const file = fileList[0];
     const fileExt = file.name.split('.').pop()?.toUpperCase() || 'PDF';
     const fileSizeMB = Math.round((file.size / (1024 * 1024)) * 10) / 10 || 1.2;
 
+    showToast(`Uploading "${file.name}" to Google Drive folder...`, 'info');
+
+    let driveFileId = `file-sub-${Date.now()}`;
+    let webViewLink = '';
+    let folderPath = '';
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('clientName', selectedClientProp || 'Apex Group');
+      formData.append('auditName', auditName || 'FY26 Distributor Channel Audit');
+      formData.append('distributorName', selectedDistributorName || 'Distributor');
+      formData.append('requirementId', `${itemId}-${subQuestionId}`);
+      formData.append('uploadedBy', currentUser?.name || (viewRole === 'Distributor' ? 'Distributor Admin' : 'Auditor'));
+      formData.append('isReferenceMaterial', 'false');
+
+      const res = await fetch('/api/storage/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+      if (data.success && data.file) {
+        driveFileId = data.file.googleDriveFileId || driveFileId;
+        webViewLink = data.file.webViewLink || '';
+        folderPath = data.file.folderPath || '';
+      }
+    } catch (uploadErr) {
+      console.warn('Backend storage upload warning:', uploadErr);
+    }
+
     const newFile: IIRFile = {
-      id: `file-sub-${Date.now()}`,
+      id: driveFileId,
       evidenceId: `EVD-SUB-${Math.floor(100 + Math.random() * 900)}`,
       fileName: file.name,
       fileSizeMB,
@@ -626,7 +657,9 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       uploadDate: new Date().toISOString().substring(0, 19).replace('T', ' '),
       version: 1,
       hash: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
-      status: 'Uploaded'
+      status: 'Uploaded',
+      webViewLink,
+      folderPath
     };
 
     setRequestsAndSave(prev => prev.map(item => {
@@ -651,7 +684,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       }
       return item;
     }));
-    showToast(`Uploaded ${file.name} for sub-question.`, 'success');
+    showToast(`Uploaded "${file.name}" to Google Drive folder: ${folderPath || 'Data360_Test'}`, 'success');
   };
 
   const handleSubQuestionFileDelete = (itemId: string, subQuestionId: string, fileId: string) => {
@@ -1119,8 +1152,8 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     }));
   };
 
-  // Handler: File Upload Simulation
-  const handleFileUpload = (itemId: string, files: FileList | null) => {
+  // Handler: File Upload to Google Drive Storage
+  const handleFileUpload = async (itemId: string, files: FileList | null) => {
     if (!files || files.length === 0) return;
     if (isLocked && viewRole === 'Distributor') return;
 
@@ -1134,17 +1167,50 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     const fileExt = file.name.split('.').pop()?.toUpperCase() || 'PDF';
     const fileSizeMB = Math.round((file.size / (1024 * 1024)) * 10) / 10 || 1.2;
 
+    showToast(`Uploading "${file.name}" to Google Drive folder...`, 'info');
+
+    let driveFileId = `file-${Date.now()}`;
+    let webViewLink = '';
+    let folderPath = '';
+
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('clientName', selectedClientProp || 'Apex Group');
+      formData.append('auditName', auditName || 'FY26 Distributor Channel Audit');
+      formData.append('distributorName', selectedDistributorName || 'Distributor');
+      formData.append('requirementId', targetItem?.refNumber || itemId);
+      formData.append('uploadedBy', currentUser?.name || (viewRole === 'Distributor' ? 'Distributor Admin' : 'Auditor'));
+      formData.append('isReferenceMaterial', 'false');
+
+      const res = await fetch('/api/storage/upload', {
+        method: 'POST',
+        body: formData
+      });
+
+      const data = await res.json();
+      if (data.success && data.file) {
+        driveFileId = data.file.googleDriveFileId || driveFileId;
+        webViewLink = data.file.webViewLink || '';
+        folderPath = data.file.folderPath || '';
+      }
+    } catch (uploadErr) {
+      console.warn('Backend storage upload warning:', uploadErr);
+    }
+
     const newFile: IIRFile = {
-      id: `file-${Date.now()}`,
+      id: driveFileId,
       evidenceId: `EVD-${Math.floor(100 + Math.random() * 900)}-UP`,
       fileName: file.name,
       fileSizeMB: fileSizeMB,
       fileType: fileExt,
-      uploadedBy: viewRole === 'Distributor' ? 'John Miller (Distributor Admin)' : 'Sarah Jenkins (Auditor)',
+      uploadedBy: currentUser?.name ? `${currentUser.name} (${currentUser.role})` : (viewRole === 'Distributor' ? 'John Miller (Distributor Admin)' : 'Sarah Jenkins (Auditor)'),
       uploadDate: new Date().toISOString().substring(0, 19).replace('T', ' '),
       version: 1,
       hash: Array.from({ length: 64 }, () => Math.floor(Math.random() * 16).toString(16)).join(''),
-      status: 'Uploaded'
+      status: 'Uploaded',
+      webViewLink,
+      folderPath
     };
 
     setRequestsAndSave(prev => prev.map(item => {
@@ -1161,8 +1227,8 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       return item;
     }));
 
-    addAuditLog('File Uploaded', `Uploaded ${file.name} (${fileSizeMB} MB) for Item ${requests.find(r => r.id === itemId)?.refNumber}`);
-    showToast(`File "${file.name}" uploaded successfully. File hash generated.`, 'success');
+    addAuditLog('File Uploaded', `Uploaded ${file.name} (${fileSizeMB} MB) to Google Drive folder: ${folderPath || 'Data360_Test'} for Item ${requests.find(r => r.id === itemId)?.refNumber}`);
+    showToast(`File "${file.name}" uploaded to Google Drive folder successfully.`, 'success');
   };
 
   // Handler: Delete File

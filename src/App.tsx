@@ -114,11 +114,9 @@ export default function App() {
     return null; // Start unauthenticated so user can sign in / sign up dynamically!
   });
 
-  // Sync client & distributor when currentUser changes or logs in
+  // Sync client & distributor when currentUser changes
   React.useEffect(() => {
-    if (currentUser?.role === 'Admin') {
-      setActiveTab('admin_approval');
-    } else if (currentUser?.role === 'Distributor' && currentUser.organization) {
+    if (currentUser?.role === 'Distributor' && currentUser.organization) {
       setSelectedDistributor(currentUser.organization);
       // Auto match client tenant if possible
       const matchedClient = CLIENT_TENANTS.find(c => 
@@ -325,16 +323,6 @@ export default function App() {
                 </button>
               </div>
             </div>
-          ) : currentUser?.role === 'Admin' && activeTab === 'master_control' ? (
-            <MasterControlView 
-              currentUser={currentUser}
-              onOpenAuth={() => setIsAuthOpen(true)}
-            />
-          ) : currentUser?.role === 'Admin' && activeTab !== 'profile' ? (
-            <AdminApprovalView 
-              currentUser={currentUser}
-              onOpenAuth={() => setIsAuthOpen(true)}
-            />
           ) : currentMode === 'brd' || activeTab === 'brd' ? (
             <BRDDocumentView />
           ) : activeTab === 'admin_approval' ? (

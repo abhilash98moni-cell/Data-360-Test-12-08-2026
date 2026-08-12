@@ -196,6 +196,8 @@ export interface IIRFile {
   version: number;
   hash: string;
   status: 'Uploaded' | 'Accepted' | 'Rejected';
+  webViewLink?: string;
+  folderPath?: string;
 }
 
 export interface IIRComment {

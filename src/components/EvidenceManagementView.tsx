@@ -123,16 +123,94 @@ const INITIAL_EVIDENCE_RECORDS: EvidenceRecord[] = [
   }
 ];
 
+const loadEvidenceFromStorage = (): EvidenceRecord[] => {
+  if (typeof window === 'undefined') return INITIAL_EVIDENCE_RECORDS;
+  const records: EvidenceRecord[] = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith('data360_iir_reqs_')) {
+        const parts = key.replace('data360_iir_reqs_', '').split('_');
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const reqs = JSON.parse(raw);
+        if (!Array.isArray(reqs)) continue;
+
+        reqs.forEach((req: any) => {
+          const distName = req.distributorName || parts.slice(1).join(' ').replace(/_/g, ' ') || 'Distributor';
+          (req.uploadedFiles || []).forEach((f: any) => {
+            records.push({
+              id: f.id || `ev-${Math.random()}`,
+              auditId: 'eng-001',
+              auditCode: 'AUD-2026-001',
+              distributorName: distName,
+              requestRef: req.refNumber || '1.1',
+              requestTitle: req.title || 'Audit Requirement',
+              fileName: f.fileName,
+              fileSizeMB: f.fileSizeMB || 1.0,
+              fileType: f.fileType || 'application/pdf',
+              version: f.version || 1,
+              hash: f.hash || 'sha256_hash',
+              uploadedBy: f.uploadedBy || 'User',
+              uploadedDate: f.uploadDate || new Date().toISOString().substring(0, 16).replace('T', ' '),
+              status: f.status === 'Accepted' ? 'Accepted' : f.status === 'Rejected' ? 'Rejected' : (req.reviewerStatus || 'Pending Review'),
+              reviewerComment: req.reviewerComment
+            });
+          });
+
+          if (req.subQuestionResponses) {
+            Object.values(req.subQuestionResponses).forEach((subResp: any) => {
+              (subResp.uploadedFiles || []).forEach((f: any) => {
+                records.push({
+                  id: f.id || `ev-sub-${Math.random()}`,
+                  auditId: 'eng-001',
+                  auditCode: 'AUD-2026-001',
+                  distributorName: distName,
+                  requestRef: req.refNumber || '1.1',
+                  requestTitle: `${req.title || 'Requirement'} (Sub-question)`,
+                  fileName: f.fileName,
+                  fileSizeMB: f.fileSizeMB || 1.0,
+                  fileType: f.fileType || 'application/pdf',
+                  version: f.version || 1,
+                  hash: f.hash || 'sha256_hash',
+                  uploadedBy: f.uploadedBy || 'User',
+                  uploadedDate: f.uploadDate || new Date().toISOString().substring(0, 16).replace('T', ' '),
+                  status: f.status === 'Accepted' ? 'Accepted' : f.status === 'Rejected' ? 'Rejected' : (req.reviewerStatus || 'Pending Review'),
+                  reviewerComment: req.reviewerComment
+                });
+              });
+            });
+          }
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('Error parsing evidence from storage:', err);
+  }
+  return records.length > 0 ? records : INITIAL_EVIDENCE_RECORDS;
+};
+
 export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
   currentUser,
   selectedDistributor
 }) => {
-  const [evidenceList, setEvidenceList] = useState<EvidenceRecord[]>(INITIAL_EVIDENCE_RECORDS);
+  const [evidenceList, setEvidenceList] = useState<EvidenceRecord[]>(loadEvidenceFromStorage);
   const [activeTab, setActiveTab] = useState<'All' | 'Pending Review' | 'Accepted' | 'Rejected' | 'Clarification Required'>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRecord, setSelectedRecord] = useState<EvidenceRecord | null>(null);
   const [reviewerCommentInput, setReviewerCommentInput] = useState('');
   const [actionSuccessMsg, setActionSuccessMsg] = useState('');
+
+  // Real-time listener for file uploads / submission changes
+  React.useEffect(() => {
+    const syncEvidence = () => setEvidenceList(loadEvidenceFromStorage());
+    window.addEventListener('data360_iir_sync_event', syncEvidence);
+    window.addEventListener('storage', syncEvidence);
+    return () => {
+      window.removeEventListener('data360_iir_sync_event', syncEvidence);
+      window.removeEventListener('storage', syncEvidence);
+    };
+  }, []);
 
   const isDistributor = currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor');
 

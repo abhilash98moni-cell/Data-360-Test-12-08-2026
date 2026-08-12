@@ -174,9 +174,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
     }
   ];
 
-  const mainNav = isAdmin
-    ? fullNav.filter(item => item.id === 'admin_approval' || item.id === 'master_control' || item.id === 'profile')
-    : fullNav.filter(item => !isDistributor || !item.auditorOnly);
+  const mainNav = fullNav.filter(item => !isDistributor || !item.auditorOnly);
 
   const auditStreams = [
     { name: 'Distributor Audits', icon: Store, count: 2 },
