@@ -1,0 +1,6 @@
+{
+  "name": "Data360 Audit Platform",
+  "description": "Enterprise SaaS Audit Management Platform for multi-client distributor, vendor, dealer, compliance, operational, financial, and forensic audits.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
