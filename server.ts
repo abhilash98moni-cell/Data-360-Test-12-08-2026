@@ -7,6 +7,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import multer from 'multer';
 import { storageService } from './src/services/storageService.js';
+import { getItemCompletionDetails } from './src/utils/irlValidation.js';
 
 dotenv.config();
 
@@ -108,62 +109,69 @@ async function startServer() {
         return res.status(400).json({ success: false, error: 'Client, distributor, and requests array are required.' });
       }
 
-      // Mirror frontend completion logic on server
-      const isItemCompleteServer = (item: any): boolean => {
-        if (item.questionType === 'yes_no_conditional') {
-          if (item.textResponse !== 'Yes' && item.textResponse !== 'No') {
-            return !item.isMandatory;
-          }
-          const activeSubs = item.textResponse === 'Yes' 
-            ? item.conditionalRules?.yesSubQuestions || [] 
-            : item.conditionalRules?.noSubQuestions || [];
-          
-          for (const sub of activeSubs) {
-            if (sub.isMandatory) {
-              const resp = item.subQuestionResponses?.[sub.id];
-              if (!resp) return false;
-              if (sub.responseFormat === 'file') {
-                if (!resp.uploadedFiles || resp.uploadedFiles.length === 0) return false;
-              } else if (sub.responseFormat === 'text_and_file') {
-                const hasText = !!resp.textResponse && resp.textResponse.trim().length > 0;
-                const hasFile = !!resp.uploadedFiles && resp.uploadedFiles.length > 0;
-                if (!hasText || !hasFile) return false;
-              } else if (sub.responseFormat === 'dropdown') {
-                if (!resp.selectedOption) return false;
-              } else {
-                if (!resp.textResponse || resp.textResponse.trim().length === 0) return false;
-              }
+      const supabase = getSupabaseServerClient();
+
+      // Look up stored/authoritative mandatory flags from database if present
+      const dbMandatoryMap = new Map<string, boolean>();
+      try {
+        const { data: dbItems } = await supabase
+          .from('irl_request_items')
+          .select('ref_number, is_mandatory')
+          .eq('distributor_name', distributor);
+        
+        if (dbItems && Array.isArray(dbItems)) {
+          dbItems.forEach((row: any) => {
+            if (row.ref_number) {
+              dbMandatoryMap.set(row.ref_number, Boolean(row.is_mandatory));
             }
-          }
-          return true;
+          });
         }
+      } catch (err) {
+        console.warn('Note: Could not fetch irl_request_items mandatory flags from DB:', err);
+      }
 
-        if (item.questionType === 'yes_no_only' || item.isYesNoOnly || item.responseType === 'Yes/No Only') {
-          if (item.textResponse === 'Yes' || item.textResponse === 'No') return true;
-          return !item.isMandatory;
-        }
+      // Authoritative validation check against Canonical Validation Model
+      const incompleteRequirements: Array<{
+        refNumber: string;
+        title: string;
+        category: string;
+        isMandatory: boolean;
+        reason: string;
+      }> = [];
 
-        if (item.uploadedFiles && item.uploadedFiles.length > 0) return true;
-        if (item.isMandatory) {
-          return Boolean(item.noUploadExplanation && item.noUploadExplanation.trim().length >= 50);
-        }
-        return true; // Non-mandatory item is complete
-      };
-
-      // Backend validation check: verify mandatory items
-      let missingMandatoryCount = 0;
       requests.forEach((item: any) => {
-        if (item.isMandatory && !isItemCompleteServer(item)) {
-          missingMandatoryCount++;
+        const refNum = String(item.refNumber || item.id);
+        // Force authoritative isMandatory flag if found in DB, preventing client tampering
+        if (dbMandatoryMap.has(refNum)) {
+          item.isMandatory = dbMandatoryMap.get(refNum)!;
+        }
+
+        const detail = getItemCompletionDetails(item);
+        if (item.isMandatory && !detail.isComplete) {
+          incompleteRequirements.push({
+            refNumber: refNum,
+            title: String(item.title || 'Requirement'),
+            category: String(item.category || 'General'),
+            isMandatory: true,
+            reason: detail.reason || 'Requirement is incomplete.'
+          });
         }
       });
 
+      // Part 7 & Part 9: Reject submission ONLY if one or more Mandatory requirements are incomplete
+      if (incompleteRequirements.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Submission rejected: ${incompleteRequirements.length} mandatory requirement(s) are incomplete or missing required explanations.`,
+          missingMandatoriesCount: incompleteRequirements.length,
+          incompleteRequirements
+        });
+      }
+
       const totalItems = requests.length;
-      const completedItems = requests.filter((r: any) => isItemCompleteServer(r)).length;
+      const completedItems = requests.filter((r: any) => getItemCompletionDetails(r).isComplete).length;
       const completionPercentage = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 100;
       const finalSubmissionDate = submissionDate || new Date().toISOString().substring(0, 19).replace('T', ' ');
-
-      const supabase = getSupabaseServerClient();
 
       let dbSuccess = false;
       let dbErrorMsg = '';

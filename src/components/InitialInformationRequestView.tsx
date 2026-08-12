@@ -13,6 +13,7 @@ import {
   SubQuestion,
   SubQuestionResponse
 } from '../types';
+import { getItemCompletionDetails, isItemComplete } from '../utils/irlValidation';
 import { 
   FileText, 
   CheckCircle2, 
@@ -1138,58 +1139,11 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   // Calculations & Validation Metrics
   const totalItemsCount = requests.length;
   
-  // Item completion criteria:
-  // For Yes/No items: must have answered 'Yes' or 'No'
-  // For standard items: (Uploaded file exists) OR (If mandatory with no file, noUploadExplanation >= 50 chars) OR (isMandatory is false)
-  const isItemComplete = (item: IIRRequestItem): boolean => {
-    if (item.questionType === 'yes_no_conditional') {
-      if (item.textResponse !== 'Yes' && item.textResponse !== 'No') {
-        return !item.isMandatory;
-      }
-      const activeSubs = item.textResponse === 'Yes' 
-        ? item.conditionalRules?.yesSubQuestions || [] 
-        : item.conditionalRules?.noSubQuestions || [];
-      
-      for (const sub of activeSubs) {
-        if (sub.isMandatory) {
-          const resp = item.subQuestionResponses?.[sub.id];
-          if (!resp) return false;
-          if (sub.responseFormat === 'file') {
-            if (!resp.uploadedFiles || resp.uploadedFiles.length === 0) return false;
-          } else if (sub.responseFormat === 'text_and_file') {
-            const hasText = !!resp.textResponse && resp.textResponse.trim().length > 0;
-            const hasFile = !!resp.uploadedFiles && resp.uploadedFiles.length > 0;
-            if (!hasText || !hasFile) return false;
-          } else if (sub.responseFormat === 'dropdown') {
-            if (!resp.selectedOption) return false;
-          } else {
-            if (!resp.textResponse || resp.textResponse.trim().length === 0) return false;
-          }
-        }
-      }
-      return true;
-    }
-
-    if (item.questionType === 'yes_no_only' || item.isYesNoOnly || item.responseType === 'Yes/No Only') {
-      if (item.textResponse === 'Yes' || item.textResponse === 'No') return true;
-      return !item.isMandatory;
-    }
-
-    if (item.uploadedFiles.length > 0) return true;
-    if (item.isMandatory) {
-      return item.noUploadExplanation.trim().length >= 50;
-    }
-    return true; // Optional items are complete if not mandatory
-  };
-
   const completedItemsCount = requests.filter(isItemComplete).length;
   const overallProgressPercent = Math.round((completedItemsCount / (totalItemsCount || 1)) * 100);
 
-  // Validation Checks
-  const invalidMandatoryItems = requests.filter(item => {
-    if (!item.isMandatory) return false;
-    return !isItemComplete(item);
-  });
+  // Validation Checks: filter mandatory items that are not complete according to canonical rules
+  const invalidMandatoryItems = requests.filter(item => item.isMandatory && !isItemComplete(item));
 
   const missingMandatoryCount = invalidMandatoryItems.length;
   const submittedItemsCount = requests.filter(item => item.status === 'Submitted' || item.status === 'Completed' || item.status === 'Accepted').length;
@@ -1359,6 +1313,13 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
   // Handler: Final Submission
   const handleFinalSubmit = async () => {
+    // Safety check: verify all mandatory items are complete before calling backend API
+    const missingItems = requests.filter(item => item.isMandatory && !isItemComplete(item));
+    if (missingItems.length > 0) {
+      showToast(`Submission rejected: ${missingItems.length} mandatory requirement(s) are incomplete.`, 'error');
+      return;
+    }
+
     setIsSubmittingApi(true);
     const now = new Date().toISOString().substring(0, 19).replace('T', ' ');
     const updatedRequests: IIRRequestItem[] = requests.map(item => ({
@@ -1955,41 +1916,56 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       {/* KPI Stats Cards Row */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-5 gap-3">
         
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1">
+        <button 
+          onClick={() => setStatusFilter('All')}
+          className={`bg-slate-900 border rounded-xl p-3.5 space-y-1 text-left transition-all cursor-pointer hover:border-slate-700 ${statusFilter === 'All' ? 'border-indigo-500 ring-1 ring-indigo-500/50 bg-slate-800/80' : 'border-slate-800'}`}
+        >
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Requests</span>
           <div className="text-xl font-bold text-white font-mono">{totalItemsCount}</div>
           <p className="text-[10px] text-slate-400">Across 6 Audit Categories</p>
-        </div>
+        </button>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1">
+        <button 
+          onClick={() => setStatusFilter('Completed')}
+          className={`bg-slate-900 border rounded-xl p-3.5 space-y-1 text-left transition-all cursor-pointer hover:border-slate-700 ${statusFilter === 'Completed' ? 'border-emerald-500 ring-1 ring-emerald-500/50 bg-slate-800/80' : 'border-slate-800'}`}
+        >
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Completed / Ready</span>
           <div className="text-xl font-bold text-emerald-400 font-mono">{completedItemsCount}</div>
           <p className="text-[10px] text-emerald-400/80 font-semibold">{overallProgressPercent}% Complete</p>
-        </div>
+        </button>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1">
+        <button 
+          onClick={() => setStatusFilter('Missing Docs')}
+          className={`bg-slate-900 border rounded-xl p-3.5 space-y-1 text-left transition-all cursor-pointer hover:border-slate-700 ${statusFilter === 'Missing Docs' ? 'border-red-500 ring-1 ring-red-500/50 bg-red-950/20' : 'border-slate-800'}`}
+        >
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Missing Mandatories</span>
           <div className={`text-xl font-bold font-mono ${missingMandatoryCount > 0 ? 'text-red-400' : 'text-slate-400'}`}>
             {missingMandatoryCount}
           </div>
           <p className="text-[10px] text-slate-400">Requires File or &gt;=50 char explanation</p>
-        </div>
+        </button>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1">
+        <button 
+          onClick={() => setStatusFilter('Accepted')}
+          className={`bg-slate-900 border rounded-xl p-3.5 space-y-1 text-left transition-all cursor-pointer hover:border-slate-700 ${statusFilter === 'Accepted' ? 'border-indigo-500 ring-1 ring-indigo-500/50 bg-slate-800/80' : 'border-slate-800'}`}
+        >
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Accepted by Auditor</span>
           <div className="text-xl font-bold text-indigo-400 font-mono">
             {requests.filter(r => r.reviewerStatus === 'Accepted').length}
           </div>
           <p className="text-[10px] text-indigo-300">Auditor verified</p>
-        </div>
+        </button>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 col-span-2 sm:col-span-1">
+        <button 
+          onClick={() => setStatusFilter('Clarification')}
+          className={`bg-slate-900 border rounded-xl p-3.5 space-y-1 col-span-2 sm:col-span-1 text-left transition-all cursor-pointer hover:border-slate-700 ${statusFilter === 'Clarification' ? 'border-amber-500 ring-1 ring-amber-500/50 bg-slate-800/80' : 'border-slate-800'}`}
+        >
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Clarifications Needed</span>
           <div className={`text-xl font-bold font-mono ${clarificationRequiredCount > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
             {clarificationRequiredCount}
           </div>
           <p className="text-[10px] text-amber-300">Action required by Distributor</p>
-        </div>
+        </button>
 
       </div>
 
@@ -2177,7 +2153,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                       const isValidationError = isMandatoryNoDoc && !hasValidExplanation;
 
                       return (
-                        <div key={item.id} className="p-4 sm:p-5 hover:bg-slate-950/40 transition-all space-y-4">
+                        <div key={item.id} id={`item-card-${item.id}`} className="p-4 sm:p-5 hover:bg-slate-950/40 transition-all space-y-4 rounded-2xl transition-all duration-300">
                           
                           {/* Item Top Row: Ref Number, Title, Mandatory Badge, Response Status */}
                           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -2896,72 +2872,176 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       {isSubmitModalOpen && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-lg w-full space-y-5 shadow-2xl relative">
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
-              <div className="p-2.5 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
-                <Send className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-white">Confirm Final IRL Submission</h3>
-                <p className="text-xs text-slate-400">Data360 Initial Information Request List</p>
-              </div>
-            </div>
-
-            <div className="space-y-3 text-xs text-slate-300">
-              <p>
-                You are about to submit the completed Initial Information Request list for <strong>{activeDistributorName}</strong> to the Audit Practice Team.
-              </p>
-
-              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
-                <div className="flex justify-between">
-                  <span>Total Requested Items:</span>
-                  <span className="font-bold text-white">{totalItemsCount}</span>
+            
+            {missingMandatoryCount > 0 ? (
+              /* SUBMISSION BLOCKED VIEW */
+              <>
+                <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                  <div className="p-2.5 rounded-xl bg-red-600/20 text-red-400 border border-red-500/30">
+                    <AlertTriangle className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Submission Blocked</h3>
+                    <p className="text-xs text-red-400 font-semibold">
+                      {missingMandatoryCount} mandatory requirement(s) are incomplete
+                    </p>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span>Completed & Validated:</span>
-                  <span className="font-bold text-emerald-400">{completedItemsCount}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Missing Mandatory Validations:</span>
-                  <span className={`font-bold ${missingMandatoryCount > 0 ? 'text-red-400' : 'text-slate-400'}`}>
-                    {missingMandatoryCount}
-                  </span>
-                </div>
-              </div>
 
-              <div className="p-3 bg-amber-950/30 border border-amber-500/30 rounded-xl text-amber-200 text-[11px] space-y-1">
-                <div className="font-bold flex items-center gap-1">
-                  <Lock className="h-3.5 w-3.5 text-amber-400" />
-                  <span>Submission Lock Notice</span>
-                </div>
-                <p>
-                  Upon final submission, editing will be locked. To modify responses after submission, you must click "Request Edit Access" with a formal justification for Auditor approval.
-                </p>
-              </div>
-            </div>
+                <div className="space-y-3 text-xs text-slate-300">
+                  <p className="leading-relaxed">
+                    The final system requires all questions marked as <strong>Mandatory</strong> to be completed before <strong>{activeDistributorName}</strong> can submit the IRL.
+                  </p>
 
-            <div className="flex justify-end gap-3 pt-2">
-              <button
-                onClick={() => setIsSubmitModalOpen(false)}
-                disabled={isSubmittingApi}
-                className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleFinalSubmit}
-                disabled={isSubmittingApi}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2"
-              >
-                {isSubmittingApi ? (
-                  <>
-                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                    <span>Persisting to Supabase...</span>
-                  </>
-                ) : (
-                  <span>Confirm & Submit Lock</span>
-                )}
-              </button>
-            </div>
+                  <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1.5 font-mono text-[11px]">
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Total Requested Items:</span>
+                      <span className="font-bold text-white">{totalItemsCount}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Completed & Validated:</span>
+                      <span className="font-bold text-emerald-400">{completedItemsCount}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-400">Incomplete Mandatory Items:</span>
+                      <span className="font-bold text-red-400">{missingMandatoryCount}</span>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-slate-200 font-bold block text-xs">Incomplete Mandatory Requirements List:</label>
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                      {invalidMandatoryItems.map(item => {
+                        const detail = getItemCompletionDetails(item);
+                        return (
+                          <div key={item.id} className="p-3 bg-red-950/20 border border-red-500/30 rounded-xl space-y-1.5 text-xs">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="font-mono text-[10px] font-extrabold text-red-300 bg-red-500/20 px-2 py-0.5 rounded border border-red-500/30 shrink-0">
+                                  Ref {item.refNumber}
+                                </span>
+                                <span className="font-bold text-white truncate">{item.title}</span>
+                              </div>
+                              <span className="text-[9px] font-bold text-red-400 bg-red-500/20 px-2 py-0.5 rounded shrink-0">
+                                INCOMPLETE
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-red-200/90 leading-snug">{detail.reason}</p>
+                            <div className="flex items-center justify-between pt-1 border-t border-red-500/20 text-[10px]">
+                              <span className="text-slate-400">Cat: {item.category}</span>
+                              <button
+                                onClick={() => {
+                                  setIsSubmitModalOpen(false);
+                                  if (!expandedCategories.includes(item.categoryNumber)) {
+                                    setExpandedCategories(prev => [...prev, item.categoryNumber]);
+                                  }
+                                  setStatusFilter('All');
+                                  setSearchQuery('');
+                                  setTimeout(() => {
+                                    const el = document.getElementById(`item-card-${item.id}`);
+                                    if (el) {
+                                      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                      el.classList.add('ring-2', 'ring-rose-500', 'ring-offset-2', 'ring-offset-slate-900');
+                                      setTimeout(() => {
+                                        el.classList.remove('ring-2', 'ring-rose-500', 'ring-offset-2', 'ring-offset-slate-900');
+                                      }, 3000);
+                                    }
+                                  }, 200);
+                                }}
+                                className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-bold transition-all cursor-pointer flex items-center gap-1 shadow-xs"
+                              >
+                                <span>Jump to Item</span>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between gap-3 pt-3 border-t border-slate-800">
+                  <p className="text-[11px] text-amber-400 italic">
+                    Please complete all mandatory items above to enable submission.
+                  </p>
+                  <button
+                    onClick={() => setIsSubmitModalOpen(false)}
+                    className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold cursor-pointer shrink-0"
+                  >
+                    Close & Complete Items
+                  </button>
+                </div>
+              </>
+            ) : (
+              /* READY TO SUBMIT VIEW */
+              <>
+                <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
+                  <div className="p-2.5 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
+                    <Send className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white">Confirm Final IRL Submission</h3>
+                    <p className="text-xs text-slate-400">Data360 Initial Information Request List</p>
+                  </div>
+                </div>
+
+                <div className="space-y-3 text-xs text-slate-300">
+                  <p>
+                    You are about to submit the completed Initial Information Request list for <strong>{activeDistributorName}</strong> to the Audit Practice Team.
+                  </p>
+
+                  <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex justify-between">
+                      <span>Total Requested Items:</span>
+                      <span className="font-bold text-white">{totalItemsCount}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Completed & Validated:</span>
+                      <span className="font-bold text-emerald-400">{completedItemsCount}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Missing Mandatory Validations:</span>
+                      <span className="font-bold text-emerald-400">0 (All Mandatory Items Complete)</span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-amber-950/30 border border-amber-500/30 rounded-xl text-amber-200 text-[11px] space-y-1">
+                    <div className="font-bold flex items-center gap-1">
+                      <Lock className="h-3.5 w-3.5 text-amber-400" />
+                      <span>Submission Lock Notice</span>
+                    </div>
+                    <p>
+                      Upon final submission, editing will be locked. To modify responses after submission, you must click "Request Edit Access" with a formal justification for Auditor approval.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
+                  <button
+                    onClick={() => setIsSubmitModalOpen(false)}
+                    disabled={isSubmittingApi}
+                    className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl text-xs font-semibold disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleFinalSubmit}
+                    disabled={isSubmittingApi}
+                    className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2 cursor-pointer"
+                  >
+                    {isSubmittingApi ? (
+                      <>
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                        <span>Persisting to Supabase...</span>
+                      </>
+                    ) : (
+                      <span>Confirm & Submit Lock</span>
+                    )}
+                  </button>
+                </div>
+              </>
+            )}
+
           </div>
         </div>
       )}
