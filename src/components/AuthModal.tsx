@@ -224,33 +224,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           ) : (
             /* Login / Register Form */
             <div>
-              {/* Super Admin Quick Sign In Helper */}
-              {mode === 'login' && (
-                <div className="mb-3.5 p-3 bg-purple-950/40 border border-purple-500/30 rounded-xl flex items-center justify-between gap-3 shadow-inner">
-                  <div className="flex items-center gap-2">
-                    <div className="p-1.5 bg-purple-500/20 rounded-lg text-purple-300">
-                      <Key className="h-4 w-4" />
-                    </div>
-                    <div>
-                      <p className="font-bold text-xs text-purple-200">Super Admin Access</p>
-                      <p className="text-[10px] text-purple-300/70">abhilash98moni@gmail.com</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEmail('abhilash98moni@gmail.com');
-                      setPassword('Ey@2026@test');
-                      setSuccessMessage('Super Admin credentials filled. Click "Sign In" below to authenticate.');
-                      setTimeout(() => setSuccessMessage(''), 3000);
-                    }}
-                    className="px-3 py-1 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer shrink-0"
-                  >
-                    Autofill Super Admin
-                  </button>
-                </div>
-              )}
-
               {/* Mode Toggle Tabs */}
               <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800 mb-4 text-xs font-semibold">
                 <button

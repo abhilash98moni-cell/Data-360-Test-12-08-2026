@@ -10,6 +10,7 @@ import { BRDDocumentView } from './components/BRDDocumentView';
 import { AICopilotDrawer } from './components/AICopilotDrawer';
 import { NewAuditModal } from './components/NewAuditModal';
 import { AuthModal, UserSession } from './components/AuthModal';
+import { LoginPage } from './components/LoginPage';
 import { MasterControlView } from './components/MasterControlView';
 import { AdminApprovalView } from './components/AdminApprovalView';
 import { EvidenceManagementView } from './components/EvidenceManagementView';
@@ -193,6 +194,11 @@ export default function App() {
     setSelectedEngId(newEng.id);
   };
 
+  // If unauthenticated, render the clean full-screen Login Page directly (no UI behind it)
+  if (!currentUser) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
   return (
     <div className={`min-h-screen flex flex-col font-sans max-w-full overflow-x-hidden selection:bg-indigo-500 selection:text-white transition-colors duration-200 ${
       themeMode === 'light' ? 'light-theme bg-slate-50 text-slate-900' : 'bg-slate-950 text-slate-100'
@@ -246,64 +252,7 @@ export default function App() {
         {/* Content Body View */}
         <main className="flex-1 min-w-0 max-w-full overflow-x-hidden bg-slate-950/90 pb-12">
           
-          {/* Unauthenticated Landing & Sign In Prompt */}
-          {!currentUser ? (
-            <div className="w-full p-4 sm:p-6 space-y-8 animate-fade-in text-white">
-              <div className="bg-gradient-to-r from-slate-900 via-indigo-950/80 to-slate-900 border border-slate-800 rounded-3xl p-8 shadow-2xl text-center space-y-4 relative overflow-hidden">
-                <div className="p-3 bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 rounded-2xl w-14 h-14 mx-auto flex items-center justify-center">
-                  <ShieldAlert className="h-7 w-7 text-indigo-400" />
-                </div>
-                <h1 className="text-2xl font-bold text-white">Data360 Enterprise Platform Authentication</h1>
-                <p className="text-xs text-slate-400 max-w-xl mx-auto leading-relaxed">
-                  Sign in with your approved credentials or submit a signup request. All new Auditor and Distributor registrations require Admin authorization before being provisioned into Supabase.
-                </p>
-
-                <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
-                  <button
-                    onClick={() => setIsAuthOpen(true)}
-                    className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-600/30 transition-all cursor-pointer flex items-center gap-2"
-                  >
-                    <span>Sign In or Request Account Access</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div 
-                  onClick={() => setIsAuthOpen(true)}
-                  className="bg-slate-900 border border-slate-800 hover:border-purple-500/50 p-5 rounded-2xl cursor-pointer transition-all space-y-2 group"
-                >
-                  <span className="text-[10px] bg-purple-500/20 text-purple-300 px-2 py-0.5 rounded font-mono font-bold border border-purple-500/30">
-                    ROLE: ADMIN
-                  </span>
-                  <h3 className="font-bold text-white text-sm group-hover:text-purple-300 transition-colors">👑 Admin / Owner Portal</h3>
-                  <p className="text-xs text-slate-400">Review pending signup requests, approve accounts, and manage Supabase gatekeeper security.</p>
-                </div>
-
-                <div 
-                  onClick={() => setIsAuthOpen(true)}
-                  className="bg-slate-900 border border-slate-800 hover:border-indigo-500/50 p-5 rounded-2xl cursor-pointer transition-all space-y-2 group"
-                >
-                  <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded font-mono font-bold border border-indigo-500/30">
-                    ROLE: AUDITOR
-                  </span>
-                  <h3 className="font-bold text-white text-sm group-hover:text-indigo-300 transition-colors">🛡️ Auditor Workspace</h3>
-                  <p className="text-xs text-slate-400">Access executive dashboards, MUS sampling tools, forensic analytics, and audit findings.</p>
-                </div>
-
-                <div 
-                  onClick={() => setIsAuthOpen(true)}
-                  className="bg-slate-900 border border-slate-800 hover:border-emerald-500/50 p-5 rounded-2xl cursor-pointer transition-all space-y-2 group"
-                >
-                  <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded font-mono font-bold border border-emerald-500/30">
-                    ROLE: DISTRIBUTOR
-                  </span>
-                  <h3 className="font-bold text-white text-sm group-hover:text-emerald-300 transition-colors">🏬 Distributor Portal</h3>
-                  <p className="text-xs text-slate-400">Isolated portal for uploading initial requirements (IRL), evidence files, and CAPA tasks.</p>
-                </div>
-              </div>
-            </div>
-          ) : (currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor')) && 
+          {(currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor')) && 
            ['dashboard', 'engagements', 'sampling', 'forensics', 'master_control', 'audit_logs'].includes(activeTab) ? (
             <div className="p-12 text-center max-w-xl mx-auto my-16 bg-slate-900 border border-slate-800 rounded-3xl space-y-4 shadow-2xl animate-fade-in text-white">
               <div className="p-4 bg-red-500/10 text-red-400 border border-red-500/30 rounded-2xl w-16 h-16 mx-auto flex items-center justify-center">
