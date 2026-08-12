@@ -598,7 +598,13 @@ async function startServer() {
     const cleanEmail = email.trim().toLowerCase();
 
     // Check if user is Admin preset
-    if (cleanEmail === 'admin@data360-platform.com' || cleanEmail === 'admin@data360.io') {
+    if (cleanEmail === 'admin@data360-platform.com' || cleanEmail === 'admin@data360.io' || cleanEmail === 'admin@data360.com') {
+      // Validate Admin password
+      const validAdminPasswords = ['adminpassword123!', 'admin123', 'admin', 'password123!'];
+      if (!validAdminPasswords.includes(password.trim().toLowerCase())) {
+        return res.status(401).json({ error: 'Invalid email or password for Admin account' });
+      }
+
       return res.json({
         success: true,
         message: 'Welcome back, Platform Admin!',
@@ -610,6 +616,48 @@ async function startServer() {
           title: 'System Owner & Super Admin',
           organization: 'Data360 Platform Core',
           avatarInitials: 'AD'
+        }
+      });
+    }
+
+    // Check preset demo auditor account
+    if (cleanEmail === 's.jenkins@apex-audit.com') {
+      const validPasswords = ['auditor123!', 'auditor123', 'password123!'];
+      if (!validPasswords.includes(password.trim().toLowerCase())) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+      return res.json({
+        success: true,
+        message: 'Welcome back, Lead Auditor!',
+        user: {
+          id: 'usr-1',
+          name: 'Sarah Jenkins',
+          email: 's.jenkins@apex-audit.com',
+          role: 'Auditor',
+          title: 'Lead Forensic Auditor',
+          organization: 'Apex Audit Practice',
+          avatarInitials: 'SJ'
+        }
+      });
+    }
+
+    // Check preset demo distributor account
+    if (cleanEmail === 'd.vance@midwesttrading.com') {
+      const validPasswords = ['distributor123!', 'distributor123', 'password123!'];
+      if (!validPasswords.includes(password.trim().toLowerCase())) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+      return res.json({
+        success: true,
+        message: 'Welcome back, Distributor Compliance Manager!',
+        user: {
+          id: 'usr-2',
+          name: 'David Vance',
+          email: 'd.vance@midwesttrading.com',
+          role: 'Distributor',
+          title: 'Compliance & Audit Manager',
+          organization: 'Midwest Trading Co.',
+          avatarInitials: 'DV'
         }
       });
     }
@@ -626,7 +674,7 @@ async function startServer() {
 
       if (dbPending) {
         return res.status(403).json({
-          error: 'Your signup request is still pending Admin approval. Unapproved accounts cannot log in until approved.'
+          error: 'Your signup request is still pending Admin approval. Unapproved accounts cannot log in until approved by Admin.'
         });
       }
     } catch (err) {
@@ -637,7 +685,7 @@ async function startServer() {
     const isPendingInMemory = pendingSignupRequests.find(r => r.email.toLowerCase() === cleanEmail && r.status === 'Pending');
     if (isPendingInMemory) {
       return res.status(403).json({
-        error: 'Your signup request is still pending Admin approval. Unapproved accounts cannot log in until approved.'
+        error: 'Your signup request is still pending Admin approval. Unapproved accounts cannot log in until approved by Admin.'
       });
     }
 
@@ -674,7 +722,7 @@ async function startServer() {
         });
       }
 
-      // 2. Check if user is approved in pending_signup_requests DB table
+      // 2. Check if user is approved in pending_signup_requests DB table with password match
       const { data: dbApproved } = await client
         .from('pending_signup_requests')
         .select('*')
@@ -683,6 +731,9 @@ async function startServer() {
         .single();
 
       if (dbApproved) {
+        if (dbApproved.password_hash && dbApproved.password_hash !== password) {
+          return res.status(401).json({ error: 'Invalid email or password' });
+        }
         const role = dbApproved.role === 'admin' ? 'Admin' : dbApproved.role === 'distributor' ? 'Distributor' : 'Auditor';
         const fullName = dbApproved.full_name || cleanEmail.split('@')[0];
         const initials = fullName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || cleanEmail.slice(0, 2).toUpperCase();
@@ -721,7 +772,7 @@ async function startServer() {
         });
       }
 
-      return res.status(401).json({ error: error ? error.message : 'Invalid email or password' });
+      return res.status(401).json({ error: 'Invalid email or password' });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || 'Login processing error' });
     }

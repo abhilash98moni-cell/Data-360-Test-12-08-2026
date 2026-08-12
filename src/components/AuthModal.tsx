@@ -59,45 +59,24 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleQuickLogin = (preset: 'admin' | 'auditor' | 'distributor') => {
+  const handleFillCredentials = (preset: 'admin' | 'auditor' | 'distributor') => {
+    setMode('login');
     if (preset === 'admin') {
-      onLogin({
-        id: 'usr-0',
-        name: 'Platform Owner (Admin)',
-        email: 'admin@data360-platform.com',
-        role: 'Admin',
-        title: 'System Owner & Super Admin',
-        organization: 'Data360 Platform Core',
-        avatarInitials: 'AD'
-      });
-      setSuccessMessage('Logged in as Platform Admin / Owner');
+      setEmail('admin@data360-platform.com');
+      setPassword('AdminPassword123!');
+      setSuccessMessage('Admin credentials filled. Click "Sign In" below to authenticate.');
     } else if (preset === 'auditor') {
-      onLogin({
-        id: 'usr-1',
-        name: 'Sarah Jenkins',
-        email: 's.jenkins@apex-audit.com',
-        role: 'Auditor',
-        title: 'Lead Forensic Auditor',
-        organization: 'Apex Audit Practice',
-        avatarInitials: 'SJ'
-      });
-      setSuccessMessage('Logged in as Lead Forensic Auditor');
+      setEmail('s.jenkins@apex-audit.com');
+      setPassword('Auditor123!');
+      setSuccessMessage('Auditor credentials filled. Click "Sign In" below to authenticate.');
     } else {
-      onLogin({
-        id: 'usr-2',
-        name: 'David Vance',
-        email: 'd.vance@midwesttrading.com',
-        role: 'Distributor',
-        title: 'Compliance & Audit Manager',
-        organization: 'Midwest Trading Co.',
-        avatarInitials: 'DV'
-      });
-      setSuccessMessage('Logged in as Distributor Representative');
+      setEmail('d.vance@midwesttrading.com');
+      setPassword('Distributor123!');
+      setSuccessMessage('Distributor credentials filled. Click "Sign In" below to authenticate.');
     }
     setTimeout(() => {
       setSuccessMessage('');
-      onClose();
-    }, 600);
+    }, 4000);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -265,58 +244,45 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           ) : (
             /* Login / Register Form */
             <div>
-              {/* Preset Quick Demo Role Selection */}
+              {/* Preset Demo Credentials Fill */}
               <div className="mb-3 p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
-                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1">
-                  <span className="text-amber-400 font-bold">⚡</span> QUICK DEMO ROLE SELECTION:
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <span className="text-amber-400 font-bold">⚡</span> AUTOFILL DEMO CREDENTIALS:
+                  </span>
+                  <span className="text-[10px] text-slate-500 font-normal">Requires password submission</span>
                 </p>
-                <div className="grid grid-cols-2 gap-2.5">
+                <div className="grid grid-cols-3 gap-2">
                   <button
                     type="button"
-                    onClick={() => handleQuickLogin('auditor')}
-                    className="flex flex-col items-start p-2.5 bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-500/40 rounded-xl text-left transition-all cursor-pointer group"
+                    onClick={() => handleFillCredentials('admin')}
+                    className="flex flex-col items-center justify-center p-2 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/40 rounded-xl transition-all cursor-pointer group text-center"
                   >
-                    <div className="flex items-center gap-1.5 font-bold text-xs text-indigo-300 group-hover:text-white">
-                      <ShieldCheck className="h-4 w-4 text-indigo-400 shrink-0" />
-                      <span>Auditor Login</span>
-                    </div>
-                    <span className="text-[10px] text-slate-400 mt-0.5">Full Auditor Workspace</span>
+                    <Key className="h-4 w-4 text-purple-400 mb-0.5" />
+                    <span className="font-bold text-[11px] text-purple-200 group-hover:text-white">Admin</span>
+                    <span className="text-[9px] text-slate-400">Super Admin</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => handleQuickLogin('distributor')}
-                    className="flex flex-col items-start p-2.5 bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/40 rounded-xl text-left transition-all cursor-pointer group"
+                    onClick={() => handleFillCredentials('auditor')}
+                    className="flex flex-col items-center justify-center p-2 bg-indigo-950/40 hover:bg-indigo-900/60 border border-indigo-500/40 rounded-xl transition-all cursor-pointer group text-center"
                   >
-                    <div className="flex items-center gap-1.5 font-bold text-xs text-emerald-300 group-hover:text-white">
-                      <UserCheck className="h-4 w-4 text-emerald-400 shrink-0" />
-                      <span>Distributor Mode</span>
-                    </div>
-                    <span className="text-[10px] text-slate-400 mt-0.5">Isolated Portal Access</span>
+                    <ShieldCheck className="h-4 w-4 text-indigo-400 mb-0.5" />
+                    <span className="font-bold text-[11px] text-indigo-200 group-hover:text-white">Auditor</span>
+                    <span className="text-[9px] text-slate-400">Full Workspace</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleFillCredentials('distributor')}
+                    className="flex flex-col items-center justify-center p-2 bg-emerald-950/40 hover:bg-emerald-900/60 border border-emerald-500/40 rounded-xl transition-all cursor-pointer group text-center"
+                  >
+                    <UserCheck className="h-4 w-4 text-emerald-400 mb-0.5" />
+                    <span className="font-bold text-[11px] text-emerald-200 group-hover:text-white">Distributor</span>
+                    <span className="text-[9px] text-slate-400">Isolated Portal</span>
                   </button>
                 </div>
-              </div>
-
-              {/* Platform Super Admin Connection Card */}
-              <div className="mb-4 p-3 bg-purple-950/40 border border-purple-500/40 rounded-xl flex items-center justify-between gap-3 shadow-inner">
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 bg-purple-500/20 rounded-lg text-purple-300">
-                    <Key className="h-4 w-4" />
-                  </div>
-                  <span className="font-bold text-xs text-purple-200">Platform Super Admin?</span>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (typeof window !== 'undefined') {
-                      window.history.pushState({}, '', '/admin/login');
-                    }
-                    handleQuickLogin('admin');
-                  }}
-                  className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs rounded-lg shadow-sm transition-all cursor-pointer flex items-center gap-1 shrink-0"
-                >
-                  <span>Go to /admin/login</span>
-                </button>
               </div>
 
               {/* Mode Toggle Tabs */}
