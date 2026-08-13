@@ -969,7 +969,8 @@ app.get('/api/storage/download/:fileId', async (req, res) => {
     res.setHeader('Content-Disposition', `attachment; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(downloaded.fileName)}`);
     res.send(downloaded.buffer);
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to download file' });
+    console.error(`Storage download endpoint error for fileId '${req.params.fileId}':`, err.message);
+    res.status(500).json({ error: err.message || 'Failed to download file from Google Drive storage' });
   }
 });
 

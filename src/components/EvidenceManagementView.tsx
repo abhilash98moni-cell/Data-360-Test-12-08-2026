@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { downloadFileFromApi } from '../lib/downloadHelper';
 import { 
   FolderArchive, 
   Search, 
@@ -582,15 +583,13 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
 
                       <td className="py-3.5 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          <a
-                            href={`/api/storage/download/${item.googleDriveFileId || item.id}`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors inline-flex"
+                          <button
+                            onClick={() => downloadFileFromApi(item.googleDriveFileId || item.id, item.fileName)}
+                            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors inline-flex cursor-pointer"
                             title="Download Original File"
                           >
                             <Download className="h-4 w-4" />
-                          </a>
+                          </button>
                           <button
                             onClick={() => handleOpenRecordModal(item)}
                             className="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/40 text-indigo-300 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"

@@ -1,4 +1,5 @@
 import React, { useState, useCallback } from 'react';
+import { downloadFileFromApi } from '../lib/downloadHelper';
 import { 
   IIRRequestItem, 
   IIRFile, 
@@ -1287,18 +1288,12 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
   // Handler: Download Uploaded File
   const handleDownloadUploadedFile = (file: IIRFile) => {
-    const targetFileId = file.id || file.evidenceId;
-    const downloadUrl = `/api/storage/download/${encodeURIComponent(targetFileId)}`;
-
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    link.setAttribute('download', file.fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-
-    addAuditLog('File Downloaded', `Downloaded uploaded file: ${file.fileName} (${file.fileSizeMB} MB)`);
-    showToast(`Downloading "${file.fileName}"...`, 'success');
+    const targetFileId = file.googleDriveFileId || file.id || file.evidenceId;
+    downloadFileFromApi(targetFileId, file.fileName, showToast).then(success => {
+      if (success) {
+        addAuditLog('File Downloaded', `Downloaded uploaded file: ${file.fileName} (${file.fileSizeMB} MB)`);
+      }
+    });
   };
 
   // Handler: Auditor Reviewer Status Change

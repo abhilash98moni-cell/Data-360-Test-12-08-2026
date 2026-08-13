@@ -200,6 +200,7 @@ export interface AuditAssignment {
 export interface IIRFile {
   id: string;
   evidenceId: string;
+  googleDriveFileId?: string;
   fileName: string;
   fileSizeMB: number;
   fileType: string;

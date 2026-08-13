@@ -1,4 +1,5 @@
 import React from 'react';
+import { downloadFileFromApi } from '../lib/downloadHelper';
 import { 
   Eye, 
   Download, 
@@ -63,14 +64,8 @@ export const DistributorVerticalView: React.FC<DistributorVerticalViewProps> = (
 }) => {
   const handleDownloadUploadedFile = (file: any) => {
     if (!file) return;
-    const targetFileId = file.id || file.evidenceId || file.googleDriveFileId;
-    const downloadUrl = `/api/storage/download/${encodeURIComponent(targetFileId)}`;
-    showToast(`Downloading "${file.fileName}"...`, 'success');
-    const link = document.createElement('a');
-    link.href = downloadUrl;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const targetFileId = file.googleDriveFileId || file.id || file.evidenceId;
+    downloadFileFromApi(targetFileId, file.fileName || 'Document', showToast);
   };
 
   return (

@@ -560,34 +560,147 @@ startxref
     return fileMeta;
   }
 
+  public async resolveMetadata(googleDriveFileId: string): Promise<FileMetadata | null> {
+    if (!googleDriveFileId) return null;
+
+    // 1. Check in-memory metadata cache
+    if (this.inMemoryMetadataStore.has(googleDriveFileId)) {
+      return this.inMemoryMetadataStore.get(googleDriveFileId)!;
+    }
+
+    // 2. Query persistent database (Supabase evidence_files table)
+    try {
+      const client = getSupabaseServerClient();
+      const { data } = await client
+        .from('evidence_files')
+        .select('*')
+        .or(`file_hash.eq.${googleDriveFileId},id.eq.${googleDriveFileId},file_name.eq.${googleDriveFileId}`)
+        .limit(1)
+        .maybeSingle();
+
+      if (data) {
+        const driveFileId = data.file_hash || googleDriveFileId;
+        const fileMeta: FileMetadata = {
+          id: data.id || `ev-${driveFileId}`,
+          evidenceId: data.id || `ev-${driveFileId}`,
+          googleDriveFileId: driveFileId,
+          fileName: data.file_name || 'Document.pdf',
+          originalFileName: data.file_name || 'Document.pdf',
+          fileType: data.file_type || 'application/octet-stream',
+          fileSizeMB: Number(data.file_size_mb) || 0.1,
+          uploadDate: data.uploaded_at || new Date().toISOString(),
+          uploadedBy: data.uploaded_by || 'User',
+          version: data.version || 1,
+          status: data.status || 'Pending Review',
+          isReferenceMaterial: false,
+          createdDate: data.uploaded_at || new Date().toISOString(),
+          modifiedDate: data.uploaded_at || new Date().toISOString()
+        };
+
+        this.inMemoryMetadataStore.set(googleDriveFileId, fileMeta);
+        this.inMemoryMetadataStore.set(driveFileId, fileMeta);
+        this.inMemoryMetadataStore.set(fileMeta.id, fileMeta);
+        if (fileMeta.fileName) this.inMemoryMetadataStore.set(fileMeta.fileName, fileMeta);
+        return fileMeta;
+      }
+    } catch (dbErr: any) {
+      console.warn('Persistent DB metadata resolution notice:', dbErr.message);
+    }
+
+    // 3. Query Google Drive API directly if fileId looks like a Google Drive ID
+    if (this.drive && !googleDriveFileId.startsWith('file-') && !googleDriveFileId.startsWith('ev-') && !googleDriveFileId.startsWith('doc-') && !googleDriveFileId.startsWith('seed-') && !googleDriveFileId.startsWith('ref-') && !googleDriveFileId.startsWith('gdrive-mock')) {
+      try {
+        const res = await this.drive.files.get({
+          fileId: googleDriveFileId,
+          fields: 'id, name, mimeType, size, createdTime, modifiedTime, webViewLink, webContentLink, parents'
+        });
+
+        if (res.data) {
+          const fileMeta: FileMetadata = {
+            id: `ev-${res.data.id}`,
+            googleDriveFileId: res.data.id!,
+            googleDriveFolderId: res.data.parents ? res.data.parents[0] : '',
+            fileName: res.data.name || 'Document.pdf',
+            originalFileName: res.data.name || 'Document.pdf',
+            fileType: res.data.mimeType || 'application/octet-stream',
+            fileSizeMB: res.data.size ? Number((Number(res.data.size) / (1024 * 1024)).toFixed(2)) : 0.1,
+            uploadDate: res.data.createdTime || new Date().toISOString(),
+            uploadedBy: 'System User',
+            version: 1,
+            status: 'Pending Review',
+            isReferenceMaterial: false,
+            createdDate: res.data.createdTime || new Date().toISOString(),
+            modifiedDate: res.data.modifiedTime || new Date().toISOString(),
+            webViewLink: res.data.webViewLink || undefined,
+            webContentLink: res.data.webContentLink || undefined
+          };
+
+          this.inMemoryMetadataStore.set(googleDriveFileId, fileMeta);
+          this.inMemoryMetadataStore.set(fileMeta.googleDriveFileId, fileMeta);
+          return fileMeta;
+        }
+      } catch (driveErr: any) {
+        console.warn(`Drive API metadata lookup notice for '${googleDriveFileId}':`, driveErr.message);
+      }
+    }
+
+    return null;
+  }
+
   public async downloadFile(googleDriveFileId: string): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
-    const cachedMeta = this.inMemoryMetadataStore.get(googleDriveFileId);
-    const targetDriveFileId = cachedMeta?.googleDriveFileId || googleDriveFileId;
-    let fileName = cachedMeta ? cachedMeta.fileName : (googleDriveFileId.includes('.') ? googleDriveFileId : `Document_${googleDriveFileId}.pdf`);
-    let mimeType = cachedMeta ? cachedMeta.fileType : 'application/pdf';
+    const resolvedMeta = await this.resolveMetadata(googleDriveFileId);
+    const targetDriveFileId = resolvedMeta?.googleDriveFileId || googleDriveFileId;
+    let fileName = resolvedMeta ? resolvedMeta.fileName : (googleDriveFileId.includes('.') ? googleDriveFileId : `Document_${googleDriveFileId}.pdf`);
+    let mimeType = resolvedMeta ? resolvedMeta.fileType : 'application/pdf';
 
     // 1. Authoritative Primary Storage: Google Drive API retrieval
     if (this.drive && !targetDriveFileId.startsWith('gdrive-mock') && !targetDriveFileId.startsWith('gdrive-') && !targetDriveFileId.startsWith('file-') && !targetDriveFileId.startsWith('doc-') && !targetDriveFileId.startsWith('ev-') && !targetDriveFileId.startsWith('EVD-')) {
       try {
-        const res = await this.drive.files.get(
-          { fileId: targetDriveFileId, alt: 'media' },
-          { responseType: 'arraybuffer' }
-        );
-        if (res.data) {
-          const buffer = Buffer.from(res.data as ArrayBuffer);
+        let driveMimeType = mimeType;
+        try {
+          const fileInfo = await this.drive.files.get({
+            fileId: targetDriveFileId,
+            fields: 'id, name, mimeType'
+          });
+          if (fileInfo.data.name) fileName = fileInfo.data.name;
+          if (fileInfo.data.mimeType) driveMimeType = fileInfo.data.mimeType;
+        } catch (infoErr) {
+          // ignore
+        }
+
+        let resData: ArrayBuffer | null = null;
+
+        // Handle native Google Workspace spreadsheets / docs export if needed
+        if (driveMimeType === 'application/vnd.google-apps.spreadsheet') {
+          const exportRes = await this.drive.files.export(
+            { fileId: targetDriveFileId, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+            { responseType: 'arraybuffer' }
+          );
+          resData = exportRes.data as ArrayBuffer;
+          mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+          if (!fileName.endsWith('.xlsx')) fileName = `${fileName}.xlsx`;
+        } else if (driveMimeType === 'application/vnd.google-apps.document') {
+          const exportRes = await this.drive.files.export(
+            { fileId: targetDriveFileId, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+            { responseType: 'arraybuffer' }
+          );
+          resData = exportRes.data as ArrayBuffer;
+          mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+          if (!fileName.endsWith('.docx')) fileName = `${fileName}.docx`;
+        } else {
+          const getRes = await this.drive.files.get(
+            { fileId: targetDriveFileId, alt: 'media' },
+            { responseType: 'arraybuffer' }
+          );
+          resData = getRes.data as ArrayBuffer;
+          if (driveMimeType && !driveMimeType.startsWith('application/vnd.google-apps')) {
+            mimeType = driveMimeType;
+          }
+        }
+
+        if (resData) {
+          const buffer = Buffer.from(resData);
           if (buffer.length > 0) {
-            if (!cachedMeta) {
-              try {
-                const metaRes = await this.drive.files.get({
-                  fileId: targetDriveFileId,
-                  fields: 'name, mimeType'
-                });
-                if (metaRes.data.name) fileName = metaRes.data.name;
-                if (metaRes.data.mimeType) mimeType = metaRes.data.mimeType;
-              } catch (metaErr) {
-                // ignore
-              }
-            }
             // Save to temporary cache
             this.saveBinaryBuffer(googleDriveFileId, fileName, mimeType, buffer, [targetDriveFileId]);
             return { buffer, fileName, mimeType };
@@ -631,42 +744,7 @@ startxref
   }
 
   public async getFileMetadata(googleDriveFileId: string): Promise<FileMetadata | null> {
-    if (this.inMemoryMetadataStore.has(googleDriveFileId)) {
-      return this.inMemoryMetadataStore.get(googleDriveFileId)!;
-    }
-
-    if (this.drive) {
-      try {
-        const res = await this.drive.files.get({
-          fileId: googleDriveFileId,
-          fields: 'id, name, mimeType, size, createdTime, modifiedTime, webViewLink, webContentLink, parents'
-        });
-
-        const meta: FileMetadata = {
-          id: `ev-${res.data.id}`,
-          googleDriveFileId: res.data.id!,
-          googleDriveFolderId: res.data.parents ? res.data.parents[0] : '',
-          fileName: res.data.name || 'Document.pdf',
-          originalFileName: res.data.name || 'Document.pdf',
-          fileType: res.data.mimeType || 'application/octet-stream',
-          fileSizeMB: res.data.size ? Number((Number(res.data.size) / (1024 * 1024)).toFixed(2)) : 0.1,
-          uploadDate: res.data.createdTime || new Date().toISOString(),
-          uploadedBy: 'System User',
-          version: 1,
-          status: 'Pending Review',
-          isReferenceMaterial: false,
-          createdDate: res.data.createdTime || new Date().toISOString(),
-          modifiedDate: res.data.modifiedTime || new Date().toISOString(),
-          webViewLink: res.data.webViewLink || undefined,
-          webContentLink: res.data.webContentLink || undefined
-        };
-        return meta;
-      } catch (err: any) {
-        console.error('Error getting Drive file metadata:', err.message);
-      }
-    }
-
-    return null;
+    return this.resolveMetadata(googleDriveFileId);
   }
 
   public async deleteFile(googleDriveFileId: string): Promise<boolean> {
