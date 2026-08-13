@@ -1698,6 +1698,7 @@ interface InStoreMessage {
   auditId: string;
   distributorId: string;
   requestRef?: string;
+  requestTitle?: string;
   senderName: string;
   senderEmail: string;
   senderRole: string;
@@ -1719,6 +1720,22 @@ interface InStoreMessage {
 
 // In-Memory Fallback & Sync Store
 const DISCUSSION_MESSAGES_STORE: InStoreMessage[] = [
+  {
+    id: 'msg-aud-team-1',
+    conversationId: 'conv-eng-101-internal-auditors',
+    auditId: 'eng-101',
+    distributorId: 'internal-auditors',
+    requestRef: 'AUD-INTERNAL',
+    senderName: 'Sarah Jenkins',
+    senderEmail: 's.jenkins@apex-audit.com',
+    senderRole: 'AA Super Admin',
+    senderOrganization: 'Apex Audit Practice (AA)',
+    timestamp: 'Today at 08:30 AM',
+    content: 'Team: Use this channel for internal auditor alignment, finding reviews, and audit strategy notes. Messages posted here are completely hidden from all distributors.',
+    isReadByAuditor: true,
+    isReadByDistributor: false,
+    createdAt: new Date(Date.now() - 10800000).toISOString()
+  },
   {
     id: 'msg-101-1',
     conversationId: 'conv-eng-101-dist-1',
@@ -1873,6 +1890,30 @@ app.get('/api/discussions/conversations', async (req, res) => {
       };
     });
 
+    // Add Internal Auditor Team Channel if caller is an Auditor/Admin
+    if (!session.isDistributor) {
+      const internalAuditorConvId = `conv-${auditId}-internal-auditors`;
+      const internalMsgs = DISCUSSION_MESSAGES_STORE.filter(m => m.conversationId === internalAuditorConvId || m.distributorId === 'internal-auditors');
+      const sortedInternalMsgs = [...internalMsgs].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const lastInternalMsg = sortedInternalMsgs.length > 0 ? sortedInternalMsgs[sortedInternalMsgs.length - 1] : undefined;
+
+      conversations.unshift({
+        conversationId: internalAuditorConvId,
+        auditId,
+        distributorId: 'internal-auditors',
+        distributorName: '🔒 Internal Auditor Team Room',
+        distributorCode: 'AUD-TEAM',
+        distributorRegion: 'Internal Audit Practice',
+        lastMessage: lastInternalMsg ? {
+          content: lastInternalMsg.content,
+          timestamp: lastInternalMsg.timestamp,
+          senderName: lastInternalMsg.senderName,
+          senderRole: lastInternalMsg.senderRole
+        } : undefined,
+        unreadCount: 0
+      });
+    }
+
     return res.json({
       success: true,
       conversations
@@ -1939,7 +1980,7 @@ app.get('/api/discussions/messages', async (req, res) => {
 app.post('/api/discussions/post', async (req, res) => {
   try {
     const session = authenticateRequestSession(req);
-    const { auditId, requestRef, content, attachments } = req.body;
+    const { auditId, requestRef, requestTitle, content, attachments } = req.body;
     let { conversationId, distributorId } = req.body;
 
     if (!content || !content.trim()) {
@@ -1957,6 +1998,8 @@ app.post('/api/discussions/post', async (req, res) => {
         });
       }
       distributorId = session.distributorInfo.id;
+    } else if (distributorId === 'internal-auditors' || conversationId?.includes('internal-auditors')) {
+      distributorId = 'internal-auditors';
     } else if (!distributorId) {
       distributorId = 'dist-1';
     }
@@ -1972,6 +2015,7 @@ app.post('/api/discussions/post', async (req, res) => {
       auditId: currentAuditId,
       distributorId,
       requestRef: requestRef || undefined,
+      requestTitle: requestTitle || undefined,
       senderName: session.name,
       senderEmail: session.email,
       senderRole: session.role,

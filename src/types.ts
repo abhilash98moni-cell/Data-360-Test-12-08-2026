@@ -54,6 +54,7 @@ export interface ThreadedMessage {
   auditId: string;
   distributorId: string;
   requestRef?: string;
+  requestTitle?: string;
   senderName: string;
   senderEmail: string;
   senderRole: EnterpriseRole;
@@ -70,6 +71,7 @@ export interface ThreadedMessage {
   replyToId?: string;
   isReadByAuditor?: boolean;
   isReadByDistributor?: boolean;
+  createdAt?: string;
 }
 
 export interface EvidenceRecord {
