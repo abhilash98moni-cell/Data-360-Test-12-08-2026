@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
@@ -8,6 +9,21 @@ import { GoogleGenAI } from '@google/genai';
 import multer from 'multer';
 import { storageService } from './src/services/storageService.js';
 import { getItemCompletionDetails } from './src/utils/irlValidation.js';
+import {
+  getSupabaseServerClient,
+  getAuthoritativeIRLState,
+  saveAuthoritativeIRLState,
+  getAuthoritativeSubmissions,
+  createAuthoritativeEditRequest,
+  getAuthoritativeEditRequests,
+  reviewAuthoritativeEditRequest
+} from './src/services/irlService.js';
+import {
+  getAuthoritativeQuestionnaireState,
+  saveAuthoritativeQuestionnaireAnswers,
+  submitAuthoritativeQuestionnaire,
+  saveAuthoritativeQuestionnaireAuditorNotes
+} from './src/services/questionnaireService.js';
 
 dotenv.config();
 
@@ -27,23 +43,6 @@ function getGeminiClient(): GoogleGenAI | null {
     geminiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   }
   return geminiClient;
-}
-
-function getSupabaseServerClient(): SupabaseClient {
-  const url = process.env.SUPABASE_URL || process.env.supabase_url || process.env.VITE_SUPABASE_URL || 'https://placeholder-data360.supabase.co';
-  const serviceKey =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_SECRET_KEY ||
-    process.env.supabase_service ||
-    process.env.SUPABASE_ANON_KEY ||
-    'placeholder-service-key';
-
-  return createClient(url, serviceKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  });
 }
 
 async function startServer() {
@@ -93,25 +92,20 @@ async function startServer() {
     }
   });
 
-  // Server-side in-memory cache fallback store for IRL Submissions
-  const iirSubmissionsStore = new Map<string, any>();
-
   // ====================================================================
   // INITIAL INFORMATION REQUEST LIST (IRL) SUPABASE PERSISTENCE API
   // ====================================================================
 
-  // Submit & Persist IRL Data Endpoint
+  // Submit & Persist IRL Data Endpoint (Final Submission)
   app.post('/api/iir/submit', async (req, res) => {
     try {
       const { client, distributor, auditId, requests, isLocked, submissionDate, submittedBy } = req.body;
 
-      if (!client || !distributor || !Array.isArray(requests)) {
+      if (!client || !distributor || !Array.isArray(requests) || requests.length === 0) {
         return res.status(400).json({ success: false, error: 'Client, distributor, and requests array are required.' });
       }
 
-      const supabase = getSupabaseServerClient();
-
-      // Authoritative validation check against Canonical Validation Model
+      // Canonical Validation Check: verify all mandatory requirements
       const incompleteRequirements: Array<{
         refNumber: string;
         title: string;
@@ -122,7 +116,6 @@ async function startServer() {
 
       requests.forEach((item: any) => {
         const refNum = String(item.refNumber || item.id);
-        // Normalize mandatory flag from item payload (supports both isMandatory and is_mandatory)
         const isMand = Boolean(item.isMandatory ?? item.is_mandatory ?? false);
         item.isMandatory = isMand;
         item.is_mandatory = isMand;
@@ -139,7 +132,6 @@ async function startServer() {
         }
       });
 
-      // Part 7 & Part 9: Reject submission ONLY if one or more Mandatory requirements are incomplete
       if (incompleteRequirements.length > 0) {
         return res.status(400).json({
           success: false,
@@ -149,76 +141,24 @@ async function startServer() {
         });
       }
 
-      const totalItems = requests.length;
-      const completedItems = requests.filter((r: any) => getItemCompletionDetails(r).isComplete).length;
-      const completionPercentage = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 100;
       const finalSubmissionDate = submissionDate || new Date().toISOString().substring(0, 19).replace('T', ' ');
+      const updatedRequests = requests.map((item: any) => ({
+        ...item,
+        status: item.reviewerStatus === 'Accepted' ? 'Accepted' : 'Submitted'
+      }));
 
-      let dbSuccess = false;
-      let dbErrorMsg = '';
-
-      // 1. Primary DB Persistence: Save/Upsert into Supabase `irl_submissions` table
-      const subRecord = {
-        id: `sub_${client.replace(/\s+/g, '_')}_${distributor.replace(/\s+/g, '_')}`,
-        client_name: client,
-        distributor_name: distributor,
-        audit_id: auditId || 'eng-101',
+      const saved = await saveAuthoritativeIRLState(client, distributor, {
+        client,
+        distributor,
+        auditId: auditId || 'eng-101',
         status: 'Submitted',
-        is_locked: isLocked ?? true,
-        submission_date: finalSubmissionDate,
-        completion_percentage: completionPercentage,
-        submitted_by: submittedBy || distributor,
-        requests_json: requests,
-        updated_at: new Date().toISOString()
-      };
+        isLocked: isLocked !== undefined ? isLocked : true,
+        submissionDate: finalSubmissionDate,
+        submittedBy: submittedBy || distributor,
+        requests: updatedRequests
+      });
 
-      try {
-        const { error: subErr } = await supabase
-          .from('irl_submissions')
-          .upsert(subRecord, { onConflict: 'id' });
-
-        if (!subErr) {
-          dbSuccess = true;
-        } else {
-          dbErrorMsg = subErr.message;
-          console.warn('Supabase irl_submissions upsert note:', subErr.message);
-        }
-      } catch (e: any) {
-        dbErrorMsg = e.message;
-      }
-
-      // Safe UUID validator for optional foreign keys
-      const isValidUuid = (str: string) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
-
-      // 2. Secondary DB Persistence: Upsert rows in `irl_request_items`
-      try {
-        const itemRows = requests.map((item: any) => ({
-          audit_id: isValidUuid(auditId) ? auditId : null,
-          distributor_name: distributor,
-          ref_number: String(item.refNumber || item.id),
-          category: item.category || 'General',
-          title: item.title || 'Requirement',
-          description: item.description || '',
-          is_mandatory: Boolean(item.isMandatory),
-          status: 'Submitted',
-          reviewer_status: item.reviewerStatus || 'Pending Review',
-          text_response: item.textResponse || '',
-          no_upload_explanation: item.noUploadExplanation || '',
-          updated_at: new Date().toISOString()
-        }));
-
-        const { error: itemsErr } = await supabase
-          .from('irl_request_items')
-          .upsert(itemRows);
-
-        if (!itemsErr) {
-          dbSuccess = true;
-        }
-      } catch (e) {
-        console.warn('Supabase irl_request_items upsert note:', e);
-      }
-
-      // 3. Log into `system_audit_logs`
+      const supabase = getSupabaseServerClient();
       try {
         await supabase.from('system_audit_logs').insert({
           user_name: submittedBy || distributor,
@@ -227,13 +167,12 @@ async function startServer() {
           organization: distributor,
           action: 'IRL Submitted',
           ip_address: req.ip || '127.0.0.1',
-          details: `Final IRL submission lock engaged by ${distributor} for client ${client}. ${requests.length} items submitted (${completionPercentage}% complete).`
+          details: `Final IRL submission lock engaged by ${distributor} for client ${client}. ${requests.length} items submitted (${saved.state.completionPercentage}% complete).`
         });
       } catch (e) {
-        console.warn('Supabase system_audit_logs insert note:', e);
+        console.warn('Supabase submission audit log note:', e);
       }
 
-      // 4. Send notification to `notifications`
       try {
         await supabase.from('notifications').insert({
           target_organization: client,
@@ -244,112 +183,165 @@ async function startServer() {
           created_at: new Date().toISOString()
         });
       } catch (e) {
-        console.warn('Supabase notifications insert note:', e);
-      }
-
-      // Always keep server memory cache updated for instant cross-worker consistency
-      iirSubmissionsStore.set(`${client}::${distributor}`, {
-        client,
-        distributor,
-        auditId: auditId || 'eng-101',
-        status: 'Submitted',
-        isLocked: isLocked ?? true,
-        submissionDate: finalSubmissionDate,
-        completionPercentage,
-        submittedBy: submittedBy || distributor,
-        requests,
-        updatedAt: new Date().toISOString()
-      });
-
-      if (!dbSuccess && dbErrorMsg) {
-        console.error('Database persistence failed:', dbErrorMsg);
-        return res.status(500).json({
-          success: false,
-          error: 'Unable to submit the IRL. Please try again or contact the administrator.'
-        });
+        console.warn('Supabase notification note:', e);
       }
 
       return res.json({
         success: true,
         message: 'Initial Information Request List successfully submitted and persisted to Supabase database!',
         submissionDate: finalSubmissionDate,
-        completionPercentage,
+        completionPercentage: saved.state.completionPercentage,
         status: 'Submitted',
         isLocked: true,
-        dbPersisted: dbSuccess
+        requests: saved.state.requests,
+        version: saved.state.version
       });
     } catch (err: any) {
       console.error('Error in /api/iir/submit:', err);
       return res.status(500).json({
         success: false,
-        error: 'Unable to submit the IRL. Please try again or contact the administrator.'
+        error: err.message || 'Unable to submit the IRL. Database persistence failed.'
       });
     }
   });
 
-  // Fetch/Sync Authoritative Submission State Endpoint
-  app.get('/api/iir/sync', async (req, res) => {
+  // Save Draft IRL Data Endpoint
+  app.post('/api/iir/save-draft', async (req, res) => {
     try {
-      const clientName = (req.query.client as string) || '';
-      const distName = (req.query.distributor as string) || '';
+      const { client, distributor, auditId, requests, submittedBy } = req.body;
 
-      if (!clientName || !distName) {
-        return res.status(400).json({ success: false, error: 'Client and distributor parameters are required' });
+      if (!client || !distributor) {
+        return res.status(400).json({ success: false, error: 'Client and distributor parameters are required.' });
       }
 
-      const key = `${clientName}::${distName}`;
-      const supabase = getSupabaseServerClient();
+      if (!Array.isArray(requests) || requests.length === 0) {
+        return res.status(400).json({ success: false, error: 'Requests array cannot be empty.' });
+      }
 
-      // 1. Check Supabase `irl_submissions` table
-      try {
-        const subId = `sub_${clientName.replace(/\s+/g, '_')}_${distName.replace(/\s+/g, '_')}`;
-        const { data, error } = await supabase
-          .from('irl_submissions')
-          .select('*')
-          .eq('id', subId)
-          .single();
+      const saved = await saveAuthoritativeIRLState(client, distributor, {
+        client,
+        distributor,
+        auditId: auditId || 'eng-101',
+        status: 'In Progress',
+        isLocked: false,
+        submittedBy: submittedBy || distributor,
+        requests
+      });
 
-        if (data && !error) {
-          return res.json({
-            success: true,
-            found: true,
-            client: data.client_name,
-            distributor: data.distributor_name,
-            auditId: data.audit_id,
-            status: data.status,
-            isLocked: data.is_locked,
-            submissionDate: data.submission_date,
-            completionPercentage: data.completion_percentage,
-            submittedBy: data.submitted_by,
-            requests: data.requests_json,
-            updatedAt: data.updated_at
-          });
+      return res.json({
+        success: true,
+        savedAt: saved.savedAt,
+        version: saved.state.version,
+        requests: saved.state.requests,
+        completionPercentage: saved.state.completionPercentage,
+        completedCount: saved.state.completedCount,
+        totalCount: saved.state.totalCount
+      });
+    } catch (err: any) {
+      console.error('Error in /api/iir/save-draft:', err);
+      return res.status(500).json({
+        success: false,
+        error: err.message || 'Failed to save draft to Supabase database.'
+      });
+    }
+  });
+
+  // Update Individual Item Reviewer Status Endpoint
+  app.post('/api/iir/update-item-status', async (req, res) => {
+    try {
+      const { client, distributor, auditId, itemId, reviewerStatus, reviewerNote, reviewerUser } = req.body;
+
+      if (!client || !distributor || !itemId || !reviewerStatus) {
+        return res.status(400).json({ success: false, error: 'Client, distributor, itemId, and reviewerStatus are required.' });
+      }
+
+      const current = await getAuthoritativeIRLState(client, distributor, auditId || 'eng-101');
+      const existingRequests = current.state.requests || [];
+
+      const updatedRequests = existingRequests.map((item: any) => {
+        if (item.id === itemId || item.refNumber === itemId) {
+          return {
+            ...item,
+            reviewerStatus,
+            status: reviewerStatus === 'Accepted' ? 'Accepted' : reviewerStatus === 'Rejected' ? 'Rejected' : 'Clarification Required',
+            reviewerComment: reviewerNote !== undefined ? reviewerNote : item.reviewerComment,
+            lastUpdated: new Date().toISOString().substring(0, 19).replace('T', ' ')
+          };
         }
-      } catch (e) {
-        console.warn('Supabase query irl_submissions note:', e);
-      }
+        return item;
+      });
 
-      // 2. Check memory store fallback
-      if (iirSubmissionsStore.has(key)) {
-        const stored = iirSubmissionsStore.get(key);
-        return res.json({
-          success: true,
-          found: true,
-          ...stored
+      const saved = await saveAuthoritativeIRLState(client, distributor, {
+        ...current.state,
+        requests: updatedRequests
+      });
+
+      // Insert audit log
+      const supabase = getSupabaseServerClient();
+      try {
+        await supabase.from('system_audit_logs').insert({
+          user_name: reviewerUser || 'Auditor',
+          user_email: 'auditor@data360.com',
+          user_role: 'Auditor',
+          organization: client,
+          action: 'Item Review Status Updated',
+          ip_address: req.ip || '127.0.0.1',
+          details: `Auditor updated status for item ${itemId} to "${reviewerStatus}". Note: "${reviewerNote || 'None'}"`
         });
+      } catch (e) {
+        console.warn('Review status audit log note:', e);
       }
 
       return res.json({
         success: true,
-        found: false,
-        client: clientName,
-        distributor: distName,
-        message: 'No submission found in database'
+        requests: saved.state.requests,
+        savedAt: saved.savedAt,
+        version: saved.state.version
       });
     } catch (err: any) {
+      console.error('Error in /api/iir/update-item-status:', err);
       return res.status(500).json({
         success: false,
-        error: err.message || 'Failed to fetch submission from Supabase'
+        error: err.message || 'Failed to update reviewer status in database.'
+      });
+    }
+  });
+
+  // Fetch Authoritative Submission State Endpoint (Strict Single Source of Truth)
+  app.get('/api/iir/sync', async (req, res) => {
+    try {
+      const clientName = (req.query.client as string) || '';
+      const distName = (req.query.distributor as string) || '';
+      const auditId = (req.query.auditId as string) || 'eng-101';
+
+      if (!clientName || !distName) {
+        return res.status(400).json({ success: false, error: 'Client and distributor parameters are required.' });
+      }
+
+      const authoritativeRecord = await getAuthoritativeIRLState(clientName, distName, auditId);
+
+      return res.json({
+        success: true,
+        found: true,
+        client: authoritativeRecord.state.client,
+        distributor: authoritativeRecord.state.distributor,
+        auditId: authoritativeRecord.state.auditId,
+        status: authoritativeRecord.state.status,
+        isLocked: Boolean(authoritativeRecord.state.isLocked),
+        submissionDate: authoritativeRecord.state.submissionDate,
+        completionPercentage: authoritativeRecord.state.completionPercentage,
+        completedCount: authoritativeRecord.state.completedCount,
+        totalCount: authoritativeRecord.state.totalCount,
+        submittedBy: authoritativeRecord.state.submittedBy,
+        requests: authoritativeRecord.state.requests,
+        version: authoritativeRecord.state.version,
+        updatedAt: authoritativeRecord.state.updatedAt
+      });
+    } catch (err: any) {
+      console.error('Error in /api/iir/sync:', err);
+      return res.status(500).json({
+        success: false,
+        error: err.message || 'Failed to fetch authoritative state from Supabase database.'
       });
     }
   });
@@ -360,63 +352,57 @@ async function startServer() {
       const clientName = (req.query.client as string) || '';
       const supabase = getSupabaseServerClient();
 
-      let dbSubmissions: any[] = [];
-      try {
-        let query = supabase.from('irl_submissions').select('*');
-        if (clientName) {
-          query = query.eq('client_name', clientName);
-        }
-        const { data, error } = await query;
-        if (data && !error) {
-          dbSubmissions = data.map(d => ({
-            client: d.client_name,
-            distributor: d.distributor_name,
-            auditId: d.audit_id,
-            status: d.status,
-            isLocked: d.is_locked,
-            submissionDate: d.submission_date,
-            completionPercentage: d.completion_percentage,
-            submittedBy: d.submitted_by,
-            updatedAt: d.updated_at
-          }));
-        }
-      } catch (e) {
-        console.warn('Supabase query all submissions note:', e);
+      const { data, error } = await supabase
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'IRL_DISTRIBUTOR_STATE')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        throw new Error(`Failed to load submissions from database: ${error.message}`);
       }
 
-      // Combine with memory cache
-      const memorySubs = Array.from(iirSubmissionsStore.values())
-        .filter(s => !clientName || s.client === clientName)
-        .map(s => ({
-          client: s.client,
-          distributor: s.distributor,
-          auditId: s.auditId,
-          status: s.status,
-          isLocked: s.isLocked,
-          submissionDate: s.submissionDate,
-          completionPercentage: s.completionPercentage,
-          submittedBy: s.submittedBy,
-          updatedAt: s.updatedAt
-        }));
+      const latestMap = new Map<string, any>();
+      (data || []).forEach(row => {
+        const state = row.details;
+        if (state && state.client && state.distributor) {
+          const key = `${state.client}::${state.distributor}`;
+          if (!latestMap.has(key)) {
+            latestMap.set(key, {
+              client: state.client,
+              distributor: state.distributor,
+              auditId: state.auditId,
+              status: state.status,
+              isLocked: state.isLocked,
+              submissionDate: state.submissionDate,
+              completionPercentage: state.completionPercentage,
+              completedCount: state.completedCount,
+              totalCount: state.totalCount,
+              submittedBy: state.submittedBy,
+              updatedAt: state.updatedAt,
+              version: state.version
+            });
+          }
+        }
+      });
 
-      const combinedMap = new Map();
-      dbSubmissions.forEach(s => combinedMap.set(`${s.client}::${s.distributor}`, s));
-      memorySubs.forEach(s => combinedMap.set(`${s.client}::${s.distributor}`, s));
+      let submissions = Array.from(latestMap.values());
+      if (clientName) {
+        submissions = submissions.filter(s => s.client === clientName);
+      }
 
       return res.json({
         success: true,
-        submissions: Array.from(combinedMap.values())
+        submissions
       });
     } catch (err: any) {
+      console.error('Error in /api/iir/submissions:', err);
       return res.status(500).json({
         success: false,
-        error: err.message || 'Failed to fetch submissions list'
+        error: err.message || 'Failed to fetch submissions list from database.'
       });
     }
   });
-
-  // Server-side in-memory cache fallback store for IRL Edit Requests
-  const editRequestsStore = new Map<string, any>();
 
   // ====================================================================
   // REQUEST EDIT / ACCESS APPROVAL WORKFLOW ENDPOINTS (STAGE 3)
@@ -440,34 +426,19 @@ async function startServer() {
       }
 
       const supabase = getSupabaseServerClient();
+      const stateKey = `${client}::${distributor}`;
 
-      // Prevent duplicate pending requests for the same audit/distributor
-      let existingPending = false;
-      try {
-        const { data: existingReqs } = await supabase
-          .from('irl_edit_requests')
-          .select('*')
-          .eq('client_name', client)
-          .eq('distributor_name', distributor)
-          .eq('status', 'PENDING');
+      // Check existing pending requests
+      const { data: existingLogs } = await supabase
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'IRL_EDIT_REQUEST')
+        .eq('target_user_email', stateKey)
+        .order('created_at', { ascending: false })
+        .limit(10);
 
-        if (existingReqs && existingReqs.length > 0) {
-          existingPending = true;
-        }
-      } catch (e) {
-        console.warn('Supabase query irl_edit_requests pending check note:', e);
-      }
-
-      if (!existingPending) {
-        for (const reqObj of editRequestsStore.values()) {
-          if (reqObj.client === client && reqObj.distributor === distributor && reqObj.status === 'PENDING') {
-            existingPending = true;
-            break;
-          }
-        }
-      }
-
-      if (existingPending) {
+      const hasPending = (existingLogs || []).some(log => log.details?.status === 'PENDING');
+      if (hasPending) {
         return res.status(400).json({
           success: false,
           error: 'You already have a pending edit request for this audit.'
@@ -482,9 +453,8 @@ async function startServer() {
         client_name: client,
         distributor_name: distributor,
         audit_id: auditId || 'eng-101',
-        irl_submission_id: `sub_${client.replace(/\s+/g, '_')}_${distributor.replace(/\s+/g, '_')}`,
         scope: scope || 'Entire IRL',
-        affected_requirements: affectedRequirements || null,
+        affected_requirements: affectedRequirements || [],
         requested_by: requestedBy || distributor,
         request_reason: trimmedReason,
         status: 'PENDING',
@@ -493,29 +463,18 @@ async function startServer() {
         updated_at: nowIso
       };
 
-      // 1. Insert into Supabase irl_edit_requests table
-      try {
-        await supabase.from('irl_edit_requests').insert(newEditRequest);
-      } catch (e) {
-        console.warn('Supabase irl_edit_requests insert note:', e);
+      const insertRes = await supabase.from('system_audit_logs').insert({
+        event_type: 'IRL_EDIT_REQUEST',
+        target_user_email: stateKey,
+        details: newEditRequest,
+        created_at: nowIso
+      });
+
+      if (insertRes.error) {
+        throw new Error(`Failed to save edit request to database: ${insertRes.error.message}`);
       }
 
-      // 2. Insert audit log
-      try {
-        await supabase.from('system_audit_logs').insert({
-          user_name: requestedBy || distributor,
-          user_email: `${distributor.toLowerCase().replace(/\s+/g, '')}@data360.com`,
-          user_role: userRole || 'Distributor',
-          organization: distributor,
-          action: 'IRL Edit Access Requested',
-          ip_address: req.ip || '127.0.0.1',
-          details: `Edit access requested by ${distributor} for client ${client}. Scope: ${scope || 'Entire IRL'}. Request ID: ${requestId}. Reason: "${trimmedReason}"`
-        });
-      } catch (e) {
-        console.warn('Supabase system_audit_logs insert note:', e);
-      }
-
-      // 3. Insert notification for APEX team
+      // Notifications
       try {
         await supabase.from('notifications').insert({
           target_organization: client,
@@ -526,31 +485,15 @@ async function startServer() {
           created_at: nowIso
         });
       } catch (e) {
-        console.warn('Supabase notifications insert note:', e);
+        console.warn('Notification insert note:', e);
       }
-
-      const memObj = {
-        id: requestId,
-        client,
-        distributor,
-        auditId: auditId || 'eng-101',
-        irlSubmissionId: newEditRequest.irl_submission_id,
-        scope: scope || 'Entire IRL',
-        affectedRequirements: affectedRequirements || [],
-        requestedBy: requestedBy || distributor,
-        requestReason: trimmedReason,
-        status: 'PENDING',
-        requestedAt: nowIso,
-        updatedAt: nowIso
-      };
-      editRequestsStore.set(requestId, memObj);
 
       return res.json({
         success: true,
         message: 'Edit access request successfully submitted to APEX Auditor team for review.',
         requestId,
         status: 'PENDING',
-        request: memObj
+        request: newEditRequest
       });
     } catch (err: any) {
       console.error('Error in /api/iir/request-edit:', err);
@@ -566,55 +509,52 @@ async function startServer() {
     try {
       const clientName = (req.query.client as string) || '';
       const distName = (req.query.distributor as string) || '';
-
       const supabase = getSupabaseServerClient();
-      let dbRequests: any[] = [];
 
-      try {
-        let query = supabase.from('irl_edit_requests').select('*');
-        if (distName) {
-          query = query.eq('distributor_name', distName);
-        } else if (clientName) {
-          query = query.eq('client_name', clientName);
-        }
-        const { data, error } = await query;
-        if (data && !error) {
-          dbRequests = data.map(r => ({
-            id: r.id,
-            client: r.client_name,
-            distributor: r.distributor_name,
-            auditId: r.audit_id,
-            irlSubmissionId: r.irl_submission_id,
-            scope: r.scope,
-            affectedRequirements: r.affected_requirements,
-            requestedBy: r.requested_by,
-            requestReason: r.request_reason,
-            status: r.status,
-            reviewerComment: r.reviewer_comment,
-            reviewedBy: r.reviewed_by,
-            requestedAt: r.requested_at,
-            reviewedAt: r.reviewed_at,
-            approvedAt: r.approved_at,
-            rejectedAt: r.rejected_at
-          }));
-        }
-      } catch (e) {
-        console.warn('Supabase query irl_edit_requests note:', e);
+      let query = supabase
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'IRL_EDIT_REQUEST')
+        .order('created_at', { ascending: false });
+
+      if (distName && clientName) {
+        query = query.eq('target_user_email', `${clientName}::${distName}`);
       }
 
-      const memRequests = Array.from(editRequestsStore.values()).filter(r => {
-        if (distName && r.distributor !== distName) return false;
-        if (clientName && r.client !== clientName) return false;
-        return true;
-      });
+      const { data, error } = await query;
+      if (error) {
+        throw new Error(`Failed to load edit requests: ${error.message}`);
+      }
 
-      const map = new Map();
-      dbRequests.forEach(r => map.set(r.id, r));
-      memRequests.forEach(r => map.set(r.id, r));
+      const reqMap = new Map<string, any>();
+      (data || []).forEach(row => {
+        const r = row.details;
+        if (r && r.id && !reqMap.has(r.id)) {
+          if (distName && r.distributor_name !== distName && r.distributor !== distName) return;
+          if (clientName && r.client_name !== clientName && r.client !== clientName) return;
+          reqMap.set(r.id, {
+            id: r.id,
+            client: r.client_name || r.client,
+            distributor: r.distributor_name || r.distributor,
+            auditId: r.audit_id || r.auditId,
+            scope: r.scope,
+            affectedRequirements: r.affected_requirements || r.affectedRequirements || [],
+            requestedBy: r.requested_by || r.requestedBy,
+            requestReason: r.request_reason || r.requestReason,
+            status: r.status,
+            reviewerComment: r.reviewer_comment || r.reviewerComment,
+            reviewedBy: r.reviewed_by || r.reviewedBy,
+            requestedAt: r.requested_at || r.requestedAt,
+            reviewedAt: r.reviewed_at || r.reviewedAt,
+            approvedAt: r.approved_at || r.approvedAt,
+            rejectedAt: r.rejected_at || r.rejectedAt
+          });
+        }
+      });
 
       return res.json({
         success: true,
-        requests: Array.from(map.values())
+        requests: Array.from(reqMap.values())
       });
     } catch (err: any) {
       return res.status(500).json({
@@ -643,69 +583,46 @@ async function startServer() {
       const supabase = getSupabaseServerClient();
       const nowIso = new Date().toISOString();
 
-      // Update request in DB
-      try {
-        await supabase
-          .from('irl_edit_requests')
-          .update({
-            status: 'APPROVED',
-            reviewed_by: reviewedBy || 'APEX Auditor',
-            reviewed_at: nowIso,
-            approved_at: nowIso,
-            reviewer_comment: comment || 'Edit access approved by APEX Lead Auditor.',
-            updated_at: nowIso
-          })
-          .eq('id', requestId);
-      } catch (e) {
-        console.warn('Supabase irl_edit_requests approve update note:', e);
-      }
+      // Find the edit request in Supabase
+      const { data: logs } = await supabase
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'IRL_EDIT_REQUEST')
+        .order('created_at', { ascending: false });
 
-      // Determine target client and distributor
-      let targetClient = client;
-      let targetDistributor = distributor;
-      if ((!targetClient || !targetDistributor) && editRequestsStore.has(requestId)) {
-        const cached = editRequestsStore.get(requestId);
-        targetClient = cached.client;
-        targetDistributor = cached.distributor;
-      }
+      const targetLog = (logs || []).find(l => l.details?.id === requestId);
+      const reqObj = targetLog?.details || {};
+      const targetClient = client || reqObj.client_name || reqObj.client;
+      const targetDistributor = distributor || reqObj.distributor_name || reqObj.distributor;
 
+      const updatedRequest = {
+        ...reqObj,
+        status: 'APPROVED',
+        reviewed_by: reviewedBy || 'APEX Auditor',
+        reviewed_at: nowIso,
+        approved_at: nowIso,
+        reviewer_comment: comment || 'Edit access approved by APEX Lead Auditor.',
+        updated_at: nowIso
+      };
+
+      await supabase.from('system_audit_logs').insert({
+        event_type: 'IRL_EDIT_REQUEST',
+        target_user_email: `${targetClient}::${targetDistributor}`,
+        details: updatedRequest,
+        created_at: nowIso
+      });
+
+      // Unlock the IRL in Supabase
       if (targetClient && targetDistributor) {
-        const subId = `sub_${targetClient.replace(/\s+/g, '_')}_${targetDistributor.replace(/\s+/g, '_')}`;
-        try {
-          await supabase
-            .from('irl_submissions')
-            .update({
-              is_locked: false,
-              status: 'In Progress',
-              updated_at: nowIso
-            })
-            .eq('id', subId);
-        } catch (e) {
-          console.warn('Supabase irl_submissions unlock update note:', e);
-        }
-
-        const subKey = `${targetClient}::${targetDistributor}`;
-        if (iirSubmissionsStore.has(subKey)) {
-          const subObj = iirSubmissionsStore.get(subKey);
-          subObj.isLocked = false;
-          subObj.status = 'In Progress';
-          subObj.updatedAt = nowIso;
-          iirSubmissionsStore.set(subKey, subObj);
-        }
+        const current = await getAuthoritativeIRLState(targetClient, targetDistributor);
+        await saveAuthoritativeIRLState(targetClient, targetDistributor, {
+          ...current.state,
+          isLocked: false,
+          status: 'In Progress'
+        });
       }
 
-      if (editRequestsStore.has(requestId)) {
-        const cached = editRequestsStore.get(requestId);
-        cached.status = 'APPROVED';
-        cached.reviewedBy = reviewedBy || 'APEX Auditor';
-        cached.reviewedAt = nowIso;
-        cached.approvedAt = nowIso;
-        cached.reviewerComment = comment || 'Edit access approved by APEX Lead Auditor.';
-        cached.updatedAt = nowIso;
-        editRequestsStore.set(requestId, cached);
-      }
-
-      // System audit log
+      // System audit log & Notification
       try {
         await supabase.from('system_audit_logs').insert({
           user_name: reviewedBy || 'APEX Auditor',
@@ -716,12 +633,7 @@ async function startServer() {
           ip_address: req.ip || '127.0.0.1',
           details: `Edit access approved for request ${requestId} (${targetDistributor} / ${targetClient}). Submission unlocked. Comment: "${comment || 'Approved'}"`
         });
-      } catch (e) {
-        console.warn('Supabase system_audit_logs insert note:', e);
-      }
 
-      // Notification for Distributor
-      try {
         await supabase.from('notifications').insert({
           target_organization: targetDistributor || 'Distributor',
           category: 'Edit Access Approved',
@@ -730,9 +642,7 @@ async function startServer() {
           is_read: false,
           created_at: nowIso
         });
-      } catch (e) {
-        console.warn('Supabase notifications insert note:', e);
-      }
+      } catch (e) {}
 
       return res.json({
         success: true,
@@ -776,42 +686,34 @@ async function startServer() {
       const supabase = getSupabaseServerClient();
       const nowIso = new Date().toISOString();
 
-      try {
-        await supabase
-          .from('irl_edit_requests')
-          .update({
-            status: 'REJECTED',
-            reviewed_by: reviewedBy || 'APEX Auditor',
-            reviewed_at: nowIso,
-            rejected_at: nowIso,
-            reviewer_comment: String(comment).trim(),
-            updated_at: nowIso
-          })
-          .eq('id', requestId);
-      } catch (e) {
-        console.warn('Supabase irl_edit_requests reject update note:', e);
-      }
+      const { data: logs } = await supabase
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'IRL_EDIT_REQUEST')
+        .order('created_at', { ascending: false });
 
-      let targetClient = client;
-      let targetDistributor = distributor;
-      if ((!targetClient || !targetDistributor) && editRequestsStore.has(requestId)) {
-        const cached = editRequestsStore.get(requestId);
-        targetClient = cached.client;
-        targetDistributor = cached.distributor;
-      }
+      const targetLog = (logs || []).find(l => l.details?.id === requestId);
+      const reqObj = targetLog?.details || {};
+      const targetClient = client || reqObj.client_name || reqObj.client;
+      const targetDistributor = distributor || reqObj.distributor_name || reqObj.distributor;
 
-      if (editRequestsStore.has(requestId)) {
-        const cached = editRequestsStore.get(requestId);
-        cached.status = 'REJECTED';
-        cached.reviewedBy = reviewedBy || 'APEX Auditor';
-        cached.reviewedAt = nowIso;
-        cached.rejectedAt = nowIso;
-        cached.reviewerComment = String(comment).trim();
-        cached.updatedAt = nowIso;
-        editRequestsStore.set(requestId, cached);
-      }
+      const updatedRequest = {
+        ...reqObj,
+        status: 'REJECTED',
+        reviewed_by: reviewedBy || 'APEX Auditor',
+        reviewed_at: nowIso,
+        rejected_at: nowIso,
+        reviewer_comment: String(comment).trim(),
+        updated_at: nowIso
+      };
 
-      // System audit log
+      await supabase.from('system_audit_logs').insert({
+        event_type: 'IRL_EDIT_REQUEST',
+        target_user_email: `${targetClient}::${targetDistributor}`,
+        details: updatedRequest,
+        created_at: nowIso
+      });
+
       try {
         await supabase.from('system_audit_logs').insert({
           user_name: reviewedBy || 'APEX Auditor',
@@ -822,12 +724,7 @@ async function startServer() {
           ip_address: req.ip || '127.0.0.1',
           details: `Edit access rejected for request ${requestId} (${targetDistributor} / ${targetClient}). Reason: "${String(comment).trim()}"`
         });
-      } catch (e) {
-        console.warn('Supabase system_audit_logs insert note:', e);
-      }
 
-      // Notification for Distributor
-      try {
         await supabase.from('notifications').insert({
           target_organization: targetDistributor || 'Distributor',
           category: 'Edit Access Rejected',
@@ -836,9 +733,7 @@ async function startServer() {
           is_read: false,
           created_at: nowIso
         });
-      } catch (e) {
-        console.warn('Supabase notifications insert note:', e);
-      }
+      } catch (e) {}
 
       return res.json({
         success: true,
@@ -1058,17 +953,23 @@ async function startServer() {
       const supabase = getSupabaseServerClient();
       const targetAuditId = auditName || req.body.auditId || 'eng-101';
 
-      // P1 FIX: Scope version count by distributor_name, requirement_ref, AND audit_id
-      const { data: existingRecords, error: versionErr } = await supabase
-        .from('evidence_files')
-        .select('version')
-        .eq('distributor_name', targetDistributor)
-        .eq('requirement_ref', requirementId)
-        .eq('audit_id', targetAuditId);
+      try {
+        const { data: existingRecords } = await supabase
+          .from('system_audit_logs')
+          .select('*')
+          .eq('event_type', 'EVIDENCE_FILE')
+          .order('created_at', { ascending: false });
 
-      if (!versionErr && existingRecords && existingRecords.length > 0) {
-        const maxVer = Math.max(...existingRecords.map(r => Number(r.version || 1)));
-        versionNum = maxVer + 1;
+        const filtered = (existingRecords || []).filter(r => 
+          r.details?.distributor_name === targetDistributor && 
+          r.details?.requirement_ref === requirementId
+        );
+        if (filtered.length > 0) {
+          const maxVer = Math.max(...filtered.map(r => Number(r.details?.version || 1)));
+          versionNum = maxVer + 1;
+        }
+      } catch (e) {
+        console.warn('Evidence version check note:', e);
       }
 
       const newEvidenceRow = {
@@ -1092,19 +993,53 @@ async function startServer() {
         review_status: 'PENDING_REVIEW'
       };
 
-      // P1 FIX: Strictly enforce Supabase persistence. Fail with HTTP 500 if DB insert fails!
-      const { data: insertedDb, error: insertErr } = await supabase
-        .from('evidence_files')
-        .insert(newEvidenceRow)
-        .select()
-        .single();
+      // Persist evidence record into Supabase PostgreSQL
+      const insertEvidenceRes = await supabase.from('system_audit_logs').insert({
+        event_type: 'EVIDENCE_FILE',
+        target_user_email: `${clientName}::${targetDistributor}`,
+        details: newEvidenceRow,
+        created_at: new Date().toISOString()
+      }).select().single();
 
-      if (insertErr) {
-        console.error('CRITICAL: Supabase evidence persistence failed for Google Drive file:', metadata.googleDriveFileId, insertErr);
+      if (insertEvidenceRes.error) {
+        console.error('Supabase evidence persistence failed:', insertEvidenceRes.error);
         return res.status(500).json({
           success: false,
-          error: 'File uploaded to storage, but evidence metadata could not be saved to database. Please retry.'
+          error: `Failed to persist evidence metadata to database: ${insertEvidenceRes.error.message}`
         });
+      }
+
+      // Synchronize uploaded file with the authoritative IRL state in Supabase
+      try {
+        const currentIRL = await getAuthoritativeIRLState(clientName, targetDistributor, targetAuditId);
+        const reqList = currentIRL.state.requests || [];
+        const updatedReqList = reqList.map((r: any) => {
+          if (r.id === requirementId || r.refNumber === requirementId) {
+            const existingFiles = Array.isArray(r.files) ? r.files : [];
+            const newFileObj = {
+              name: metadata.fileName,
+              size: `${metadata.fileSizeMB} MB`,
+              uploadDate: new Date().toISOString().substring(0, 19).replace('T', ' '),
+              storageId: metadata.googleDriveFileId,
+              fileType: req.file.mimetype,
+              googleDriveFileId: metadata.googleDriveFileId,
+              version: versionNum
+            };
+            return {
+              ...r,
+              files: [...existingFiles, newFileObj],
+              lastUpdated: new Date().toISOString().substring(0, 19).replace('T', ' ')
+            };
+          }
+          return r;
+        });
+
+        await saveAuthoritativeIRLState(clientName, targetDistributor, {
+          ...currentIRL.state,
+          requests: updatedReqList
+        });
+      } catch (err: any) {
+        console.warn('IRL state file update sync note:', err.message);
       }
 
       // Create Audit Trail Log
@@ -1122,7 +1057,7 @@ async function startServer() {
         success: true,
         file: metadata,
         version: versionNum,
-        recordId: insertedDb?.id,
+        recordId: insertEvidenceRes.data?.id,
         message: `File '${metadata.fileName}' (V${versionNum}) successfully uploaded to Google Drive folder: ${metadata.folderPath}`
       });
     } catch (err: any) {
@@ -2172,27 +2107,508 @@ async function startServer() {
   });
 
   // ====================================================================
-  // STEP 10: THREADED COMMUNICATION API
+  // STEP 10: THREADED COMMUNICATION API (PERMANENT MULTI-TENANT CHATS)
   // ====================================================================
-  app.post('/api/discussions/post', (req, res) => {
-    const { auditId, requestRef, senderName, senderEmail, senderRole, senderOrganization, content } = req.body;
+  const DISTRIBUTOR_REGISTRY: Record<string, { id: string; name: string; code: string; region: string }> = {
+    'dist-1': { id: 'dist-1', name: 'Midwest Trading Co.', code: 'MDT-8092', region: 'Midwest Region (USA)' },
+    'dist-2': { id: 'dist-2', name: 'Horizon Logistics India', code: 'HLI-4022', region: 'South Asia / India' },
+    'dist-3': { id: 'dist-3', name: 'Pacific Rim Distribution', code: 'PRD-7712', region: 'Asia-Pacific (APAC)' },
+    'dist-4': { id: 'dist-4', name: 'Nexus Logistics Ltd', code: 'NEX-1044', region: 'Western Division' },
+    'dist-5': { id: 'dist-5', name: 'Middle East Company', code: 'MEC-5521', region: 'Middle East & Africa (MEA)' },
+    'dist-6': { id: 'dist-6', name: 'EuroTech Supply Chains', code: 'ETS-3091', region: 'European Union (EU)' },
+    'dist-7': { id: 'dist-7', name: 'LatAm Trading Network', code: 'LTN-9910', region: 'Latin America (LATAM)' }
+  };
 
-    const newMessage = {
-      id: `msg-${Date.now()}`,
-      auditId: auditId || 'eng-001',
-      requestRef: requestRef || '1.1',
-      senderName: senderName || 'Sarah Jenkins',
-      senderEmail: senderEmail || 's.jenkins@apex-audit.com',
-      senderRole: senderRole || 'AA Super Admin',
-      senderOrganization: senderOrganization || 'Apex Audit Practice (AA)',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-      content: content || ''
+  function getDistributorByOrg(orgName: string) {
+    if (!orgName) return DISTRIBUTOR_REGISTRY['dist-1'];
+    const normalized = orgName.trim().toLowerCase();
+    for (const key of Object.keys(DISTRIBUTOR_REGISTRY)) {
+      const dist = DISTRIBUTOR_REGISTRY[key];
+      if (dist.name.toLowerCase() === normalized || dist.id.toLowerCase() === normalized || dist.code.toLowerCase() === normalized) {
+        return dist;
+      }
+    }
+    const slug = orgName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+    return { id: `dist-${slug}`, name: orgName, code: `DIST-${slug.substring(0, 4).toUpperCase()}`, region: 'Global' };
+  }
+
+  interface InStoreMessage {
+    id: string;
+    conversationId: string;
+    auditId: string;
+    distributorId: string;
+    requestRef?: string;
+    requestTitle?: string;
+    senderName: string;
+    senderEmail: string;
+    senderRole: string;
+    senderOrganization: string;
+    timestamp: string;
+    content: string;
+    attachments?: {
+      fileName: string;
+      fileSizeMB: number;
+      url?: string;
+      googleDriveFileId?: string;
+    }[];
+    mentions?: string[];
+    replyToId?: string;
+    isReadByAuditor: boolean;
+    isReadByDistributor: boolean;
+    createdAt: string;
+  }
+
+  const DISCUSSIONS_FILE_PATH = path.join(process.cwd(), 'data', 'discussions_messages.json');
+
+  const INITIAL_SEED_DISCUSSION_MESSAGES: InStoreMessage[] = [
+    {
+      id: 'msg-aud-team-1',
+      conversationId: 'conv-eng-101-internal-auditors',
+      auditId: 'eng-101',
+      distributorId: 'internal-auditors',
+      requestRef: 'AUD-INTERNAL',
+      senderName: 'Sarah Jenkins',
+      senderEmail: 's.jenkins@apex-audit.com',
+      senderRole: 'AA Super Admin',
+      senderOrganization: 'Apex Audit Practice (AA)',
+      timestamp: 'Today at 08:30 AM',
+      content: 'Team: Use this channel for internal auditor alignment, finding reviews, and audit strategy notes. Messages posted here are completely hidden from all distributors.',
+      isReadByAuditor: true,
+      isReadByDistributor: false,
+      createdAt: new Date(Date.now() - 10800000).toISOString()
+    },
+    {
+      id: 'msg-101-1',
+      conversationId: 'conv-eng-101-dist-1',
+      auditId: 'eng-101',
+      distributorId: 'dist-1',
+      requestRef: '1.1',
+      senderName: 'Sarah Jenkins',
+      senderEmail: 's.jenkins@apex-audit.com',
+      senderRole: 'AA Super Admin',
+      senderOrganization: 'Apex Audit Practice (AA)',
+      timestamp: 'Today at 09:15 AM',
+      content: 'Hi David, thank you for uploading the corporate registration document for Midwest Trading. Could you also verify if the tax clearance certificate covers Q2 2026?',
+      mentions: ['@David Vance'],
+      isReadByAuditor: true,
+      isReadByDistributor: true,
+      createdAt: new Date(Date.now() - 7200000).toISOString()
+    },
+    {
+      id: 'msg-101-2',
+      conversationId: 'conv-eng-101-dist-1',
+      auditId: 'eng-101',
+      distributorId: 'dist-1',
+      requestRef: '1.1',
+      senderName: 'David Vance',
+      senderEmail: 'd.vance@midwesttrading.com',
+      senderRole: 'Distributor Admin',
+      senderOrganization: 'Midwest Trading Co.',
+      timestamp: 'Today at 09:42 AM',
+      content: 'Hello Sarah, yes! The attached state tax license is valid through December 2026. I have also attached our quarterly compliance statement for your reference.',
+      replyToId: 'msg-101-1',
+      attachments: [
+        { fileName: 'State_Tax_Compliance_Statement_2026.pdf', fileSizeMB: 1.8 }
+      ],
+      isReadByAuditor: false,
+      isReadByDistributor: true,
+      createdAt: new Date(Date.now() - 3600000).toISOString()
+    },
+    {
+      id: 'msg-101-3',
+      conversationId: 'conv-eng-101-dist-1',
+      auditId: 'eng-101',
+      distributorId: 'dist-1',
+      requestRef: '3.1',
+      senderName: 'Sarah Jenkins',
+      senderEmail: 's.jenkins@apex-audit.com',
+      senderRole: 'AA Super Admin',
+      senderOrganization: 'Apex Audit Practice (AA)',
+      timestamp: 'Today at 10:30 AM',
+      content: 'We noticed a variance in credit note #CN-9042 regarding the MDF rebate calculation. Please check item 3.1 in the IRL section.',
+      mentions: ['@David Vance'],
+      isReadByAuditor: true,
+      isReadByDistributor: false,
+      createdAt: new Date(Date.now() - 1800000).toISOString()
+    },
+    {
+      id: 'msg-102-1',
+      conversationId: 'conv-eng-101-dist-2',
+      auditId: 'eng-101',
+      distributorId: 'dist-2',
+      requestRef: '2.1',
+      senderName: 'Sarah Jenkins',
+      senderEmail: 's.jenkins@apex-audit.com',
+      senderRole: 'AA Super Admin',
+      senderOrganization: 'Apex Audit Practice (AA)',
+      timestamp: 'Yesterday at 02:15 PM',
+      content: 'Greeting Horizon Logistics India compliance team. Please upload the Q2 SAP ERP sales ledger with tax reconciliation numbers.',
+      isReadByAuditor: true,
+      isReadByDistributor: true,
+      createdAt: new Date(Date.now() - 86400000).toISOString()
+    },
+    {
+      id: 'msg-103-1',
+      conversationId: 'conv-eng-101-dist-3',
+      auditId: 'eng-101',
+      distributorId: 'dist-3',
+      requestRef: '3.1',
+      senderName: 'Sarah Jenkins',
+      senderEmail: 's.jenkins@apex-audit.com',
+      senderRole: 'AA Super Admin',
+      senderOrganization: 'Apex Audit Practice (AA)',
+      timestamp: 'Yesterday at 04:00 PM',
+      content: 'Pacific Rim Distribution: Awaiting clarification on volume rebate tier adjustments for Q1.',
+      isReadByAuditor: true,
+      isReadByDistributor: false,
+      createdAt: new Date(Date.now() - 43200000).toISOString()
+    }
+  ];
+
+  const DISCUSSION_MESSAGES_STORE: InStoreMessage[] = [...INITIAL_SEED_DISCUSSION_MESSAGES];
+
+  function loadDiskDiscussionMessages(): InStoreMessage[] {
+    try {
+      if (fs.existsSync(DISCUSSIONS_FILE_PATH)) {
+        const fileContent = fs.readFileSync(DISCUSSIONS_FILE_PATH, 'utf-8');
+        const parsed = JSON.parse(fileContent);
+        if (Array.isArray(parsed)) {
+          return parsed;
+        }
+      }
+    } catch (err) {
+      console.warn('Failed to read local discussions disk cache:', err);
+    }
+    return [];
+  }
+
+  function saveDiskDiscussionMessages(messages: InStoreMessage[]) {
+    try {
+      const dir = path.dirname(DISCUSSIONS_FILE_PATH);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+      fs.writeFileSync(DISCUSSIONS_FILE_PATH, JSON.stringify(messages, null, 2), 'utf-8');
+    } catch (err) {
+      console.warn('Failed to write local discussions disk cache:', err);
+    }
+  }
+
+  async function getOrSyncDiscussionMessages(): Promise<InStoreMessage[]> {
+    const client = getSupabaseServerClient();
+    let dbMessages: InStoreMessage[] = [];
+
+    if (client) {
+      try {
+        const { data, error } = await client
+          .from('system_audit_logs')
+          .select('*')
+          .eq('event_type', 'DISCUSSION_MESSAGE');
+
+        if (!error && Array.isArray(data)) {
+          dbMessages = data.map(row => row.details).filter(Boolean);
+        } else if (error) {
+          console.warn('Supabase discussion fetch notice:', error.message);
+        }
+      } catch (dbErr: any) {
+        console.warn('Supabase discussion connection error:', dbErr.message);
+      }
+    }
+
+    const diskMessages = loadDiskDiscussionMessages();
+
+    const messageMap = new Map<string, InStoreMessage>();
+
+    INITIAL_SEED_DISCUSSION_MESSAGES.forEach(m => messageMap.set(m.id, m));
+    diskMessages.forEach(m => messageMap.set(m.id, m));
+    DISCUSSION_MESSAGES_STORE.forEach(m => messageMap.set(m.id, m));
+    dbMessages.forEach(m => messageMap.set(m.id, m));
+
+    const mergedMessages = Array.from(messageMap.values());
+    mergedMessages.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+
+    DISCUSSION_MESSAGES_STORE.length = 0;
+    DISCUSSION_MESSAGES_STORE.push(...mergedMessages);
+    saveDiskDiscussionMessages(mergedMessages);
+
+    return mergedMessages;
+  }
+
+  function authenticateRequestSession(req: express.Request) {
+    const role = (req.headers['x-user-role'] as string) || (req.body?.senderRole as string) || 'Auditor';
+    const org = (req.headers['x-user-organization'] as string) || (req.body?.senderOrganization as string) || 'Apex Audit Practice (AA)';
+    const email = (req.headers['x-user-email'] as string) || (req.body?.senderEmail as string) || 'user@company.com';
+    const name = (req.headers['x-user-name'] as string) || (req.body?.senderName as string) || 'Authorized User';
+
+    const isDistributor = role.toLowerCase().includes('distributor');
+    const distributorInfo = isDistributor ? getDistributorByOrg(org) : null;
+
+    return {
+      role,
+      org,
+      email,
+      name,
+      isDistributor,
+      distributorInfo
     };
+  }
 
-    return res.json({
-      success: true,
-      message: newMessage
-    });
+  // GET /api/discussions/conversations — Get list of distributor conversations for audit
+  app.get('/api/discussions/conversations', async (req, res) => {
+    try {
+      const session = authenticateRequestSession(req);
+      const auditId = (req.query.auditId as string) || 'eng-101';
+
+      const allMessages = await getOrSyncDiscussionMessages();
+
+      let activeDistributors = Object.values(DISTRIBUTOR_REGISTRY);
+
+      if (session.isDistributor && session.distributorInfo) {
+        activeDistributors = [session.distributorInfo];
+      }
+
+      const conversations = activeDistributors.map(dist => {
+        const convId = `conv-${auditId}-${dist.id}`;
+        const messagesForConv = allMessages.filter(m => m.conversationId === convId || (m.auditId === auditId && m.distributorId === dist.id));
+
+        const sortedMessages = [...messagesForConv].sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+        const lastMsg = sortedMessages.length > 0 ? sortedMessages[sortedMessages.length - 1] : undefined;
+
+        const unreadCount = sortedMessages.filter(m => {
+          if (session.isDistributor) {
+            return !m.isReadByDistributor && m.senderRole !== session.role;
+          } else {
+            return !m.isReadByAuditor && m.senderRole.toLowerCase().includes('distributor');
+          }
+        }).length;
+
+        return {
+          conversationId: convId,
+          auditId,
+          distributorId: dist.id,
+          distributorName: dist.name,
+          distributorCode: dist.code,
+          distributorRegion: dist.region,
+          lastMessage: lastMsg ? {
+            content: lastMsg.content,
+            timestamp: lastMsg.timestamp,
+            senderName: lastMsg.senderName,
+            senderRole: lastMsg.senderRole
+          } : undefined,
+          unreadCount
+        };
+      });
+
+      if (!session.isDistributor) {
+        const internalAuditorConvId = `conv-${auditId}-internal-auditors`;
+        const internalMsgs = allMessages.filter(m => m.conversationId === internalAuditorConvId || m.distributorId === 'internal-auditors');
+        const sortedInternalMsgs = [...internalMsgs].sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+        const lastInternalMsg = sortedInternalMsgs.length > 0 ? sortedInternalMsgs[sortedInternalMsgs.length - 1] : undefined;
+
+        conversations.unshift({
+          conversationId: internalAuditorConvId,
+          auditId,
+          distributorId: 'internal-auditors',
+          distributorName: '🔒 Internal Auditor Team Room',
+          distributorCode: 'AUD-TEAM',
+          distributorRegion: 'Internal Audit Practice',
+          lastMessage: lastInternalMsg ? {
+            content: lastInternalMsg.content,
+            timestamp: lastInternalMsg.timestamp,
+            senderName: lastInternalMsg.senderName,
+            senderRole: lastInternalMsg.senderRole
+          } : undefined,
+          unreadCount: 0
+        });
+      }
+
+      return res.json({
+        success: true,
+        conversations
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Failed to retrieve conversations' });
+    }
+  });
+
+  function extractDistributorIdFromConvId(convId: string): string {
+    if (!convId) return '';
+    const distIdx = convId.indexOf('-dist-');
+    if (distIdx !== -1) {
+      return convId.substring(distIdx + 1);
+    }
+    if (convId.includes('internal-auditors')) {
+      return 'internal-auditors';
+    }
+    return '';
+  }
+
+  // GET /api/discussions/messages — Get messages for a specific conversation with strict isolation
+  app.get('/api/discussions/messages', async (req, res) => {
+    try {
+      const session = authenticateRequestSession(req);
+      const conversationId = (req.query.conversationId as string) || '';
+      const auditId = (req.query.auditId as string) || 'eng-101';
+      let targetDistributorId = (req.query.distributorId as string) || '';
+
+      if (conversationId) {
+        const extracted = extractDistributorIdFromConvId(conversationId);
+        if (extracted) {
+          targetDistributorId = extracted;
+        }
+      }
+
+      if (!targetDistributorId && session.isDistributor && session.distributorInfo) {
+        targetDistributorId = session.distributorInfo.id;
+      }
+
+      if (session.isDistributor && session.distributorInfo) {
+        if (targetDistributorId && targetDistributorId !== session.distributorInfo.id) {
+          console.warn(`SECURITY REJECTION: Distributor '${session.org}' (ID: ${session.distributorInfo.id}) attempted to access conversation for '${targetDistributorId}'`);
+          return res.status(403).json({
+            error: 'Access Denied: You are not authorized to view messages belonging to another distributor conversation.'
+          });
+        }
+        targetDistributorId = session.distributorInfo.id;
+      }
+
+      const expectedConvId = conversationId || `conv-${auditId}-${targetDistributorId || 'dist-1'}`;
+
+      const allMessages = await getOrSyncDiscussionMessages();
+
+      const messages = allMessages.filter(m => m.conversationId === expectedConvId || (m.auditId === auditId && m.distributorId === targetDistributorId));
+
+      messages.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+
+      return res.json({
+        success: true,
+        conversationId: expectedConvId,
+        auditId,
+        distributorId: targetDistributorId,
+        messages
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Failed to retrieve discussion messages' });
+    }
+  });
+
+  // POST /api/discussions/post — Post message with server-side authorization & isolation
+  app.post('/api/discussions/post', async (req, res) => {
+    try {
+      const session = authenticateRequestSession(req);
+      const { auditId, requestRef, requestTitle, content, attachments } = req.body;
+      let { conversationId, distributorId } = req.body;
+
+      if (!content || !content.trim()) {
+        return res.status(400).json({ error: 'Message content cannot be empty' });
+      }
+
+      const currentAuditId = auditId || 'eng-101';
+
+      if (session.isDistributor && session.distributorInfo) {
+        if (distributorId && distributorId !== session.distributorInfo.id) {
+          console.warn(`SECURITY REJECTION: Distributor '${session.org}' attempted to post to distributorId '${distributorId}'`);
+          return res.status(403).json({
+            error: 'Access Denied: You cannot post messages to another distributor conversation.'
+          });
+        }
+        distributorId = session.distributorInfo.id;
+      } else if (distributorId === 'internal-auditors' || conversationId?.includes('internal-auditors')) {
+        distributorId = 'internal-auditors';
+      } else if (!distributorId) {
+        distributorId = 'dist-1';
+      }
+
+      const validConvId = conversationId || `conv-${currentAuditId}-${distributorId}`;
+
+      const now = new Date();
+      const formattedTimestamp = `Today at ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+      const newMessage: InStoreMessage = {
+        id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        conversationId: validConvId,
+        auditId: currentAuditId,
+        distributorId,
+        requestRef: requestRef || undefined,
+        requestTitle: requestTitle || undefined,
+        senderName: session.name,
+        senderEmail: session.email,
+        senderRole: session.role,
+        senderOrganization: session.org,
+        timestamp: formattedTimestamp,
+        content: content.trim(),
+        attachments: Array.isArray(attachments) ? attachments : undefined,
+        isReadByAuditor: !session.isDistributor,
+        isReadByDistributor: session.isDistributor,
+        createdAt: now.toISOString()
+      };
+
+      DISCUSSION_MESSAGES_STORE.push(newMessage);
+      saveDiskDiscussionMessages(DISCUSSION_MESSAGES_STORE);
+
+      try {
+        const client = getSupabaseServerClient();
+        if (client) {
+          const insertRes = await client.from('system_audit_logs').insert({
+            event_type: 'DISCUSSION_MESSAGE',
+            target_user_email: validConvId,
+            details: newMessage,
+            created_at: now.toISOString()
+          });
+          if (insertRes.error) {
+            console.warn('Supabase discussion message insert error:', insertRes.error.message);
+          }
+        }
+      } catch (dbErr: any) {
+        console.warn('Supabase discussions notice:', dbErr.message);
+      }
+
+      console.log(`💬 Message permanently saved in '${validConvId}' by ${session.name} (${session.org})`);
+
+      return res.json({
+        success: true,
+        message: newMessage
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Failed to post message' });
+    }
+  });
+
+  // POST /api/discussions/mark-read — Mark unread messages in conversation as read
+  app.post('/api/discussions/mark-read', async (req, res) => {
+    try {
+      const session = authenticateRequestSession(req);
+      const { conversationId } = req.body;
+
+      if (!conversationId) {
+        return res.status(400).json({ error: 'Conversation ID is required' });
+      }
+
+      if (session.isDistributor && session.distributorInfo) {
+        if (!conversationId.includes(session.distributorInfo.id)) {
+          return res.status(403).json({ error: 'Access Denied: Cannot mark messages as read for another conversation.' });
+        }
+      }
+
+      DISCUSSION_MESSAGES_STORE.forEach(m => {
+        if (m.conversationId === conversationId || conversationId.includes(m.distributorId)) {
+          if (session.isDistributor) {
+            m.isReadByDistributor = true;
+          } else {
+            m.isReadByAuditor = true;
+          }
+        }
+      });
+
+      saveDiskDiscussionMessages(DISCUSSION_MESSAGES_STORE);
+
+      return res.json({
+        success: true,
+        message: `Messages marked as read for ${conversationId}`
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Failed to mark messages as read' });
+    }
   });
 
   // ====================================================================
@@ -2249,6 +2665,148 @@ async function startServer() {
         error: err?.message || 'Supabase connection failed',
         timestamp: new Date().toISOString()
       });
+    }
+  });
+
+  // ====================================================================
+  // BUSINESS QUESTIONNAIRE SUPABASE PERSISTENCE API
+  // ====================================================================
+
+  // Fetch Authoritative Questionnaire State
+  app.get('/api/questionnaire/sync', async (req, res) => {
+    try {
+      const client = String(req.query.client || 'Apex Electronics Corp');
+      const distributor = String(req.query.distributor || 'Midwest Trading Co.');
+      const auditId = String(req.query.auditId || 'eng-101');
+      const userRole = String(req.query.role || req.headers['x-user-role'] || '');
+      const userOrg = String(req.query.organization || req.headers['x-user-org'] || '');
+
+      const isDistributor = userRole.toLowerCase().includes('distributor');
+
+      // Cross-distributor access isolation check
+      if (isDistributor && userOrg && !distributor.toLowerCase().includes(userOrg.toLowerCase()) && !userOrg.toLowerCase().includes(distributor.toLowerCase())) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: You are not authorized to view questionnaires belonging to other distributors.'
+        });
+      }
+
+      const isAuditor = !isDistributor;
+      const result = await getAuthoritativeQuestionnaireState(client, distributor, auditId, isAuditor);
+
+      return res.json({
+        success: true,
+        found: result.found,
+        state: result.state
+      });
+    } catch (err: any) {
+      console.error('Error in GET /api/questionnaire/sync:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Failed to sync questionnaire state' });
+    }
+  });
+
+  // Save Questionnaire Answers
+  app.post('/api/questionnaire/save', async (req, res) => {
+    try {
+      const { client, distributor, auditId, answers, userEmail, userName, version, userRole, userOrg } = req.body;
+      if (!client || !distributor || !answers) {
+        return res.status(400).json({ success: false, error: 'client, distributor, and answers are required.' });
+      }
+
+      const isDistributor = (userRole || '').toLowerCase().includes('distributor');
+      if (isDistributor && userOrg && !distributor.toLowerCase().includes(userOrg.toLowerCase()) && !userOrg.toLowerCase().includes(distributor.toLowerCase())) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: Cross-distributor save is not permitted.'
+        });
+      }
+
+      const result = await saveAuthoritativeQuestionnaireAnswers(
+        client,
+        distributor,
+        auditId || 'eng-101',
+        answers,
+        userEmail || 'distributor@example.com',
+        userName || 'Distributor User',
+        version
+      );
+
+      return res.json({
+        success: true,
+        state: result.state
+      });
+    } catch (err: any) {
+      console.error('Error in POST /api/questionnaire/save:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Failed to save questionnaire answers' });
+    }
+  });
+
+  // Submit Final Questionnaire
+  app.post('/api/questionnaire/submit', async (req, res) => {
+    try {
+      const { client, distributor, auditId, userEmail, userName, userRole, userOrg } = req.body;
+      if (!client || !distributor) {
+        return res.status(400).json({ success: false, error: 'client and distributor are required.' });
+      }
+
+      const isDistributor = (userRole || '').toLowerCase().includes('distributor');
+      if (isDistributor && userOrg && !distributor.toLowerCase().includes(userOrg.toLowerCase()) && !userOrg.toLowerCase().includes(distributor.toLowerCase())) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: Cross-distributor submission is not permitted.'
+        });
+      }
+
+      const result = await submitAuthoritativeQuestionnaire(
+        client,
+        distributor,
+        auditId || 'eng-101',
+        userEmail || 'distributor@example.com',
+        userName || 'Distributor User'
+      );
+
+      return res.json({
+        success: true,
+        state: result.state
+      });
+    } catch (err: any) {
+      console.error('Error in POST /api/questionnaire/submit:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Failed to submit questionnaire' });
+    }
+  });
+
+  // Save Auditor Notes & Risk Ratings
+  app.post('/api/questionnaire/auditor-notes', async (req, res) => {
+    try {
+      const { client, distributor, auditId, auditorNotes, userEmail, userName, userRole } = req.body;
+      if (!client || !distributor || !auditorNotes) {
+        return res.status(400).json({ success: false, error: 'client, distributor, and auditorNotes are required.' });
+      }
+
+      const isDistributor = (userRole || '').toLowerCase().includes('distributor');
+      if (isDistributor) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: Distributors cannot create or modify auditor internal notes.'
+        });
+      }
+
+      const result = await saveAuthoritativeQuestionnaireAuditorNotes(
+        client,
+        distributor,
+        auditId || 'eng-101',
+        auditorNotes,
+        userEmail || 'auditor@example.com',
+        userName || 'Audit Lead'
+      );
+
+      return res.json({
+        success: true,
+        auditorNotes: result.auditorNotes
+      });
+    } catch (err: any) {
+      console.error('Error in POST /api/questionnaire/auditor-notes:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Failed to save auditor notes' });
     }
   });
 

@@ -26,7 +26,9 @@ import {
   Sparkles,
   FileCode,
   FileSpreadsheet,
-  FileCheck
+  FileCheck,
+  Maximize2,
+  Minimize2
 } from 'lucide-react';
 import { ThreadedMessage, UserSession, ConversationSummary } from '../types';
 import { downloadFileFromApi } from '../lib/downloadHelper';
@@ -114,9 +116,22 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
   // Mobile navigation (LIST vs CHAT)
   const [mobileView, setMobileView] = useState<'LIST' | 'CHAT'>('LIST');
 
+  // Full Screen Mode
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
   // Error and Sending State
   const [isSending, setIsSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        setIsFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isFullscreen]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatContainerRef = useRef<HTMLDivElement>(null);
@@ -573,10 +588,14 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
   };
 
   return (
-    <div className="w-full p-3 sm:p-6 space-y-4 text-slate-100 animate-fade-in max-w-[1600px] mx-auto">
+    <div className={
+      isFullscreen
+        ? "fixed inset-0 z-[9999] bg-slate-950 p-2 sm:p-4 flex flex-col h-screen w-screen overflow-hidden text-slate-100 animate-fade-in"
+        : "w-full p-3 sm:p-6 space-y-4 text-slate-100 animate-fade-in max-w-[1600px] mx-auto"
+    }>
       
       {/* Top Workspace Header Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-indigo-950/50 to-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div className={`bg-gradient-to-r from-slate-900 via-indigo-950/50 to-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-xl flex flex-col md:flex-row md:items-center md:justify-between gap-3 shrink-0 ${isFullscreen ? 'mb-1' : ''}`}>
         <div>
           <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="px-2.5 py-0.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
@@ -587,38 +606,64 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
               <span>Live Sync</span>
             </span>
-            <span className="text-xs text-slate-400">&bull; Step 10 Isolated Multi-Tenant Channels</span>
+            <span className="text-xs text-slate-400 hidden sm:inline">&bull; Step 10 Isolated Multi-Tenant Channels</span>
           </div>
           <h1 className="text-lg sm:text-2xl font-extrabold text-white flex items-center gap-2.5">
             <MessageSquare className="h-6 w-6 text-indigo-400" />
             <span>Audit Communication & Clarification Threads</span>
           </h1>
-          <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-            {isDistributor 
-              ? `Official audit discussion channel for ${currentUser?.organization}. Direct communication with Lead Auditor Sarah Jenkins.`
-              : 'Isolated audit communication workspace. Multiple auditors collaborate on distributor conversations with zero cross-tenant leakage.'}
-          </p>
+          {!isFullscreen && (
+            <p className="text-xs text-slate-400 mt-1 max-w-2xl">
+              {isDistributor 
+                ? `Official audit discussion channel for ${currentUser?.organization}. Direct communication with Lead Auditor Sarah Jenkins.`
+                : 'Isolated audit communication workspace. Multiple auditors collaborate on distributor conversations with zero cross-tenant leakage.'}
+            </p>
+          )}
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="px-3.5 py-2 bg-slate-950/90 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-center gap-2.5 shadow-inner">
+        <div className="flex items-center gap-3 flex-wrap">
+          <div className="px-3 py-1.5 bg-slate-950/90 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-center gap-2.5 shadow-inner">
             <Building2 className="h-4 w-4 text-indigo-400" />
             <div className="flex flex-col">
               <span className="text-[10px] text-slate-400 font-medium">Organization</span>
               <span className="font-bold text-white">{currentUser?.organization}</span>
             </div>
           </div>
+
+          {/* Full Screen Mode Toggle Button */}
+          <button
+            type="button"
+            onClick={() => setIsFullscreen(prev => !prev)}
+            className="px-3.5 py-2 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 hover:text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-sm"
+            title={isFullscreen ? 'Exit Full Screen (Esc)' : 'Enter Full Screen Mode'}
+          >
+            {isFullscreen ? (
+              <>
+                <Minimize2 className="h-4 w-4 text-indigo-400" />
+                <span className="hidden sm:inline">Exit Full Screen</span>
+              </>
+            ) : (
+              <>
+                <Maximize2 className="h-4 w-4 text-indigo-400" />
+                <span className="hidden sm:inline">Full Screen Mode</span>
+              </>
+            )}
+          </button>
         </div>
       </div>
 
       {/* Main Grid Workspace */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-[680px]">
+      <div className={`grid grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-4 ${
+        isFullscreen ? 'flex-1 min-h-0 h-full overflow-hidden' : 'min-h-[680px]'
+      }`}>
 
         {/* ==================================================================== */}
         {/* LEFT PANEL: AUDITOR DISTRIBUTOR SELECTOR SIDEBAR                      */}
         {/* ==================================================================== */}
         {!isDistributor && (
-          <div className={`lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3 shadow-xl h-[680px] ${
+          <div className={`lg:col-span-4 bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col gap-3 shadow-xl ${
+            isFullscreen ? 'h-full min-h-0 overflow-hidden' : 'h-[680px]'
+          } ${
             mobileView === 'CHAT' ? 'hidden lg:flex' : 'flex'
           }`}>
             
@@ -777,7 +822,9 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
           isDistributor ? 'lg:col-span-12' : 'lg:col-span-8'
         } ${
           mobileView === 'LIST' && !isDistributor ? 'hidden lg:flex' : 'flex'
-        } bg-slate-900 border border-slate-800 rounded-2xl flex-col shadow-xl h-[680px] overflow-hidden relative`}>
+        } bg-slate-900 border border-slate-800 rounded-2xl flex-col shadow-xl ${
+          isFullscreen ? 'h-full min-h-0' : 'h-[680px]'
+        } overflow-hidden relative`}>
 
           {/* ACTIVE CHAT HEADER */}
           <div className="p-3.5 sm:p-4 bg-slate-950 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0">
@@ -923,6 +970,15 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
                 title="Refresh messages"
               >
                 <RefreshCw className={`h-3.5 w-3.5 ${loadingMessages ? 'animate-spin' : ''}`} />
+              </button>
+
+              <button 
+                type="button"
+                onClick={() => setIsFullscreen(prev => !prev)}
+                className="p-1.5 bg-indigo-600/20 hover:bg-indigo-600/30 border border-indigo-500/40 text-indigo-300 hover:text-white rounded-xl cursor-pointer transition-colors"
+                title={isFullscreen ? 'Exit Full Screen (Esc)' : 'Full Screen Mode'}
+              >
+                {isFullscreen ? <Minimize2 className="h-3.5 w-3.5" /> : <Maximize2 className="h-3.5 w-3.5" />}
               </button>
             </div>
 

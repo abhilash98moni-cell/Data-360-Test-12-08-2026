@@ -16,7 +16,11 @@ import {
   FileSpreadsheet,
   Users,
   Sliders,
-  UserCheck
+  UserCheck,
+  Layers,
+  Settings,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 
 import { UserSession } from './AuthModal';
@@ -24,6 +28,7 @@ import { supabase } from '../lib/supabaseClient';
 
 export type ActiveTab = 
   | 'dashboard' 
+  | 'engagement_workspace'
   | 'admin_approval'
   | 'iir' 
   | 'evidence' 
@@ -57,6 +62,16 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
 
   const [pendingCount, setPendingCount] = React.useState<number>(0);
 
+  const isAdminTabActive = activeTab === 'admin_approval' || activeTab === 'master_control' || activeTab === 'audit_logs';
+  const [isAdminExpanded, setIsAdminExpanded] = React.useState<boolean>(isAdminTabActive);
+
+  // Auto-expand if active tab becomes one of the admin tabs
+  React.useEffect(() => {
+    if (isAdminTabActive) {
+      setIsAdminExpanded(true);
+    }
+  }, [isAdminTabActive]);
+
   React.useEffect(() => {
     const fetchPendingCount = async () => {
       try {
@@ -78,103 +93,38 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
     return () => clearInterval(interval);
   }, [activeTab]);
 
-  const fullNav = [
-    {
-      id: 'dashboard' as ActiveTab,
-      label: 'Executive Dashboard',
-      icon: LayoutDashboard,
-      badge: 'Overview',
-      auditorOnly: true
-    },
+  const handleAdminControlClick = () => {
+    if (!isAdminExpanded) {
+      setIsAdminExpanded(true);
+      if (!isAdminTabActive) {
+        onTabChange('admin_approval');
+      }
+    } else {
+      setIsAdminExpanded(false);
+    }
+  };
+
+  const adminChildren = [
     {
       id: 'admin_approval' as ActiveTab,
       label: 'Admin Approval Queue',
       icon: UserCheck,
       badge: pendingCount > 0 ? `${pendingCount} Pending` : '0 Pending',
-      badgeColor: pendingCount > 0 ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-      auditorOnly: true
-    },
-    {
-      id: 'iir' as ActiveTab,
-      label: isDistributor ? 'Initial Requirement List (IRL)' : 'Initial Info Request (IRL)',
-      icon: FileSpreadsheet,
-      badge: 'Step 7',
-      badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30'
-    },
-    {
-      id: 'evidence' as ActiveTab,
-      label: isDistributor ? 'My Uploads & Evidence' : 'Evidence Management',
-      icon: FileSpreadsheet,
-      badge: 'Vault',
-      badgeColor: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-    },
-    {
-      id: 'communication' as ActiveTab,
-      label: 'Communication',
-      icon: HelpCircle,
-      badge: 'Discussions',
-      badgeColor: 'bg-blue-500/20 text-blue-300 border-blue-500/30'
-    },
-    {
-      id: 'engagements' as ActiveTab,
-      label: 'Audit Portfolio',
-      icon: Briefcase,
-      badge: '6 Active',
-      auditorOnly: true
-    },
-    {
-      id: 'sampling' as ActiveTab,
-      label: 'Fieldwork & MUS Sampling',
-      icon: Calculator,
-      badge: null,
-      auditorOnly: true
-    },
-    {
-      id: 'forensics' as ActiveTab,
-      label: 'Forensic Anomaly AI',
-      icon: Search,
-      badge: flaggedAnomaliesCount > 0 ? `${flaggedAnomaliesCount} Flagged` : null,
-      badgeColor: 'bg-red-500/20 text-red-300 border-red-500/30',
-      auditorOnly: true
-    },
-    {
-      id: 'findings' as ActiveTab,
-      label: isDistributor ? 'Assigned Action Items & CAPA' : 'Findings & CAPA',
-      icon: ShieldAlert,
-      badge: openFindingsCount > 0 ? `${openFindingsCount} Open` : null,
-      badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+      badgeColor: pendingCount > 0 ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : 'bg-slate-800/80 text-slate-400 border-slate-700/60'
     },
     {
       id: 'master_control' as ActiveTab,
       label: 'Master Control & System',
       icon: Sliders,
-      badge: 'Governance',
-      badgeColor: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
-      auditorOnly: true
+      badge: null
     },
     {
       id: 'audit_logs' as ActiveTab,
       label: 'Security Audit Logs',
       icon: FileCheck2,
-      badge: 'Logs',
-      auditorOnly: true
-    },
-    {
-      id: 'profile' as ActiveTab,
-      label: 'My Profile & Security',
-      icon: Users,
-      badge: 'Account'
-    },
-    {
-      id: 'brd' as ActiveTab,
-      label: 'BRD Document View',
-      icon: FileCheck2,
-      badge: 'Spec',
-      auditorOnly: true
+      badge: null
     }
   ];
-
-  const mainNav = fullNav.filter(item => !isDistributor || !item.auditorOnly);
 
   const auditStreams = [
     { name: 'Distributor Audits', icon: Store, count: 2 },
@@ -186,7 +136,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
   return (
     <aside className="w-64 bg-slate-900 border-r border-slate-800 text-slate-300 flex flex-col justify-between shrink-0 hidden md:flex min-h-[calc(100vh-57px)]">
       
-      <div className="p-3 space-y-6">
+      <div className="p-3 space-y-5">
         
         {/* Navigation Sections */}
         <div>
@@ -194,33 +144,246 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
             Main Navigation
           </p>
           <nav className="space-y-1">
-            {mainNav.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
+            
+            {/* 1. Executive Dashboard (Auditor / Admin only) */}
+            {!isDistributor && (
+              <button
+                onClick={() => onTabChange('dashboard')}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                  activeTab === 'dashboard'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <LayoutDashboard className={`h-4 w-4 shrink-0 ${activeTab === 'dashboard' ? 'text-white' : 'text-slate-400'}`} />
+                  <span className="truncate">Executive Dashboard</span>
+                </div>
+              </button>
+            )}
+
+            {/* 2. Engagement Workspace */}
+            <button
+              onClick={() => onTabChange('engagement_workspace')}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'engagement_workspace'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <Layers className={`h-4 w-4 shrink-0 ${activeTab === 'engagement_workspace' ? 'text-white' : 'text-slate-400'}`} />
+                <span className="truncate">Engagement Workspace</span>
+              </div>
+            </button>
+
+            {/* 3. Admin Control (Grouped Collapsible - Auditor / Admin only) */}
+            {!isDistributor && (
+              <div className="space-y-1">
                 <button
-                  key={item.id}
-                  onClick={() => onTabChange(item.id)}
+                  onClick={handleAdminControlClick}
                   className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                    isActive
+                    isAdminTabActive && !isAdminExpanded
                       ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                      : isAdminTabActive
+                      ? 'bg-slate-800/80 text-slate-200 border border-slate-700/60 font-semibold'
                       : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
-                    <Icon className={`h-4 w-4 ${isActive ? 'text-white' : 'text-slate-400'}`} />
-                    <span>{item.label}</span>
+                  <div className="flex items-center gap-3 min-w-0">
+                    <Settings className={`h-4 w-4 shrink-0 ${isAdminTabActive ? 'text-indigo-400' : 'text-slate-400'}`} />
+                    <span className="truncate">Admin Control</span>
                   </div>
-                  {item.badge && (
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border ${
-                      item.badgeColor || 'bg-slate-800 text-slate-300 border-slate-700'
-                    }`}>
-                      {item.badge}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {pendingCount > 0 && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        {pendingCount}
+                      </span>
+                    )}
+                    {isAdminExpanded ? (
+                      <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+                    ) : (
+                      <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                    )}
+                  </div>
                 </button>
-              );
-            })}
+
+                {/* Collapsible Admin Children */}
+                {isAdminExpanded && (
+                  <div className="ml-3.5 pl-3 border-l border-slate-800 space-y-1 mt-1 transition-all">
+                    {adminChildren.map((child) => {
+                      const ChildIcon = child.icon;
+                      const isChildActive = activeTab === child.id;
+                      return (
+                        <button
+                          key={child.id}
+                          onClick={() => onTabChange(child.id)}
+                          className={`w-full flex items-center justify-between px-2.5 py-2 rounded-lg text-xs font-medium transition-all ${
+                            isChildActive
+                              ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20 font-semibold'
+                              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <ChildIcon className={`h-3.5 w-3.5 shrink-0 ${isChildActive ? 'text-white' : 'text-slate-400'}`} />
+                            <span className="truncate">{child.label}</span>
+                          </div>
+                          {child.badge && (
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium border shrink-0 ${
+                              child.badgeColor || 'bg-slate-800 text-slate-400 border-slate-700/60'
+                            }`}>
+                              {child.badge}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 4. Evidence Management / My Uploads & Evidence */}
+            <button
+              onClick={() => onTabChange('evidence')}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'evidence'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <FileSpreadsheet className={`h-4 w-4 shrink-0 ${activeTab === 'evidence' ? 'text-white' : 'text-slate-400'}`} />
+                <span className="truncate">{isDistributor ? 'My Uploads & Evidence' : 'Evidence Management'}</span>
+              </div>
+            </button>
+
+            {/* 5. Communication */}
+            <button
+              onClick={() => onTabChange('communication')}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'communication'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <HelpCircle className={`h-4 w-4 shrink-0 ${activeTab === 'communication' ? 'text-white' : 'text-slate-400'}`} />
+                <span className="truncate">Communication</span>
+              </div>
+            </button>
+
+            {/* 6. Audit Portfolio (Auditor / Admin only) */}
+            {!isDistributor && (
+              <button
+                onClick={() => onTabChange('engagements')}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                  activeTab === 'engagements'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <Briefcase className={`h-4 w-4 shrink-0 ${activeTab === 'engagements' ? 'text-white' : 'text-slate-400'}`} />
+                  <span className="truncate">Audit Portfolio</span>
+                </div>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium border bg-slate-800 text-slate-300 border-slate-700 shrink-0">
+                  6 Active
+                </span>
+              </button>
+            )}
+
+            {/* 7. Fieldwork & MUS Sampling (Auditor / Admin only) */}
+            {!isDistributor && (
+              <button
+                onClick={() => onTabChange('sampling')}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                  activeTab === 'sampling'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <Calculator className={`h-4 w-4 shrink-0 ${activeTab === 'sampling' ? 'text-white' : 'text-slate-400'}`} />
+                  <span className="truncate">Fieldwork & MUS Sampling</span>
+                </div>
+              </button>
+            )}
+
+            {/* 8. Forensic Anomaly AI (Auditor / Admin only) */}
+            {!isDistributor && (
+              <button
+                onClick={() => onTabChange('forensics')}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                  activeTab === 'forensics'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <Search className={`h-4 w-4 shrink-0 ${activeTab === 'forensics' ? 'text-white' : 'text-slate-400'}`} />
+                  <span className="truncate">Forensic Anomaly AI</span>
+                </div>
+                {flaggedAnomaliesCount > 0 && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-medium border bg-red-500/20 text-red-300 border-red-500/30 shrink-0">
+                    {flaggedAnomaliesCount} Flagged
+                  </span>
+                )}
+              </button>
+            )}
+
+            {/* 9. Findings & CAPA / Assigned Action Items & CAPA */}
+            <button
+              onClick={() => onTabChange('findings')}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'findings'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <ShieldAlert className={`h-4 w-4 shrink-0 ${activeTab === 'findings' ? 'text-white' : 'text-slate-400'}`} />
+                <span className="truncate">{isDistributor ? 'Assigned Action Items & CAPA' : 'Findings & CAPA'}</span>
+              </div>
+              {openFindingsCount > 0 && (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium border bg-amber-500/20 text-amber-300 border-amber-500/30 shrink-0">
+                  {openFindingsCount} Open
+                </span>
+              )}
+            </button>
+
+            {/* 10. My Profile & Security */}
+            <button
+              onClick={() => onTabChange('profile')}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'profile'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <Users className={`h-4 w-4 shrink-0 ${activeTab === 'profile' ? 'text-white' : 'text-slate-400'}`} />
+                <span className="truncate">My Profile & Security</span>
+              </div>
+            </button>
+
+            {/* 11. BRD Document View (Auditor / Admin only) */}
+            {!isDistributor && (
+              <button
+                onClick={() => onTabChange('brd')}
+                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                  activeTab === 'brd'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <FileCheck2 className={`h-4 w-4 shrink-0 ${activeTab === 'brd' ? 'text-white' : 'text-slate-400'}`} />
+                  <span className="truncate">BRD Document View</span>
+                </div>
+              </button>
+            )}
+
           </nav>
         </div>
 
@@ -254,11 +417,11 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                     onClick={() => onTabChange('engagements')}
                     className="flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 cursor-pointer transition-colors"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <Icon className="h-3.5 w-3.5 text-indigo-400" />
-                      <span>{stream.name}</span>
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Icon className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                      <span className="truncate">{stream.name}</span>
                     </div>
-                    <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700/60">
+                    <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700/60 shrink-0">
                       {stream.count}
                     </span>
                   </div>

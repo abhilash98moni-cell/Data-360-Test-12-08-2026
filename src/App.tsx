@@ -6,6 +6,7 @@ import { AuditExecutionView } from './components/AuditExecutionView';
 import { ForensicAnalyticsView } from './components/ForensicAnalyticsView';
 import { FindingsCAPAView } from './components/FindingsCAPAView';
 import { InitialInformationRequestView } from './components/InitialInformationRequestView';
+import { EngagementWorkspaceView } from './components/EngagementWorkspaceView';
 import { BRDDocumentView } from './components/BRDDocumentView';
 import { AICopilotDrawer } from './components/AICopilotDrawer';
 import { NewAuditModal } from './components/NewAuditModal';
@@ -137,7 +138,7 @@ export default function App() {
     if (user.role === 'Admin') {
       setActiveTab('admin_approval');
     } else if (user.role === 'Distributor') {
-      setActiveTab('iir');
+      setActiveTab('engagement_workspace');
       if (user.organization) {
         setSelectedDistributor(user.organization);
         const matchedClient = CLIENT_TENANTS.find(c => 
@@ -224,7 +225,7 @@ export default function App() {
         onOpenNewAudit={() => setIsNewAuditOpen(true)}
         unreadAlertsCount={3}
         onNavigateToIIR={() => {
-          setActiveTab('iir');
+          setActiveTab('engagement_workspace');
           setCurrentMode('platform');
         }}
         currentUser={currentUser}
@@ -235,7 +236,7 @@ export default function App() {
       <div className="flex flex-1 max-w-full overflow-x-hidden">
         
         {/* Left Navigation Drawer */}
-        {(!isIIRFullScreen || activeTab !== 'iir') && (
+        {(!isIIRFullScreen || (activeTab !== 'iir' && activeTab !== 'engagement_workspace')) && (
           <NavigationSidebar 
             activeTab={activeTab}
             onTabChange={(tab) => {
@@ -264,11 +265,11 @@ export default function App() {
               </p>
               <div className="pt-2">
                 <button 
-                  onClick={() => setActiveTab('iir')}
+                  onClick={() => setActiveTab('engagement_workspace')}
                   className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl transition-all inline-flex items-center gap-2 cursor-pointer shadow-lg"
                 >
                   <ArrowLeft className="h-4 w-4" />
-                  <span>Return to Initial Requirement List (IRL)</span>
+                  <span>Return to Engagement Workspace</span>
                 </button>
               </div>
             </div>
@@ -295,20 +296,15 @@ export default function App() {
               currencyMode={currencyMode}
               currentUser={currentUser}
             />
-          ) : activeTab === 'iir' ? (
-            <InitialInformationRequestView 
-              initialRequests={INITIAL_IIR_REQUESTS}
-              initialAuditTrail={INITIAL_IIR_AUDIT_TRAIL}
-              auditName={`${selectedClient !== 'All Clients' ? selectedClient : 'Apex Group'} FY26 Distributor Channel Audit`}
-              distributorName={selectedDistributor !== 'All Distributors' ? selectedDistributor : 'Midwest Trading Co.'}
-              selectedClientProp={selectedClient}
-              selectedDistributorProp={currentUser?.role?.includes('Distributor') ? (currentUser.organization || selectedDistributor) : selectedDistributor}
-              onDistributorChangeGlobal={setSelectedDistributor}
-              auditPeriod="FY 2025 - Q1 to Q4 (Apr 1, 2025 – Mar 31, 2026)"
-              dueDate="Aug 25, 2026"
+          ) : activeTab === 'engagement_workspace' || activeTab === 'iir' ? (
+            <EngagementWorkspaceView 
+              selectedClient={selectedClient}
+              selectedDistributor={currentUser?.role?.includes('Distributor') ? (currentUser.organization || selectedDistributor) : selectedDistributor}
               currentUser={currentUser}
-              isFullScreen={isIIRFullScreen}
-              onToggleFullScreen={() => setIsIIRFullScreen(prev => !prev)}
+              initialSubTab={activeTab === 'iir' ? 'iir' : 'questionnaire'}
+              isIIRFullScreen={isIIRFullScreen}
+              onToggleIIRFullScreen={() => setIsIIRFullScreen(prev => !prev)}
+              onDistributorChangeGlobal={setSelectedDistributor}
             />
           ) : activeTab === 'evidence' ? (
             <EvidenceManagementView 

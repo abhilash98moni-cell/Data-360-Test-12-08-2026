@@ -90,7 +90,7 @@ const getIIRPushedStorageKey = (client: string) =>
 const loadIIRRequestsFromStorage = (client: string, dist: string, fallback: IIRRequestItem[]): IIRRequestItem[] => {
   if (typeof window === 'undefined') return fallback;
   const key = getIIRStorageKey(client, dist);
-  const saved = localStorage.getItem(key) || localStorage.getItem('data360_iir_reqs_latest');
+  const saved = localStorage.getItem(key);
   if (saved) {
     try {
       const parsed = JSON.parse(saved);
@@ -110,26 +110,6 @@ const loadIIRRequestsFromStorage = (client: string, dist: string, fallback: IIRR
       console.error('Failed to parse saved requests:', err);
     }
   }
-
-  // Fallback search across localStorage for any key starting with data360_iir_reqs_ with user responses
-  try {
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k && k.startsWith('data360_iir_reqs_')) {
-        const val = localStorage.getItem(k);
-        if (val) {
-          const parsed = JSON.parse(val);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const hasResponses = parsed.some(it => !!it.textResponse || (it.uploadedFiles && it.uploadedFiles.length > 0) || (it.subQuestionResponses && Object.keys(it.subQuestionResponses).length > 0));
-            if (hasResponses) {
-              return parsed;
-            }
-          }
-        }
-      }
-    }
-  } catch (err) {}
-
   return fallback;
 };
 
@@ -137,7 +117,6 @@ const saveIIRRequestsToStorage = (client: string, dist: string, items: IIRReques
   if (typeof window === 'undefined') return;
   const key = getIIRStorageKey(client, dist);
   localStorage.setItem(key, JSON.stringify(items));
-  localStorage.setItem('data360_iir_reqs_latest', JSON.stringify(items));
   
   // Dispatch custom window event for same-tab reactivity
   window.dispatchEvent(new CustomEvent('data360_iir_sync_event', {
@@ -623,11 +602,37 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     }
   };
 
+  const autoSaveTimerRef = React.useRef<any>(null);
+
   // Wrapper helper to update requests state AND persist/broadcast sync events
   const setRequestsAndSave = (updater: IIRRequestItem[] | ((prev: IIRRequestItem[]) => IIRRequestItem[])) => {
     setRequests(prev => {
       const next = typeof updater === 'function' ? updater(prev) : updater;
       saveIIRRequestsToStorage(selectedClientProp, selectedDistributorName, next);
+
+      // Debounce auto-save to authoritative Supabase backend
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+      autoSaveTimerRef.current = setTimeout(async () => {
+        try {
+          await fetch('/api/iir/save-draft', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              client: selectedClientProp || 'Apex Electronics Corp',
+              distributor: selectedDistributorName || 'Midwest Trading Co.',
+              auditId: 'eng-101',
+              requests: next,
+              submittedBy: currentUser?.name || currentUser?.email || selectedDistributorName
+            })
+          });
+          setLastSyncedTime(new Date().toLocaleTimeString());
+        } catch (e) {
+          console.warn('Auto-save to backend note:', e);
+        }
+      }, 800);
+
       return next;
     });
   };
@@ -1297,29 +1302,71 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   };
 
   // Handler: Auditor Reviewer Status Change
-  const handleReviewerStatusChange = (itemId: string, newReviewerStatus: IIRReviewerStatus, comment?: string) => {
-    setRequestsAndSave(prev => prev.map(item => {
+  const handleReviewerStatusChange = async (itemId: string, newReviewerStatus: IIRReviewerStatus, comment?: string) => {
+    const updated = requests.map(item => {
       if (item.id === itemId) {
         return {
           ...item,
           reviewerStatus: newReviewerStatus,
-          status: newReviewerStatus === 'Accepted' ? 'Accepted' : newReviewerStatus === 'Rejected' ? 'Rejected' : 'Clarification Required',
-          reviewerComment: comment || item.reviewerComment,
+          status: newReviewerStatus === 'Accepted' ? ('Accepted' as IIRResponseStatus) : newReviewerStatus === 'Rejected' ? ('Rejected' as IIRResponseStatus) : ('Clarification Required' as IIRResponseStatus),
+          reviewerComment: comment !== undefined ? comment : item.reviewerComment,
           lastUpdated: new Date().toISOString().substring(0, 19).replace('T', ' ')
         };
       }
       return item;
-    }));
+    });
 
+    setRequestsAndSave(updated);
     addAuditLog('Review Status Updated', `Auditor set Item ${requests.find(r => r.id === itemId)?.refNumber} status to "${newReviewerStatus}"`);
     showToast(`Reviewer status updated to "${newReviewerStatus}"`, 'success');
+
+    // Persist to authoritative Supabase backend
+    try {
+      await fetch('/api/iir/update-item-status', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client: selectedClientProp || 'Apex Electronics Corp',
+          distributor: selectedDistributorName || 'Midwest Trading Co.',
+          auditId: 'eng-101',
+          itemId,
+          reviewerStatus: newReviewerStatus,
+          reviewerNote: comment,
+          reviewerUser: currentUser?.name || 'Auditor'
+        })
+      });
+    } catch (e) {
+      console.warn('Sync review status to DB note:', e);
+    }
   };
 
   // Handler: Save Draft
-  const handleSaveDraft = () => {
+  const handleSaveDraft = async () => {
     saveIIRRequestsToStorage(selectedClientProp, selectedDistributorName, requests);
     addAuditLog('Draft Saved', `Saved draft version with ${completedItemsCount} of ${totalItemsCount} requests completed`);
-    showToast(`Draft saved successfully at ${new Date().toLocaleTimeString()}. Real-time sync updated.`, 'success');
+
+    try {
+      const res = await fetch('/api/iir/save-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          client: selectedClientProp || 'Apex Electronics Corp',
+          distributor: selectedDistributorName || 'Midwest Trading Co.',
+          auditId: 'eng-101',
+          requests,
+          submittedBy: currentUser?.name || currentUser?.email || selectedDistributorName
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setLastSyncedTime(new Date().toLocaleTimeString());
+        showToast(`Draft persisted to Supabase database at ${new Date().toLocaleTimeString()}.`, 'success');
+      } else {
+        showToast(`Draft local save complete (DB note: ${data.error})`, 'info');
+      }
+    } catch (err: any) {
+      showToast(`Draft local save complete (sync note: ${err.message})`, 'info');
+    }
   };
 
   // Handler: Final Submission
