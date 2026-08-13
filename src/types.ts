@@ -32,9 +32,27 @@ export interface AppNotification {
   targetOrganization?: string;
 }
 
+export interface ConversationSummary {
+  conversationId: string;
+  auditId: string;
+  distributorId: string;
+  distributorName: string;
+  distributorCode?: string;
+  distributorRegion?: string;
+  lastMessage?: {
+    content: string;
+    timestamp: string;
+    senderName: string;
+    senderRole: string;
+  };
+  unreadCount: number;
+}
+
 export interface ThreadedMessage {
   id: string;
+  conversationId: string;
   auditId: string;
+  distributorId: string;
   requestRef?: string;
   senderName: string;
   senderEmail: string;
@@ -46,9 +64,12 @@ export interface ThreadedMessage {
     fileName: string;
     fileSizeMB: number;
     url?: string;
+    googleDriveFileId?: string;
   }[];
   mentions?: string[];
   replyToId?: string;
+  isReadByAuditor?: boolean;
+  isReadByDistributor?: boolean;
 }
 
 export interface EvidenceRecord {

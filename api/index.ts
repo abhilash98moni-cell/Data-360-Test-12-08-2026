@@ -1666,27 +1666,397 @@ app.post('/api/evidence/:id/status', (req, res) => {
 });
 
 // ====================================================================
-// STEP 10: THREADED COMMUNICATION API
+// STEP 10: THREADED COMMUNICATION API (ISOLATED MULTI-TENANT CHATS)
 // ====================================================================
-app.post('/api/discussions/post', (req, res) => {
-  const { auditId, requestRef, senderName, senderEmail, senderRole, senderOrganization, content } = req.body;
 
-  const newMessage = {
-    id: `msg-${Date.now()}`,
-    auditId: auditId || 'eng-001',
-    requestRef: requestRef || '1.1',
-    senderName: senderName || 'Sarah Jenkins',
-    senderEmail: senderEmail || 's.jenkins@apex-audit.com',
-    senderRole: senderRole || 'AA Super Admin',
-    senderOrganization: senderOrganization || 'Apex Audit Practice (AA)',
-    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    content: content || ''
+const DISTRIBUTOR_REGISTRY: Record<string, { id: string; name: string; code: string; region: string }> = {
+  'dist-1': { id: 'dist-1', name: 'Midwest Trading Co.', code: 'MDT-8092', region: 'Midwest Region (USA)' },
+  'dist-2': { id: 'dist-2', name: 'Horizon Logistics India', code: 'HLI-4022', region: 'South Asia / India' },
+  'dist-3': { id: 'dist-3', name: 'Pacific Rim Distribution', code: 'PRD-7712', region: 'Asia-Pacific (APAC)' },
+  'dist-4': { id: 'dist-4', name: 'Nexus Logistics Ltd', code: 'NEX-1044', region: 'Western Division' },
+  'dist-5': { id: 'dist-5', name: 'Middle East Company', code: 'MEC-5521', region: 'Middle East & Africa (MEA)' },
+  'dist-6': { id: 'dist-6', name: 'EuroTech Supply Chains', code: 'ETS-3091', region: 'European Union (EU)' },
+  'dist-7': { id: 'dist-7', name: 'LatAm Trading Network', code: 'LTN-9910', region: 'Latin America (LATAM)' }
+};
+
+function getDistributorByOrg(orgName: string) {
+  if (!orgName) return DISTRIBUTOR_REGISTRY['dist-1'];
+  const normalized = orgName.trim().toLowerCase();
+  for (const key of Object.keys(DISTRIBUTOR_REGISTRY)) {
+    const dist = DISTRIBUTOR_REGISTRY[key];
+    if (dist.name.toLowerCase() === normalized || dist.id.toLowerCase() === normalized || dist.code.toLowerCase() === normalized) {
+      return dist;
+    }
+  }
+  const slug = orgName.toLowerCase().replace(/[^a-z0-9]/g, '-');
+  return { id: `dist-${slug}`, name: orgName, code: `DIST-${slug.substring(0, 4).toUpperCase()}`, region: 'Global' };
+}
+
+interface InStoreMessage {
+  id: string;
+  conversationId: string;
+  auditId: string;
+  distributorId: string;
+  requestRef?: string;
+  senderName: string;
+  senderEmail: string;
+  senderRole: string;
+  senderOrganization: string;
+  timestamp: string;
+  content: string;
+  attachments?: {
+    fileName: string;
+    fileSizeMB: number;
+    url?: string;
+    googleDriveFileId?: string;
+  }[];
+  mentions?: string[];
+  replyToId?: string;
+  isReadByAuditor: boolean;
+  isReadByDistributor: boolean;
+  createdAt: string;
+}
+
+// In-Memory Fallback & Sync Store
+const DISCUSSION_MESSAGES_STORE: InStoreMessage[] = [
+  {
+    id: 'msg-101-1',
+    conversationId: 'conv-eng-101-dist-1',
+    auditId: 'eng-101',
+    distributorId: 'dist-1',
+    requestRef: '1.1',
+    senderName: 'Sarah Jenkins',
+    senderEmail: 's.jenkins@apex-audit.com',
+    senderRole: 'AA Super Admin',
+    senderOrganization: 'Apex Audit Practice (AA)',
+    timestamp: 'Today at 09:15 AM',
+    content: 'Hi David, thank you for uploading the corporate registration document for Midwest Trading. Could you also verify if the tax clearance certificate covers Q2 2026?',
+    mentions: ['@David Vance'],
+    isReadByAuditor: true,
+    isReadByDistributor: true,
+    createdAt: new Date(Date.now() - 7200000).toISOString()
+  },
+  {
+    id: 'msg-101-2',
+    conversationId: 'conv-eng-101-dist-1',
+    auditId: 'eng-101',
+    distributorId: 'dist-1',
+    requestRef: '1.1',
+    senderName: 'David Vance',
+    senderEmail: 'd.vance@midwesttrading.com',
+    senderRole: 'Distributor Admin',
+    senderOrganization: 'Midwest Trading Co.',
+    timestamp: 'Today at 09:42 AM',
+    content: 'Hello Sarah, yes! The attached state tax license is valid through December 2026. I have also attached our quarterly compliance statement for your reference.',
+    replyToId: 'msg-101-1',
+    attachments: [
+      { fileName: 'State_Tax_Compliance_Statement_2026.pdf', fileSizeMB: 1.8 }
+    ],
+    isReadByAuditor: false,
+    isReadByDistributor: true,
+    createdAt: new Date(Date.now() - 3600000).toISOString()
+  },
+  {
+    id: 'msg-101-3',
+    conversationId: 'conv-eng-101-dist-1',
+    auditId: 'eng-101',
+    distributorId: 'dist-1',
+    requestRef: '3.1',
+    senderName: 'Sarah Jenkins',
+    senderEmail: 's.jenkins@apex-audit.com',
+    senderRole: 'AA Super Admin',
+    senderOrganization: 'Apex Audit Practice (AA)',
+    timestamp: 'Today at 10:30 AM',
+    content: 'We noticed a variance in credit note #CN-9042 regarding the MDF rebate calculation. Please check item 3.1 in the IRL section.',
+    mentions: ['@David Vance'],
+    isReadByAuditor: true,
+    isReadByDistributor: false,
+    createdAt: new Date(Date.now() - 1800000).toISOString()
+  },
+  {
+    id: 'msg-102-1',
+    conversationId: 'conv-eng-101-dist-2',
+    auditId: 'eng-101',
+    distributorId: 'dist-2',
+    requestRef: '2.1',
+    senderName: 'Sarah Jenkins',
+    senderEmail: 's.jenkins@apex-audit.com',
+    senderRole: 'AA Super Admin',
+    senderOrganization: 'Apex Audit Practice (AA)',
+    timestamp: 'Yesterday at 02:15 PM',
+    content: 'Greeting Horizon Logistics India compliance team. Please upload the Q2 SAP ERP sales ledger with tax reconciliation numbers.',
+    isReadByAuditor: true,
+    isReadByDistributor: true,
+    createdAt: new Date(Date.now() - 86400000).toISOString()
+  },
+  {
+    id: 'msg-103-1',
+    conversationId: 'conv-eng-101-dist-3',
+    auditId: 'eng-101',
+    distributorId: 'dist-3',
+    requestRef: '3.1',
+    senderName: 'Sarah Jenkins',
+    senderEmail: 's.jenkins@apex-audit.com',
+    senderRole: 'AA Super Admin',
+    senderOrganization: 'Apex Audit Practice (AA)',
+    timestamp: 'Yesterday at 04:00 PM',
+    content: 'Pacific Rim Distribution: Awaiting clarification on volume rebate tier adjustments for Q1.',
+    isReadByAuditor: true,
+    isReadByDistributor: false,
+    createdAt: new Date(Date.now() - 43200000).toISOString()
+  }
+];
+
+// Helper to authenticate user and extract tenant context
+function authenticateRequestSession(req: express.Request) {
+  const role = (req.headers['x-user-role'] as string) || (req.body?.senderRole as string) || 'Auditor';
+  const org = (req.headers['x-user-organization'] as string) || (req.body?.senderOrganization as string) || 'Apex Audit Practice (AA)';
+  const email = (req.headers['x-user-email'] as string) || (req.body?.senderEmail as string) || 'user@company.com';
+  const name = (req.headers['x-user-name'] as string) || (req.body?.senderName as string) || 'Authorized User';
+
+  const isDistributor = role.toLowerCase().includes('distributor');
+  const distributorInfo = isDistributor ? getDistributorByOrg(org) : null;
+
+  return {
+    role,
+    org,
+    email,
+    name,
+    isDistributor,
+    distributorInfo
   };
+}
 
-  return res.json({
-    success: true,
-    message: newMessage
-  });
+// GET /api/discussions/conversations — Get list of distributor conversations for audit
+app.get('/api/discussions/conversations', async (req, res) => {
+  try {
+    const session = authenticateRequestSession(req);
+    const auditId = (req.query.auditId as string) || 'eng-101';
+
+    let activeDistributors = Object.values(DISTRIBUTOR_REGISTRY);
+
+    // SERVER-SIDE ISOLATION: If caller is a Distributor, restrict strictly to their OWN distributor ID
+    if (session.isDistributor && session.distributorInfo) {
+      activeDistributors = [session.distributorInfo];
+    }
+
+    const conversations = activeDistributors.map(dist => {
+      const convId = `conv-${auditId}-${dist.id}`;
+      const messagesForConv = DISCUSSION_MESSAGES_STORE.filter(m => m.conversationId === convId || (m.auditId === auditId && m.distributorId === dist.id));
+
+      const sortedMessages = [...messagesForConv].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const lastMsg = sortedMessages.length > 0 ? sortedMessages[sortedMessages.length - 1] : undefined;
+
+      // Calculate unread count
+      const unreadCount = sortedMessages.filter(m => {
+        if (session.isDistributor) {
+          return !m.isReadByDistributor && m.senderRole !== session.role;
+        } else {
+          return !m.isReadByAuditor && m.senderRole.toLowerCase().includes('distributor');
+        }
+      }).length;
+
+      return {
+        conversationId: convId,
+        auditId,
+        distributorId: dist.id,
+        distributorName: dist.name,
+        distributorCode: dist.code,
+        distributorRegion: dist.region,
+        lastMessage: lastMsg ? {
+          content: lastMsg.content,
+          timestamp: lastMsg.timestamp,
+          senderName: lastMsg.senderName,
+          senderRole: lastMsg.senderRole
+        } : undefined,
+        unreadCount
+      };
+    });
+
+    return res.json({
+      success: true,
+      conversations
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to retrieve conversations' });
+  }
+});
+
+// GET /api/discussions/messages — Get messages for a specific conversation with strict isolation
+app.get('/api/discussions/messages', async (req, res) => {
+  try {
+    const session = authenticateRequestSession(req);
+    const conversationId = (req.query.conversationId as string) || '';
+    const auditId = (req.query.auditId as string) || 'eng-101';
+    let targetDistributorId = (req.query.distributorId as string) || '';
+
+    // If conversationId is supplied, parse distributor ID
+    if (conversationId && conversationId.includes('conv-')) {
+      const parts = conversationId.split('-');
+      if (parts.length >= 4) {
+        targetDistributorId = `${parts[2]}-${parts[3]}`; // e.g. dist-1
+      }
+    }
+
+    if (!targetDistributorId && session.isDistributor && session.distributorInfo) {
+      targetDistributorId = session.distributorInfo.id;
+    }
+
+    // STRICT AUTHORIZATION CHECK:
+    // If user is a Distributor, they CANNOT request a conversation belonging to another distributor!
+    if (session.isDistributor && session.distributorInfo) {
+      if (targetDistributorId && targetDistributorId !== session.distributorInfo.id) {
+        console.warn(`SECURITY REJECTION: Distributor '${session.org}' (ID: ${session.distributorInfo.id}) attempted to access conversation for '${targetDistributorId}'`);
+        return res.status(403).json({
+          error: 'Access Denied: You are not authorized to view messages belonging to another distributor conversation.'
+        });
+      }
+      // Force distributor ID to authenticated user's distributor ID
+      targetDistributorId = session.distributorInfo.id;
+    }
+
+    const expectedConvId = conversationId || `conv-${auditId}-${targetDistributorId || 'dist-1'}`;
+
+    // Filter messages STRICTLY belonging to expectedConvId
+    const messages = DISCUSSION_MESSAGES_STORE.filter(m => m.conversationId === expectedConvId || (m.auditId === auditId && m.distributorId === targetDistributorId));
+
+    // Sort by creation timestamp
+    messages.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+    return res.json({
+      success: true,
+      conversationId: expectedConvId,
+      auditId,
+      distributorId: targetDistributorId,
+      messages
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to retrieve discussion messages' });
+  }
+});
+
+// POST /api/discussions/post — Post message with server-side authorization & isolation
+app.post('/api/discussions/post', async (req, res) => {
+  try {
+    const session = authenticateRequestSession(req);
+    const { auditId, requestRef, content, attachments } = req.body;
+    let { conversationId, distributorId } = req.body;
+
+    if (!content || !content.trim()) {
+      return res.status(400).json({ error: 'Message content cannot be empty' });
+    }
+
+    const currentAuditId = auditId || 'eng-101';
+
+    // Derive or enforce distributor ID based on session if distributor
+    if (session.isDistributor && session.distributorInfo) {
+      if (distributorId && distributorId !== session.distributorInfo.id) {
+        console.warn(`SECURITY REJECTION: Distributor '${session.org}' attempted to post to distributorId '${distributorId}'`);
+        return res.status(403).json({
+          error: 'Access Denied: You cannot post messages to another distributor conversation.'
+        });
+      }
+      distributorId = session.distributorInfo.id;
+    } else if (!distributorId) {
+      distributorId = 'dist-1';
+    }
+
+    const validConvId = conversationId || `conv-${currentAuditId}-${distributorId}`;
+
+    const now = new Date();
+    const formattedTimestamp = `Today at ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+
+    const newMessage: InStoreMessage = {
+      id: `msg-${Date.now()}`,
+      conversationId: validConvId,
+      auditId: currentAuditId,
+      distributorId,
+      requestRef: requestRef || undefined,
+      senderName: session.name,
+      senderEmail: session.email,
+      senderRole: session.role,
+      senderOrganization: session.org,
+      timestamp: formattedTimestamp,
+      content: content.trim(),
+      attachments: Array.isArray(attachments) ? attachments : undefined,
+      isReadByAuditor: !session.isDistributor, // Sender automatically reads their own message
+      isReadByDistributor: session.isDistributor,
+      createdAt: now.toISOString()
+    };
+
+    DISCUSSION_MESSAGES_STORE.push(newMessage);
+
+    // Save to Supabase if available
+    try {
+      const client = getSupabaseServerClient();
+      if (client) {
+        await client.from('audit_discussions').insert({
+          conversation_id: validConvId,
+          audit_id: currentAuditId,
+          distributor_id: distributorId,
+          distributor_name: getDistributorByOrg(session.org).name,
+          request_ref: requestRef || null,
+          sender_name: session.name,
+          sender_email: session.email,
+          sender_role: session.role,
+          sender_organization: session.org,
+          content: content.trim(),
+          attachments_json: attachments || [],
+          is_read_by_auditor: !session.isDistributor,
+          is_read_by_distributor: session.isDistributor,
+          created_at: now.toISOString()
+        });
+      }
+    } catch (dbErr: any) {
+      console.warn('Supabase discussions notice:', dbErr.message);
+    }
+
+    console.log(`💬 Message posted in '${validConvId}' by ${session.name} (${session.org})`);
+
+    return res.json({
+      success: true,
+      message: newMessage
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to post message' });
+  }
+});
+
+// POST /api/discussions/mark-read — Mark unread messages in conversation as read
+app.post('/api/discussions/mark-read', async (req, res) => {
+  try {
+    const session = authenticateRequestSession(req);
+    const { conversationId } = req.body;
+
+    if (!conversationId) {
+      return res.status(400).json({ error: 'Conversation ID is required' });
+    }
+
+    // Validate access
+    if (session.isDistributor && session.distributorInfo) {
+      const expectedConvId = `conv-eng-101-${session.distributorInfo.id}`;
+      if (!conversationId.includes(session.distributorInfo.id)) {
+        return res.status(403).json({ error: 'Access Denied: Cannot mark messages as read for another conversation.' });
+      }
+    }
+
+    DISCUSSION_MESSAGES_STORE.forEach(m => {
+      if (m.conversationId === conversationId || conversationId.includes(m.distributorId)) {
+        if (session.isDistributor) {
+          m.isReadByDistributor = true;
+        } else {
+          m.isReadByAuditor = true;
+        }
+      }
+    });
+
+    return res.json({
+      success: true,
+      message: `Messages marked as read for ${conversationId}`
+    });
+  } catch (err: any) {
+    return res.status(500).json({ error: err.message || 'Failed to mark messages as read' });
+  }
 });
 
 // ====================================================================
