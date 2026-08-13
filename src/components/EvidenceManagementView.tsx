@@ -676,67 +676,34 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
 
               {/* TAB 1: PREVIEW & METADATA */}
               {activeModalTab === 'preview' && (
-                <div className="space-y-6">
+                <div className="space-y-4">
                   
-                  {/* File Metadata Overview */}
-                  <div className="bg-slate-950 p-4 border border-slate-800 rounded-xl space-y-3 text-xs">
-                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-                      <div className="flex items-center gap-2 font-bold text-slate-200">
-                        <FileText className="h-4 w-4 text-indigo-400" />
-                        <span className="text-sm text-white">{selectedRecord.fileName}</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="px-2 py-0.5 bg-slate-900 border border-slate-800 text-indigo-300 font-mono font-bold rounded text-[11px]">
-                          Version v{selectedRecord.version}
-                        </span>
-                        <a
-                          href={`/api/storage/download/${selectedRecord.googleDriveFileId || selectedRecord.id}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/40 border border-indigo-500/40 text-indigo-300 font-bold text-[11px] rounded-lg flex items-center gap-1 transition-colors"
-                        >
-                          <Download className="h-3 w-3" />
-                          <span>Download Original</span>
-                        </a>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-slate-400 pt-1">
-                      <div>
-                        <span className="text-[10px] uppercase text-slate-500 block font-bold">Uploaded By</span>
-                        <p className="font-semibold text-slate-200 mt-0.5">{selectedRecord.uploadedBy}</p>
-                      </div>
-                      <div>
-                        <span className="text-[10px] uppercase text-slate-500 block font-bold">Upload Date</span>
-                        <p className="font-semibold text-slate-200 mt-0.5">{selectedRecord.uploadedDate}</p>
-                      </div>
-                      <div>
-                        <span className="text-[10px] uppercase text-slate-500 block font-bold">File Format & Size</span>
-                        <p className="font-semibold text-slate-200 mt-0.5">{selectedRecord.fileType.split('/')[1]?.toUpperCase() || 'FILE'} ({selectedRecord.fileSizeMB} MB)</p>
-                      </div>
-                      <div>
-                        <span className="text-[10px] uppercase text-slate-500 block font-bold">SHA-256 Hash</span>
-                        <p className="font-mono text-[10px] text-slate-300 truncate mt-0.5">{selectedRecord.hash || 'sha256_e8f9021a7c'}</p>
-                      </div>
-                    </div>
-                  </div>
-
                   {/* Document Content In-App Preview Container */}
                   <div className="space-y-2">
-                    <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">
-                      Embedded Document Preview
-                    </label>
-                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 min-h-[220px] flex flex-col items-center justify-center text-center">
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
+                      <span className="flex items-center gap-1.5 uppercase tracking-wider text-slate-400 font-bold">
+                        <Eye className="h-4 w-4 text-indigo-400" />
+                        Embedded Document Preview
+                      </span>
+                      <a
+                        href={`/api/storage/preview/${selectedRecord.googleDriveFileId || selectedRecord.id}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[11px] text-indigo-400 hover:underline flex items-center gap-1 font-mono"
+                      >
+                        <span>Open in New Tab</span>
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </div>
+
+                    <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 min-h-[380px] flex flex-col items-center justify-center text-center">
                       {selectedRecord.fileType.includes('pdf') ? (
-                        <div className="w-full space-y-3">
+                        <div className="w-full h-[400px]">
                           <iframe 
                             src={`/api/storage/preview/${selectedRecord.googleDriveFileId || selectedRecord.id}`} 
-                            className="w-full h-64 border border-slate-800 rounded-lg bg-slate-900"
+                            className="w-full h-full border border-slate-800 rounded-lg bg-slate-900"
                             title="PDF Preview"
                           />
-                          <p className="text-[11px] text-slate-400 italic">
-                            Displaying PDF Document stream proxy from Google Drive storage vault.
-                          </p>
                         </div>
                       ) : selectedRecord.fileType.includes('sheet') || selectedRecord.fileType.includes('excel') || selectedRecord.fileName.endsWith('.xlsx') ? (
                         <div className="w-full space-y-3 text-left">
@@ -779,21 +746,51 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                                   <td className="p-2">2026-02-01</td>
                                   <td className="p-2 font-semibold">Commercial Access Point v3</td>
                                   <td className="p-2">80</td>
-                                  <td className="p-2 text-right font-mono">$32,000.00</td>
+                                  <td className="p-2 text-right font-mono">$12,800.00</td>
                                 </tr>
                               </tbody>
                             </table>
                           </div>
                         </div>
                       ) : (
-                        <div className="space-y-2 py-6">
-                          <FileText className="h-10 w-10 text-indigo-400 mx-auto" />
-                          <p className="font-bold text-slate-200">{selectedRecord.fileName}</p>
-                          <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                            File is ready for auditor review. Click download above to view complete file locally or stream in dedicated viewer.
-                          </p>
+                        <div className="w-full h-[400px]">
+                          <iframe 
+                            src={`/api/storage/preview/${selectedRecord.googleDriveFileId || selectedRecord.id}`} 
+                            className="w-full h-full border border-slate-800 rounded-lg bg-slate-900"
+                            title="Document Preview"
+                          />
                         </div>
                       )}
+                    </div>
+                  </div>
+
+                  {/* Actions & Compact Metadata Strip Below */}
+                  <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl space-y-2.5">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="flex items-center gap-2">
+                        <a
+                          href={`/api/storage/download/${selectedRecord.googleDriveFileId || selectedRecord.id}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-md"
+                        >
+                          <Download className="h-3.5 w-3.5" />
+                          <span>Download Original File ({selectedRecord.fileSizeMB} MB)</span>
+                        </a>
+                      </div>
+                      <span className="px-2 py-0.5 bg-slate-900 border border-slate-800 text-indigo-300 font-mono font-bold rounded text-[11px]">
+                        Version v{selectedRecord.version}
+                      </span>
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-800/80 flex flex-wrap items-center gap-y-1.5 gap-x-3 text-[11px] text-slate-400 font-mono">
+                      <span>{selectedRecord.fileSizeMB} MB</span>
+                      <span className="text-slate-700">&bull;</span>
+                      <span className="uppercase">{selectedRecord.fileType.split('/')[1] || selectedRecord.fileType}</span>
+                      <span className="text-slate-700">&bull;</span>
+                      <span>Uploaded by <strong className="text-slate-200 font-sans font-semibold">{selectedRecord.uploadedBy}</strong></span>
+                      <span className="text-slate-700">&bull;</span>
+                      <span>{selectedRecord.uploadedDate}</span>
                     </div>
                   </div>
 

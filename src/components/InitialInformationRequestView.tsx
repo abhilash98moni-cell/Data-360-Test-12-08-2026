@@ -2767,97 +2767,113 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
         </div>
       )}
 
-      {/* MODAL 1: File Preview & Hash Metadata Modal */}
+      {/* MODAL 1: File Preview & Compact Metadata Modal */}
       {selectedFileForPreview && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-2xl w-full space-y-4 shadow-2xl relative max-h-[90vh] overflow-y-auto">
-            <button 
-              onClick={() => setSelectedFileForPreview(null)}
-              className="absolute top-4 right-4 p-1.5 rounded-xl text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 transition-colors cursor-pointer"
-            >
-              <X className="h-4 w-4" />
-            </button>
-
-            <div className="flex items-center gap-3 border-b border-slate-800 pb-4">
-              <div className="p-2.5 rounded-xl bg-indigo-600/20 text-indigo-400 border border-indigo-500/30">
-                <File className="h-6 w-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-white">{selectedFileForPreview.fileName}</h3>
-                <p className="text-xs text-slate-400">Evidence ID: {selectedFileForPreview.evidenceId}</p>
-              </div>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1 font-mono">
-                <span className="text-[10px] text-slate-500 uppercase block">SHA-256 Cryptographic Hash Fingerprint</span>
-                <span className="text-[11px] text-emerald-400 break-all">{selectedFileForPreview.hash}</span>
-              </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-slate-300">
-                <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
-                  <span className="text-[10px] text-slate-500 block">File Size</span>
-                  <span className="font-bold text-white">{selectedFileForPreview.fileSizeMB} MB</span>
+        <div className="fixed inset-0 bg-slate-950/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-5 animate-fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-5xl w-full h-[88vh] max-h-[900px] flex flex-col shadow-2xl overflow-hidden relative">
+            
+            {/* Top Compact Header */}
+            <div className="flex items-center justify-between border-b border-slate-800/80 px-5 py-3.5 bg-slate-950 shrink-0">
+              <div className="flex items-center gap-3 min-w-0 pr-4">
+                <div className="p-2 rounded-xl bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">
+                  <FileText className="h-5 w-5" />
                 </div>
-                <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
-                  <span className="text-[10px] text-slate-500 block">Document Format</span>
-                  <span className="font-bold text-white">{selectedFileForPreview.fileType}</span>
-                </div>
-                <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
-                  <span className="text-[10px] text-slate-500 block">Uploaded By</span>
-                  <span className="font-bold text-white">{selectedFileForPreview.uploadedBy}</span>
-                </div>
-                <div className="p-2.5 bg-slate-950 rounded-lg border border-slate-800">
-                  <span className="text-[10px] text-slate-500 block">Upload Timestamp</span>
-                  <span className="font-bold text-white">{selectedFileForPreview.uploadDate}</span>
-                </div>
-              </div>
-
-              {/* Document Live Preview Box */}
-              <div className="border border-slate-800 rounded-xl overflow-hidden bg-slate-950 p-3 space-y-2">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
-                  <span className="flex items-center gap-1.5">
-                    <Eye className="h-4 w-4 text-indigo-400" />
-                    Interactive File Content Preview
-                  </span>
-                  <a
-                    href={selectedFileForPreview.webViewLink || `/api/storage/preview/${encodeURIComponent(selectedFileForPreview.id || selectedFileForPreview.evidenceId)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[11px] text-indigo-400 hover:underline flex items-center gap-1 font-mono"
+                <div className="min-w-0">
+                  <h3 
+                    className="text-sm sm:text-base font-extrabold text-white truncate max-w-[280px] sm:max-w-md md:max-w-xl" 
+                    title={selectedFileForPreview.fileName}
                   >
-                    <span>Open in New Tab</span>
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                </div>
-                <div className="rounded-lg overflow-hidden border border-slate-800/80 bg-slate-900">
-                  <iframe
-                    src={selectedFileForPreview.webViewLink || `/api/storage/preview/${encodeURIComponent(selectedFileForPreview.id || selectedFileForPreview.evidenceId)}`}
-                    className="w-full h-56 rounded border-0 bg-slate-950 text-slate-200"
-                    title={`Preview of ${selectedFileForPreview.fileName}`}
-                  />
+                    {selectedFileForPreview.fileName}
+                  </h3>
+                  <p className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                    <span>Evidence ID:</span>
+                    <span className="font-semibold text-indigo-300">{selectedFileForPreview.evidenceId}</span>
+                  </p>
                 </div>
               </div>
-            </div>
 
-            <div className="pt-2 flex items-center justify-between gap-2 border-t border-slate-800">
-              <button
-                type="button"
-                onClick={() => handleDownloadUploadedFile(selectedFileForPreview)}
-                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
-              >
-                <Download className="h-3.5 w-3.5" />
-                <span>Download File ({selectedFileForPreview.fileSizeMB} MB)</span>
-              </button>
-
-              <button
+              <button 
                 type="button"
                 onClick={() => setSelectedFileForPreview(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold cursor-pointer"
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white bg-slate-800/80 hover:bg-slate-700 border border-slate-700/60 transition-colors cursor-pointer shrink-0"
+                title="Close Preview"
               >
-                Close Preview
+                <X className="h-4 w-4" />
               </button>
             </div>
+
+            {/* Document Preview Box — Maximum Vertical Dominance */}
+            <div className="flex-1 w-full bg-slate-950 p-3 sm:p-4 flex flex-col min-h-0 relative">
+              <div className="flex items-center justify-between text-xs text-slate-400 px-1 pb-2 shrink-0">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                  <Eye className="h-3.5 w-3.5 text-indigo-400" />
+                  <span>Document Preview</span>
+                </span>
+                <a
+                  href={selectedFileForPreview.webViewLink || `/api/storage/preview/${encodeURIComponent(selectedFileForPreview.id || selectedFileForPreview.evidenceId)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1 font-mono font-medium transition-colors"
+                >
+                  <span>Open in New Tab</span>
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+
+              <div className="flex-1 w-full rounded-xl overflow-hidden border border-slate-800/90 bg-slate-900 shadow-inner min-h-[300px]">
+                <iframe
+                  src={selectedFileForPreview.webViewLink || `/api/storage/preview/${encodeURIComponent(selectedFileForPreview.id || selectedFileForPreview.evidenceId)}`}
+                  className="w-full h-full rounded border-0 bg-slate-950 text-slate-200"
+                  title={`Preview of ${selectedFileForPreview.fileName}`}
+                />
+              </div>
+            </div>
+
+            {/* Bottom Footer: Download Button + Compact Metadata Below */}
+            <div className="p-4 sm:p-5 bg-slate-950 border-t border-slate-800/80 space-y-3 shrink-0">
+              
+              {/* Primary Download & Close Buttons */}
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadUploadedFile(selectedFileForPreview)}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-950/40 flex items-center gap-2 cursor-pointer"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>Download File ({selectedFileForPreview.fileSizeMB} MB)</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedFileForPreview(null)}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold cursor-pointer border border-slate-700/60 transition-colors"
+                >
+                  Close Preview
+                </button>
+              </div>
+
+              {/* Compact Horizontal Metadata Strip Below Download */}
+              <div className="pt-2 border-t border-slate-800/60 flex flex-wrap items-center gap-y-1.5 gap-x-3 text-[11px] text-slate-400 font-mono">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-300 font-bold">{selectedFileForPreview.fileSizeMB} MB</span>
+                </div>
+                <span className="text-slate-700">&bull;</span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-slate-300 font-bold uppercase">{selectedFileForPreview.fileType}</span>
+                </div>
+                <span className="text-slate-700">&bull;</span>
+                <div className="flex items-center gap-1.5">
+                  <span>Uploaded by <strong className="text-slate-200 font-sans font-semibold">{selectedFileForPreview.uploadedBy}</strong></span>
+                </div>
+                <span className="text-slate-700">&bull;</span>
+                <div className="flex items-center gap-1.5">
+                  <Clock className="h-3 w-3 text-slate-500" />
+                  <span>{selectedFileForPreview.uploadDate}</span>
+                </div>
+              </div>
+
+            </div>
+
           </div>
         </div>
       )}
