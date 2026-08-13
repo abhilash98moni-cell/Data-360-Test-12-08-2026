@@ -1,6 +1,8 @@
 import { google, drive_v3 } from 'googleapis';
 import { Readable } from 'stream';
 import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
 import { getSupabaseServerClient } from '../lib/supabaseServer.js';
 
 dotenv.config();
@@ -94,7 +96,108 @@ export class GoogleDriveStorageService implements StorageService {
   private rootFolderName: string = 'Data360_Test';
   private folderCache: Map<string, string> = new Map(); // path -> driveFolderId
   private inMemoryMetadataStore: Map<string, FileMetadata> = new Map(); // fileId -> metadata
+  private binaryBufferStore: Map<string, { buffer: Buffer; fileName: string; mimeType: string }> = new Map();
+  private uploadsDir: string = path.join(process.cwd(), 'uploads');
   public lastDriveError: string | null = null;
+
+  private saveBinaryBuffer(fileId: string, fileName: string, mimeType: string, buffer: Buffer, additionalKeys: string[] = []) {
+    const entry = { buffer, fileName, mimeType };
+    if (fileId) this.binaryBufferStore.set(fileId, entry);
+    if (fileName) this.binaryBufferStore.set(fileName, entry);
+    for (const key of additionalKeys) {
+      if (key) this.binaryBufferStore.set(key, entry);
+    }
+
+    try {
+      if (!fs.existsSync(this.uploadsDir)) {
+        fs.mkdirSync(this.uploadsDir, { recursive: true });
+      }
+      if (fileId) {
+        const safePath = path.join(this.uploadsDir, fileId.replace(/[/\\?%*:|"<>]/g, '_'));
+        fs.writeFileSync(safePath, buffer);
+        fs.writeFileSync(`${safePath}.meta.json`, JSON.stringify({ fileName, mimeType, fileId }));
+      }
+    } catch (err: any) {
+      console.warn('Disk storage save notice:', err.message);
+    }
+  }
+
+  private getBinaryBuffer(fileId: string): { buffer: Buffer; fileName: string; mimeType: string } | null {
+    if (this.binaryBufferStore.has(fileId)) {
+      return this.binaryBufferStore.get(fileId)!;
+    }
+
+    try {
+      const safePath = path.join(this.uploadsDir, fileId.replace(/[/\\?%*:|"<>]/g, '_'));
+      if (fs.existsSync(safePath)) {
+        const buffer = fs.readFileSync(safePath);
+        let fileName = `Document_${fileId}.pdf`;
+        let mimeType = 'application/pdf';
+
+        const metaPath = `${safePath}.meta.json`;
+        if (fs.existsSync(metaPath)) {
+          try {
+            const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+            if (meta.fileName) fileName = meta.fileName;
+            if (meta.mimeType) mimeType = meta.mimeType;
+          } catch (e) {
+            // ignore
+          }
+        }
+
+        const entry = { buffer, fileName, mimeType };
+        this.binaryBufferStore.set(fileId, entry);
+        return entry;
+      }
+    } catch (err: any) {
+      console.warn('Disk storage read notice:', err.message);
+    }
+
+    return null;
+  }
+
+  private generateValidPdfBuffer(title: string, details: string): Buffer {
+    const pdfContent = `%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kinds [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+5 0 obj
+<< /Length 250 >>
+stream
+BT
+/F1 14 Tf
+50 720 Td
+(${title.replace(/[()]/g, '')}) Tj
+0 -20 Td
+/F1 10 Tf
+(${details.replace(/[()]/g, '')}) Tj
+ET
+endstream
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000244 00000 n 
+0000000318 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+600
+%%EOF`;
+    return Buffer.from(pdfContent, 'binary');
+  }
 
   constructor() {
     this.initDriveClient();
@@ -418,6 +521,11 @@ export class GoogleDriveStorageService implements StorageService {
 
     // Store in memory
     this.inMemoryMetadataStore.set(driveFileId, fileMeta);
+    this.inMemoryMetadataStore.set(fileMeta.id, fileMeta);
+    if (fileMeta.evidenceId) this.inMemoryMetadataStore.set(fileMeta.evidenceId, fileMeta);
+
+    // Save actual binary buffer locally and in memory
+    this.saveBinaryBuffer(driveFileId, fileName, mimeType || 'application/octet-stream', fileBuffer, [fileMeta.id, fileMeta.evidenceId, fileName]);
 
     // Also insert into Supabase `evidence_files` and `system_audit_logs`
     try {
@@ -454,29 +562,72 @@ export class GoogleDriveStorageService implements StorageService {
 
   public async downloadFile(googleDriveFileId: string): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
     const cachedMeta = this.inMemoryMetadataStore.get(googleDriveFileId);
-    const fileName = cachedMeta ? cachedMeta.fileName : `Document_${googleDriveFileId}.pdf`;
-    const mimeType = cachedMeta ? cachedMeta.fileType : 'application/pdf';
+    const targetDriveFileId = cachedMeta?.googleDriveFileId || googleDriveFileId;
+    let fileName = cachedMeta ? cachedMeta.fileName : (googleDriveFileId.includes('.') ? googleDriveFileId : `Document_${googleDriveFileId}.pdf`);
+    let mimeType = cachedMeta ? cachedMeta.fileType : 'application/pdf';
 
-    if (this.drive && !googleDriveFileId.startsWith('gdrive-mock') && !googleDriveFileId.startsWith('gdrive-')) {
+    // 1. Authoritative Primary Storage: Google Drive API retrieval
+    if (this.drive && !targetDriveFileId.startsWith('gdrive-mock') && !targetDriveFileId.startsWith('gdrive-') && !targetDriveFileId.startsWith('file-') && !targetDriveFileId.startsWith('doc-') && !targetDriveFileId.startsWith('ev-') && !targetDriveFileId.startsWith('EVD-')) {
       try {
         const res = await this.drive.files.get(
-          { fileId: googleDriveFileId, alt: 'media' },
+          { fileId: targetDriveFileId, alt: 'media' },
           { responseType: 'arraybuffer' }
         );
-        const buffer = Buffer.from(res.data as ArrayBuffer);
-        return { buffer, fileName, mimeType };
+        if (res.data) {
+          const buffer = Buffer.from(res.data as ArrayBuffer);
+          if (buffer.length > 0) {
+            if (!cachedMeta) {
+              try {
+                const metaRes = await this.drive.files.get({
+                  fileId: targetDriveFileId,
+                  fields: 'name, mimeType'
+                });
+                if (metaRes.data.name) fileName = metaRes.data.name;
+                if (metaRes.data.mimeType) mimeType = metaRes.data.mimeType;
+              } catch (metaErr) {
+                // ignore
+              }
+            }
+            // Save to temporary cache
+            this.saveBinaryBuffer(googleDriveFileId, fileName, mimeType, buffer, [targetDriveFileId]);
+            return { buffer, fileName, mimeType };
+          }
+        }
       } catch (err: any) {
-        console.error(`Error downloading file ${googleDriveFileId} from Google Drive:`, err.message);
+        console.error(`Error downloading file '${targetDriveFileId}' from Google Drive API:`, err.message);
       }
     }
 
-    // Fallback sample buffer for preview/download testing
-    const sampleText = `DATA360 GOOGLE DRIVE TRIAL STORAGE DOCUMENT\n\nFile Name: ${fileName}\nDrive File ID: ${googleDriveFileId}\nUploaded At: ${new Date().toISOString()}\nStatus: Verified in Google Drive Data360_Test Storage Layer`;
-    return {
-      buffer: Buffer.from(sampleText),
-      fileName,
-      mimeType: 'text/plain'
-    };
+    // 2. Check temporary local binary cache (speedup for same container execution)
+    const stored = this.getBinaryBuffer(googleDriveFileId) || this.getBinaryBuffer(targetDriveFileId);
+    if (stored) {
+      return stored;
+    }
+
+    // 3. Fallback for pre-seeded demo/mock files
+    const isSeedFile = googleDriveFileId.startsWith('gdrive-mock') || 
+                       googleDriveFileId.startsWith('file-') || 
+                       googleDriveFileId.startsWith('doc-') ||
+                       googleDriveFileId.startsWith('seed-') ||
+                       googleDriveFileId.startsWith('ref-') ||
+                       googleDriveFileId === 'ev-101' ||
+                       googleDriveFileId === 'ev-102';
+
+    if (isSeedFile) {
+      const pdfBuffer = this.generateValidPdfBuffer(
+        `DATA360 DEMO DOCUMENT: ${fileName}`,
+        `File Name: ${fileName} | ID: ${googleDriveFileId} | Pre-seeded Reference Stream`
+      );
+
+      return {
+        buffer: pdfBuffer,
+        fileName,
+        mimeType: mimeType.includes('pdf') || mimeType === 'application/octet-stream' ? 'application/pdf' : mimeType
+      };
+    }
+
+    // 4. For user-uploaded documents that cannot be retrieved, throw a clear error instead of generating dummy text
+    throw new Error(`Requested document binary for '${googleDriveFileId}' was not found in Google Drive storage.`);
   }
 
   public async getFileMetadata(googleDriveFileId: string): Promise<FileMetadata | null> {

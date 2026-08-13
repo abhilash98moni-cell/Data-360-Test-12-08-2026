@@ -958,31 +958,33 @@ app.post('/api/storage/upload', upload.single('file'), async (req, res) => {
   }
 });
 
-// Download file from Google Drive
+// Download file from Google Drive / Local Storage
 app.get('/api/storage/download/:fileId', async (req, res) => {
   try {
     const { fileId } = req.params;
     const downloaded = await storageService.downloadFile(fileId);
 
+    const safeFileName = downloaded.fileName.replace(/"/g, '\\"');
     res.setHeader('Content-Type', downloaded.mimeType || 'application/octet-stream');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(downloaded.fileName)}"`);
+    res.setHeader('Content-Disposition', `attachment; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(downloaded.fileName)}`);
     res.send(downloaded.buffer);
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to download file from Google Drive' });
+    res.status(500).json({ error: 'Failed to download file' });
   }
 });
 
-// Preview file from Google Drive
+// Preview file from Google Drive / Local Storage
 app.get('/api/storage/preview/:fileId', async (req, res) => {
   try {
     const { fileId } = req.params;
     const downloaded = await storageService.downloadFile(fileId);
 
-    res.setHeader('Content-Type', downloaded.mimeType || 'text/plain');
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(downloaded.fileName)}"`);
+    const safeFileName = downloaded.fileName.replace(/"/g, '\\"');
+    res.setHeader('Content-Type', downloaded.mimeType || 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${safeFileName}"; filename*=UTF-8''${encodeURIComponent(downloaded.fileName)}`);
     res.send(downloaded.buffer);
   } catch (err: any) {
-    res.status(500).json({ error: 'Failed to preview file from Google Drive' });
+    res.status(500).json({ error: 'Failed to preview file' });
   }
 });
 

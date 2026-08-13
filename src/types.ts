@@ -340,7 +340,7 @@ export interface IIRRequestItem {
 
 export interface IIRAuditTrail {
   id: string;
-  action: 'Login' | 'Draft Saved' | 'File Uploaded' | 'File Deleted' | 'File Replaced' | 'Response Edited' | 'Submitted' | 'Edit Requested' | 'Edit Approved' | 'Review Status Updated';
+  action: 'Login' | 'Draft Saved' | 'File Uploaded' | 'File Downloaded' | 'File Deleted' | 'File Replaced' | 'Response Edited' | 'Submitted' | 'Edit Requested' | 'Edit Approved' | 'Review Status Updated';
   user: string;
   role: string;
   timestamp: string;

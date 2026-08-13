@@ -61,6 +61,18 @@ export const DistributorVerticalView: React.FC<DistributorVerticalViewProps> = (
   handleSubQuestionFileUpload,
   handleSubQuestionFileDelete
 }) => {
+  const handleDownloadUploadedFile = (file: any) => {
+    if (!file) return;
+    const targetFileId = file.id || file.evidenceId || file.googleDriveFileId;
+    const downloadUrl = `/api/storage/download/${encodeURIComponent(targetFileId)}`;
+    showToast(`Downloading "${file.fileName}"...`, 'success');
+    const link = document.createElement('a');
+    link.href = downloadUrl;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="space-y-8 animate-fade-in">
       {categoryNames.map(cat => {
@@ -472,8 +484,8 @@ export const DistributorVerticalView: React.FC<DistributorVerticalViewProps> = (
                                     <Eye className="h-4 w-4" />
                                   </button>
                                   <button
-                                    onClick={() => showToast(`Downloading ${item.uploadedFiles[0].fileName}...`, 'info')}
-                                    title="Download document"
+                                    onClick={() => handleDownloadUploadedFile(item.uploadedFiles[0])}
+                                    title="Download File"
                                     className="p-1.5 text-slate-600 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                                   >
                                     <Download className="h-4 w-4" />
@@ -661,15 +673,25 @@ export const DistributorVerticalView: React.FC<DistributorVerticalViewProps> = (
                                                         <button
                                                           type="button"
                                                           onClick={() => setSelectedFileForPreview(file)}
-                                                          className="p-1 text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+                                                          title="View File"
+                                                          className="p-1 text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-indigo-300 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                                                         >
                                                           <Eye className="h-3.5 w-3.5" />
+                                                        </button>
+                                                        <button
+                                                          type="button"
+                                                          onClick={() => handleDownloadUploadedFile(file)}
+                                                          title="Download File"
+                                                          className="p-1 text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-300 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                                                        >
+                                                          <Download className="h-3.5 w-3.5" />
                                                         </button>
                                                         {!isLocked && (
                                                           <button
                                                             type="button"
                                                             onClick={() => handleSubQuestionFileDelete && handleSubQuestionFileDelete(item.id, subQ.id, file.id)}
-                                                            className="p-1 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 rounded hover:bg-slate-100 dark:hover:bg-slate-800"
+                                                            title="Remove File"
+                                                            className="p-1 text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400 rounded hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
                                                           >
                                                             <Trash2 className="h-3.5 w-3.5" />
                                                           </button>
