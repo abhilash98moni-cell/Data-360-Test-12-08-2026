@@ -1288,16 +1288,11 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   // Handler: Download Uploaded File
   const handleDownloadUploadedFile = (file: IIRFile) => {
     const targetFileId = file.id || file.evidenceId;
-    const downloadUrl = (file.webViewLink && file.webViewLink.startsWith('http'))
-      ? file.webViewLink
-      : `/api/storage/download/${encodeURIComponent(targetFileId)}`;
+    const downloadUrl = `/api/storage/download/${encodeURIComponent(targetFileId)}`;
 
     const link = document.createElement('a');
     link.href = downloadUrl;
     link.setAttribute('download', file.fileName);
-    if (file.webViewLink && file.webViewLink.startsWith('http')) {
-      link.target = '_blank';
-    }
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2477,32 +2472,31 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                                           <span className="font-medium truncate">{file.fileName}</span>
                                                           <span className="text-[10px] text-slate-500">({file.fileSizeMB} MB)</span>
                                                         </div>
-                                                        <div className="flex items-center gap-1.5 shrink-0">
+                                                        <div className="flex items-center gap-1 shrink-0">
                                                           <button
                                                             type="button"
                                                             onClick={() => setSelectedFileForPreview(file)}
-                                                            title="View File & Metadata"
-                                                            className="px-2 py-0.5 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 rounded text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition-all"
+                                                            title="View File"
+                                                            className="p-1 hover:bg-slate-800 rounded text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
                                                           >
-                                                            <Eye className="h-3 w-3" />
-                                                            <span>View File</span>
+                                                            <Eye className="h-3.5 w-3.5" />
                                                           </button>
                                                           <button
                                                             type="button"
                                                             onClick={() => handleDownloadUploadedFile(file)}
                                                             title="Download File"
-                                                            className="px-2 py-0.5 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/30 rounded text-[10px] font-semibold flex items-center gap-1 cursor-pointer transition-all"
+                                                            className="p-1 hover:bg-slate-800 rounded text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
                                                           >
-                                                            <Download className="h-3 w-3" />
-                                                            <span>Download File</span>
+                                                            <Download className="h-3.5 w-3.5" />
                                                           </button>
                                                           {(!isLocked || viewRole === 'Auditor') && (
                                                             <button
                                                               type="button"
                                                               onClick={() => handleSubQuestionFileDelete(item.id, subQ.id, file.id)}
-                                                              className="p-1 text-slate-400 hover:text-rose-400 cursor-pointer"
+                                                              title="Remove File"
+                                                              className="p-1 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
                                                             >
-                                                              <Trash2 className="h-3 w-3" />
+                                                              <Trash2 className="h-3.5 w-3.5" />
                                                             </button>
                                                           )}
                                                         </div>
@@ -2636,25 +2630,23 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                                 <span className="text-[9px] bg-slate-800 text-slate-300 px-1.5 py-0.2 rounded">v{file.version}</span>
                                               </div>
 
-                                              <div className="flex items-center gap-1.5 shrink-0">
+                                              <div className="flex items-center gap-1 shrink-0">
                                                 <button
                                                   type="button"
                                                   onClick={() => setSelectedFileForPreview(file)}
-                                                  title="View File & Metadata"
-                                                  className="px-2.5 py-1 bg-indigo-600/20 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/30 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
+                                                  title="View File"
+                                                  className="p-1 hover:bg-slate-800 rounded-lg text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
                                                 >
                                                   <Eye className="h-3.5 w-3.5" />
-                                                  <span>View File</span>
                                                 </button>
 
                                                 <button
                                                   type="button"
                                                   onClick={() => handleDownloadUploadedFile(file)}
                                                   title="Download File"
-                                                  className="px-2.5 py-1 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-300 border border-emerald-500/30 rounded-lg text-[11px] font-semibold flex items-center gap-1.5 cursor-pointer transition-all shadow-xs"
+                                                  className="p-1 hover:bg-slate-800 rounded-lg text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer"
                                                 >
                                                   <Download className="h-3.5 w-3.5" />
-                                                  <span>Download File</span>
                                                 </button>
 
                                                 {(!isLocked || viewRole === 'Auditor') && (
