@@ -437,7 +437,9 @@ startxref
 
     if (isReference) {
       targetFolderId = folderIds['02_Reference_Materials'];
-      parentsList = [targetFolderId];
+      if (targetFolderId && !targetFolderId.startsWith('folder-') && !targetFolderId.startsWith('mock-')) {
+        parentsList = [targetFolderId];
+      }
       folderPath = `Data360_Test/Clients/${safeClient}/Audits/${safeAudit}/Distributors/${safeDistributor}/02_Reference_Materials`;
     } else {
       // Send uploaded evidence files directly to 01_IRL and 03_Distributor_Evidence folders in Google Drive
@@ -445,61 +447,100 @@ startxref
       const evidenceFolderId = folderIds['03_Distributor_Evidence'];
       targetFolderId = irlFolderId || evidenceFolderId;
       
-      if (irlFolderId && evidenceFolderId) {
-        parentsList = [irlFolderId, evidenceFolderId];
-      } else if (irlFolderId) {
-        parentsList = [irlFolderId];
-      } else if (evidenceFolderId) {
-        parentsList = [evidenceFolderId];
+      const validFolderId = [irlFolderId, evidenceFolderId].find(id => id && !id.startsWith('folder-') && !id.startsWith('mock-') && !id.startsWith('fallback-'));
+      if (validFolderId) {
+        parentsList = [validFolderId];
       }
 
       folderPath = `Data360_Test/Clients/${safeClient}/Audits/${safeAudit}/Distributors/${safeDistributor}/01_IRL`;
     }
 
-    let driveFileId = `gdrive-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+    if (!this.drive) {
+      this.initDriveClient();
+    }
+
+    if (!this.drive) {
+      throw new Error("Google Drive storage client is not initialized or authenticated.");
+    }
+
+    let realDriveFileId = '';
     let webViewLink = '';
     let webContentLink = '';
 
-    if (this.drive) {
-      try {
-        const readableStream = new Readable();
-        readableStream.push(fileBuffer);
-        readableStream.push(null);
+    const validParents = parentsList.filter(id => id && !id.startsWith('folder-') && !id.startsWith('mock-') && !id.startsWith('fallback-'));
+    const requestParents = validParents.length > 0 ? validParents : (this.rootFolderId && !this.rootFolderId.startsWith('fallback-') && !this.rootFolderId.startsWith('mock-') ? [this.rootFolderId] : undefined);
 
-        const media = {
-          mimeType: mimeType || 'application/octet-stream',
-          body: readableStream
-        };
+    try {
+      const readableStream = new Readable();
+      readableStream.push(fileBuffer);
+      readableStream.push(null);
+
+      const media = {
+        mimeType: mimeType || 'application/octet-stream',
+        body: readableStream
+      };
+
+      const fileRes = await this.drive.files.create({
+        requestBody: {
+          name: fileName,
+          parents: requestParents
+        },
+        media: media,
+        fields: 'id, name, webViewLink, webContentLink'
+      });
+
+      if (fileRes.data && fileRes.data.id) {
+        realDriveFileId = fileRes.data.id;
+        webViewLink = fileRes.data.webViewLink || '';
+        webContentLink = fileRes.data.webContentLink || '';
+        console.log(`✅ File '${fileName}' uploaded to Google Drive. Target folder: ${targetFolderId}, Real File ID: ${realDriveFileId}`);
+      }
+    } catch (createErr: any) {
+      console.warn(`Folder-targeted upload failed for '${fileName}' (${createErr.message}). Retrying upload directly to Google Drive root...`);
+      
+      try {
+        const fallbackStream = new Readable();
+        fallbackStream.push(fileBuffer);
+        fallbackStream.push(null);
 
         const fileRes = await this.drive.files.create({
           requestBody: {
-            name: fileName,
-            parents: parentsList.length > 0 ? parentsList : [targetFolderId]
+            name: fileName
           },
-          media: media,
+          media: {
+            mimeType: mimeType || 'application/octet-stream',
+            body: fallbackStream
+          },
           fields: 'id, name, webViewLink, webContentLink'
         });
 
-        driveFileId = fileRes.data.id || driveFileId;
-        webViewLink = fileRes.data.webViewLink || '';
-        webContentLink = fileRes.data.webContentLink || '';
-        console.log(`✅ File '${fileName}' uploaded to Google Drive Folder ID: ${targetFolderId}, File ID: ${driveFileId}`);
-      } catch (err: any) {
-        console.error('Error uploading file to Google Drive:', err.message);
+        if (fileRes.data && fileRes.data.id) {
+          realDriveFileId = fileRes.data.id;
+          webViewLink = fileRes.data.webViewLink || '';
+          webContentLink = fileRes.data.webContentLink || '';
+          console.log(`✅ File '${fileName}' uploaded to Google Drive root folder. Real File ID: ${realDriveFileId}`);
+        }
+      } catch (fallbackErr: any) {
+        console.error('Fatal Google Drive upload failure:', fallbackErr.message);
+        throw new Error(`Google Drive storage upload failed: ${fallbackErr.message || createErr.message}`);
       }
+    }
+
+    if (!realDriveFileId || realDriveFileId.startsWith('gdrive-') || realDriveFileId.startsWith('mock-')) {
+      throw new Error(`Google Drive storage failed to return a valid file ID for '${fileName}'. Upload aborted.`);
     }
 
     const fileSizeMB = Number((fileBuffer.length / (1024 * 1024)).toFixed(2));
     const now = new Date().toISOString();
 
     const fileMeta: FileMetadata = {
-      id: `ev-${Date.now()}`,
+      id: `ev-${realDriveFileId}`,
       evidenceId: `EVD-${Math.floor(1000 + Math.random() * 9000)}`,
       clientName: metadata.clientName,
       auditName: metadata.auditName,
       distributorName: metadata.distributorName,
       requirementId: metadata.requirementId,
-      googleDriveFileId: driveFileId,
+      googleDriveFileId: realDriveFileId,
       googleDriveFolderId: targetFolderId,
       folderPath,
       fileName,
@@ -520,12 +561,12 @@ startxref
     };
 
     // Store in memory
-    this.inMemoryMetadataStore.set(driveFileId, fileMeta);
+    this.inMemoryMetadataStore.set(realDriveFileId, fileMeta);
     this.inMemoryMetadataStore.set(fileMeta.id, fileMeta);
     if (fileMeta.evidenceId) this.inMemoryMetadataStore.set(fileMeta.evidenceId, fileMeta);
 
     // Save actual binary buffer locally and in memory
-    this.saveBinaryBuffer(driveFileId, fileName, mimeType || 'application/octet-stream', fileBuffer, [fileMeta.id, fileMeta.evidenceId, fileName]);
+    this.saveBinaryBuffer(realDriveFileId, fileName, mimeType || 'application/octet-stream', fileBuffer, [fileMeta.id, fileMeta.evidenceId, fileName]);
 
     // Also insert into Supabase `evidence_files` and `system_audit_logs`
     try {
@@ -537,7 +578,7 @@ startxref
         file_size_mb: fileMeta.fileSizeMB,
         file_type: fileMeta.fileType,
         storage_path: `${folderPath}/${fileName}`,
-        file_hash: driveFileId,
+        file_hash: realDriveFileId,
         version: 1,
         uploaded_by: metadata.uploadedBy,
         uploaded_at: now,
@@ -551,7 +592,7 @@ startxref
         organization: metadata.distributorName,
         action: isReference ? 'Reference File Upload' : 'File Upload',
         ip_address: '127.0.0.1',
-        details: `Uploaded ${fileName} to Google Drive (${folderPath}), File ID: ${driveFileId}`
+        details: `Uploaded ${fileName} to Google Drive (${folderPath}), File ID: ${realDriveFileId}`
       });
     } catch (dbErr: any) {
       console.warn('Supabase DB log notice:', dbErr.message);
