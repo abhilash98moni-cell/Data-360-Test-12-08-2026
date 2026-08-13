@@ -1143,7 +1143,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   const overallProgressPercent = Math.round((completedItemsCount / (totalItemsCount || 1)) * 100);
 
   // Validation Checks: filter mandatory items that are not complete according to canonical rules
-  const invalidMandatoryItems = requests.filter(item => item.isMandatory && !isItemComplete(item));
+  const invalidMandatoryItems = requests.filter(item => Boolean(item.isMandatory ?? item.is_mandatory) && !isItemComplete(item));
 
   const missingMandatoryCount = invalidMandatoryItems.length;
   const submittedItemsCount = requests.filter(item => item.status === 'Submitted' || item.status === 'Completed' || item.status === 'Accepted').length;
@@ -1314,7 +1314,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   // Handler: Final Submission
   const handleFinalSubmit = async () => {
     // Safety check: verify all mandatory items are complete before calling backend API
-    const missingItems = requests.filter(item => item.isMandatory && !isItemComplete(item));
+    const missingItems = requests.filter(item => Boolean(item.isMandatory ?? item.is_mandatory) && !isItemComplete(item));
     if (missingItems.length > 0) {
       showToast(`Submission rejected: ${missingItems.length} mandatory requirement(s) are incomplete.`, 'error');
       return;

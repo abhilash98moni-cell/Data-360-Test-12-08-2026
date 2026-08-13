@@ -4,6 +4,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import multer from 'multer';
 import { storageService } from '../src/services/storageService.js';
+import { getItemCompletionDetails } from '../src/utils/irlValidation.js';
 
 dotenv.config();
 
@@ -133,35 +134,49 @@ app.post('/api/iir/submit', async (req, res) => {
       return res.status(400).json({ success: false, error: 'Client, distributor, and requests array are required.' });
     }
 
-    // Backend validation check: verify mandatory items
-    let missingMandatoryCount = 0;
+    const supabase = getSupabaseServerClient();
+
+    // Authoritative validation check against Canonical Validation Model
+    const incompleteRequirements: Array<{
+      refNumber: string;
+      title: string;
+      category: string;
+      isMandatory: boolean;
+      reason: string;
+    }> = [];
+
     requests.forEach((item: any) => {
-      if (item.isMandatory) {
-        const hasText = Boolean(item.textResponse && item.textResponse.trim().length >= 10);
-        const hasExplanation = Boolean(item.noUploadExplanation && item.noUploadExplanation.trim().length >= 20);
-        const hasFiles = Boolean(item.uploadedFiles && item.uploadedFiles.length > 0);
-        const hasSubResp = Object.values(item.subQuestionResponses || {}).some((r: any) =>
-          (r.textResponse && r.textResponse.trim().length > 0) || (r.uploadedFiles && r.uploadedFiles.length > 0)
-        );
-        if (!hasText && !hasExplanation && !hasFiles && !hasSubResp) {
-          missingMandatoryCount++;
-        }
+      const refNum = String(item.refNumber || item.id);
+      // Normalize mandatory flag from item payload (supports both isMandatory and is_mandatory)
+      const isMand = Boolean(item.isMandatory ?? item.is_mandatory ?? false);
+      item.isMandatory = isMand;
+      item.is_mandatory = isMand;
+
+      const detail = getItemCompletionDetails(item);
+      if (isMand && !detail.isComplete) {
+        incompleteRequirements.push({
+          refNumber: refNum,
+          title: String(item.title || 'Requirement'),
+          category: String(item.category || 'General'),
+          isMandatory: true,
+          reason: detail.reason || 'Requirement is incomplete.'
+        });
       }
     });
 
-    if (missingMandatoryCount > 0) {
+    if (incompleteRequirements.length > 0) {
       return res.status(400).json({
         success: false,
-        error: `Submission rejected: ${missingMandatoryCount} mandatory requirement(s) are incomplete or missing required explanations.`
+        error: `Submission rejected: ${incompleteRequirements.length} mandatory requirement(s) are incomplete or missing required explanations.`,
+        missingMandatoriesCount: incompleteRequirements.length,
+        incompleteRequirements
       });
     }
 
     const totalItems = requests.length;
-    const completedItems = requests.filter((r: any) => r.status === 'Completed' || r.status === 'Submitted' || r.status === 'Accepted').length;
+    const completedItems = requests.filter((r: any) => getItemCompletionDetails(r).isComplete).length;
     const completionPercentage = totalItems > 0 ? Math.round((completedItems / totalItems) * 100) : 100;
     const finalSubmissionDate = submissionDate || new Date().toISOString().substring(0, 19).replace('T', ' ');
-
-    const supabase = getSupabaseServerClient();
 
     let dbSuccess = false;
     let dbErrorMsg = '';
@@ -196,16 +211,19 @@ app.post('/api/iir/submit', async (req, res) => {
       dbErrorMsg = e.message;
     }
 
+    // Safe UUID validator for optional foreign keys
+    const isValidUuid = (str: string) => typeof str === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str);
+
     // 2. Secondary DB Persistence: Upsert rows in `irl_request_items`
     try {
       const itemRows = requests.map((item: any) => ({
-        audit_id: auditId || 'eng-101',
+        audit_id: isValidUuid(auditId) ? auditId : null,
         distributor_name: distributor,
         ref_number: String(item.refNumber || item.id),
         category: item.category || 'General',
         title: item.title || 'Requirement',
         description: item.description || '',
-        is_mandatory: Boolean(item.isMandatory),
+        is_mandatory: Boolean(item.isMandatory ?? item.is_mandatory),
         status: 'Submitted',
         reviewer_status: item.reviewerStatus || 'Pending Review',
         text_response: item.textResponse || '',

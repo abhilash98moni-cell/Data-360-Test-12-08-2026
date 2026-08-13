@@ -111,25 +111,6 @@ async function startServer() {
 
       const supabase = getSupabaseServerClient();
 
-      // Look up stored/authoritative mandatory flags from database if present
-      const dbMandatoryMap = new Map<string, boolean>();
-      try {
-        const { data: dbItems } = await supabase
-          .from('irl_request_items')
-          .select('ref_number, is_mandatory')
-          .eq('distributor_name', distributor);
-        
-        if (dbItems && Array.isArray(dbItems)) {
-          dbItems.forEach((row: any) => {
-            if (row.ref_number) {
-              dbMandatoryMap.set(row.ref_number, Boolean(row.is_mandatory));
-            }
-          });
-        }
-      } catch (err) {
-        console.warn('Note: Could not fetch irl_request_items mandatory flags from DB:', err);
-      }
-
       // Authoritative validation check against Canonical Validation Model
       const incompleteRequirements: Array<{
         refNumber: string;
@@ -141,13 +122,13 @@ async function startServer() {
 
       requests.forEach((item: any) => {
         const refNum = String(item.refNumber || item.id);
-        // Force authoritative isMandatory flag if found in DB, preventing client tampering
-        if (dbMandatoryMap.has(refNum)) {
-          item.isMandatory = dbMandatoryMap.get(refNum)!;
-        }
+        // Normalize mandatory flag from item payload (supports both isMandatory and is_mandatory)
+        const isMand = Boolean(item.isMandatory ?? item.is_mandatory ?? false);
+        item.isMandatory = isMand;
+        item.is_mandatory = isMand;
 
         const detail = getItemCompletionDetails(item);
-        if (item.isMandatory && !detail.isComplete) {
+        if (isMand && !detail.isComplete) {
           incompleteRequirements.push({
             refNumber: refNum,
             title: String(item.title || 'Requirement'),

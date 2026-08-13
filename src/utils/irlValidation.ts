@@ -10,7 +10,12 @@ export interface RequirementCompletionDetail {
  * Enforces Rules A, B, C, D, E consistently across frontend and backend.
  */
 export const getItemCompletionDetails = (item: any): RequirementCompletionDetail => {
-  const isMandatory = Boolean(item.isMandatory);
+  const isMandatory = Boolean(item.isMandatory ?? item.is_mandatory);
+
+  // Rule E: Optional / Non-mandatory items (isMandatory === false) NEVER block submission
+  if (!isMandatory) {
+    return { isComplete: true };
+  }
 
   // 1. Rule D: Yes/No Conditional Question
   if (item.questionType === 'yes_no_conditional') {
