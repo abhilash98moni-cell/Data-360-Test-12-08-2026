@@ -169,35 +169,7 @@ ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_analysis_timestamp
 ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
 
--- 9. Threaded Communication Messages
-CREATE TABLE IF NOT EXISTS public.communication_messages (
-  id VARCHAR(255) PRIMARY KEY,
-  conversation_id VARCHAR(255) NOT NULL,
-  audit_id VARCHAR(255) NOT NULL,
-  distributor_id VARCHAR(255) NOT NULL,
-  distributor_name VARCHAR(255),
-  sender_id VARCHAR(255),
-  sender_name VARCHAR(255) NOT NULL,
-  sender_email VARCHAR(255) NOT NULL,
-  sender_role VARCHAR(100) NOT NULL,
-  sender_organization VARCHAR(255) NOT NULL,
-  content TEXT NOT NULL,
-  attachments JSONB DEFAULT '[]'::jsonb,
-  reply_to_id VARCHAR(255),
-  request_ref VARCHAR(100),
-  request_title VARCHAR(255),
-  is_read_by_auditor BOOLEAN DEFAULT FALSE,
-  is_read_by_distributor BOOLEAN DEFAULT FALSE,
-  is_deleted BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  edited_at TIMESTAMP WITH TIME ZONE,
-  deleted_at TIMESTAMP WITH TIME ZONE
-);
-
-CREATE INDEX IF NOT EXISTS idx_comm_messages_conv ON public.communication_messages(conversation_id);
-CREATE INDEX IF NOT EXISTS idx_comm_messages_audit ON public.communication_messages(audit_id);
-CREATE INDEX IF NOT EXISTS idx_comm_messages_dist ON public.communication_messages(distributor_id);
-
+-- 9. Threaded Messages Table
 CREATE TABLE IF NOT EXISTS public.threaded_messages (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   audit_id UUID REFERENCES public.audits(id) ON DELETE CASCADE,
