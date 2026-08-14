@@ -40,7 +40,7 @@ export type ActiveTab =
   | 'master_control' 
   | 'audit_logs' 
   | 'profile' 
-  | 'brd' | 'reporting';
+  | 'reporting';
 
 interface NavigationSidebarProps {
   activeTab: ActiveTab;
@@ -177,7 +177,37 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
               </div>
             </button>
 
-            {/* Reporting */}
+            {/* 3. Evidence Management / My Uploads & Evidence */}
+            <button
+              onClick={() => onTabChange('evidence')}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'evidence'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <FileSpreadsheet className={`h-4 w-4 shrink-0 ${activeTab === 'evidence' ? 'text-white' : 'text-slate-400'}`} />
+                <span className="truncate">{isDistributor ? 'My Uploads & Evidence' : 'Evidence Management'}</span>
+              </div>
+            </button>
+
+            {/* 4. Communication */}
+            <button
+              onClick={() => onTabChange('communication')}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'communication'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <HelpCircle className={`h-4 w-4 shrink-0 ${activeTab === 'communication' ? 'text-white' : 'text-slate-400'}`} />
+                <span className="truncate">Communication</span>
+              </div>
+            </button>
+
+            {/* 5. Reporting */}
             <button
               onClick={() => onTabChange('reporting')}
               className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
@@ -192,7 +222,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
               </div>
             </button>
 
-            {/* 3. Admin Control (Grouped Collapsible - Auditor / Admin only) */}
+            {/* 6. Admin Control (Grouped Collapsible - Auditor / Admin only) */}
             {!isDistributor && (
               <div className="space-y-1">
                 <button
@@ -258,208 +288,54 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
               </div>
             )}
 
-            {/* 4. Evidence Management / My Uploads & Evidence */}
-            <button
-              onClick={() => onTabChange('evidence')}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === 'evidence'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
-                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <FileSpreadsheet className={`h-4 w-4 shrink-0 ${activeTab === 'evidence' ? 'text-white' : 'text-slate-400'}`} />
-                <span className="truncate">{isDistributor ? 'My Uploads & Evidence' : 'Evidence Management'}</span>
-              </div>
-            </button>
-
-            {/* 5. Communication */}
-            <button
-              onClick={() => onTabChange('communication')}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === 'communication'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
-                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <HelpCircle className={`h-4 w-4 shrink-0 ${activeTab === 'communication' ? 'text-white' : 'text-slate-400'}`} />
-                <span className="truncate">Communication</span>
-              </div>
-            </button>
-
-            {/* 6. Audit Portfolio (Auditor / Admin only) */}
-            {!isDistributor && (
-              <button
-                onClick={() => onTabChange('engagements')}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                  activeTab === 'engagements'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <Briefcase className={`h-4 w-4 shrink-0 ${activeTab === 'engagements' ? 'text-white' : 'text-slate-400'}`} />
-                  <span className="truncate">Audit Portfolio</span>
-                </div>
-                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium border bg-slate-800 text-slate-300 border-slate-700 shrink-0">
-                  6 Active
-                </span>
-              </button>
-            )}
-
-            {/* 7. Fieldwork & MUS Sampling (Auditor / Admin only) */}
-            {!isDistributor && (
-              <button
-                onClick={() => onTabChange('sampling')}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                  activeTab === 'sampling'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <Calculator className={`h-4 w-4 shrink-0 ${activeTab === 'sampling' ? 'text-white' : 'text-slate-400'}`} />
-                  <span className="truncate">Fieldwork & MUS Sampling</span>
-                </div>
-              </button>
-            )}
-
-            {/* 8. Forensic Anomaly AI (Auditor / Admin only) */}
-            {!isDistributor && (
-              <button
-                onClick={() => onTabChange('forensics')}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                  activeTab === 'forensics'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <Search className={`h-4 w-4 shrink-0 ${activeTab === 'forensics' ? 'text-white' : 'text-slate-400'}`} />
-                  <span className="truncate">Forensic Anomaly AI</span>
-                </div>
-                {flaggedAnomaliesCount > 0 && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-medium border bg-red-500/20 text-red-300 border-red-500/30 shrink-0">
-                    {flaggedAnomaliesCount} Flagged
-                  </span>
-                )}
-              </button>
-            )}
-
-            {/* 9. Findings & CAPA / Assigned Action Items & CAPA */}
-            <button
-              onClick={() => onTabChange('findings')}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === 'findings'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
-                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <ShieldAlert className={`h-4 w-4 shrink-0 ${activeTab === 'findings' ? 'text-white' : 'text-slate-400'}`} />
-                <span className="truncate">{isDistributor ? 'Assigned Action Items & CAPA' : 'Findings & CAPA'}</span>
-              </div>
-              {openFindingsCount > 0 && (
-                <span className="text-[10px] px-2 py-0.5 rounded-full font-medium border bg-amber-500/20 text-amber-300 border-amber-500/30 shrink-0">
-                  {openFindingsCount} Open
-                </span>
-              )}
-            </button>
-
-            {/* 10. My Profile & Security */}
-            <button
-              onClick={() => onTabChange('profile')}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === 'profile'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
-                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-              }`}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <Users className={`h-4 w-4 shrink-0 ${activeTab === 'profile' ? 'text-white' : 'text-slate-400'}`} />
-                <span className="truncate">My Profile & Security</span>
-              </div>
-            </button>
-
-            {/* 11. BRD Document View (Auditor / Admin only) */}
-            {!isDistributor && (
-              <button
-                onClick={() => onTabChange('brd')}
-                className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                  activeTab === 'brd'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-                }`}
-              >
-                <div className="flex items-center gap-3 min-w-0">
-                  <FileCheck2 className={`h-4 w-4 shrink-0 ${activeTab === 'brd' ? 'text-white' : 'text-slate-400'}`} />
-                  <span className="truncate">BRD Document View</span>
-                </div>
-              </button>
-            )}
-
           </nav>
         </div>
 
         {/* Audit Streams / Scope Section */}
-        {isAdmin ? (
-          <div>
-            <p className="px-3 text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-2">
-              Admin Control Scope
-            </p>
-            <div className="p-3 bg-amber-950/30 border border-amber-500/30 rounded-xl space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Role Scope:</span>
-                <span className="text-amber-300 font-bold">Admin Dashboard Only</span>
-              </div>
-              <p className="text-[11px] text-slate-400 leading-relaxed">
-                Your account is restricted exclusively to reviewing, approving, and provisioning user signups.
+        {!isAdmin && (
+          !isDistributor ? (
+            <div>
+              <p className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                Active Audit Streams
               </p>
-            </div>
-          </div>
-        ) : !isDistributor ? (
-          <div>
-            <p className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-              Active Audit Streams
-            </p>
-            <div className="space-y-1">
-              {auditStreams.map((stream, idx) => {
-                const Icon = stream.icon;
-                return (
-                  <div
-                    key={idx}
-                    onClick={() => onTabChange('engagements')}
-                    className="flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 cursor-pointer transition-colors"
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <Icon className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                      <span className="truncate">{stream.name}</span>
+              <div className="space-y-1">
+                {auditStreams.map((stream, idx) => {
+                  const Icon = stream.icon;
+                  return (
+                    <div
+                      key={idx}
+                      onClick={() => onTabChange('engagements')}
+                      className="flex items-center justify-between px-3 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 cursor-pointer transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <Icon className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
+                        <span className="truncate">{stream.name}</span>
+                      </div>
+                      <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700/60 shrink-0">
+                        {stream.count}
+                      </span>
                     </div>
-                    <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700/60 shrink-0">
-                      {stream.count}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        ) : (
-          <div>
-            <p className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
-              Distributor Portal Scope
-            </p>
-            <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">Assigned Entity:</span>
-                <span className="text-emerald-300 font-semibold">{currentUser?.organization || 'Midwest Trading Co.'}</span>
-              </div>
-              <div className="flex items-center justify-between text-[11px]">
-                <span className="text-slate-400">Target Completion:</span>
-                <span className="text-slate-200 font-mono">Aug 25, 2026</span>
+                  );
+                })}
               </div>
             </div>
-          </div>
+          ) : (
+            <div>
+              <p className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">
+                Distributor Portal Scope
+              </p>
+              <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-slate-400">Assigned Entity:</span>
+                  <span className="text-emerald-300 font-semibold">{currentUser?.organization || 'Midwest Trading Co.'}</span>
+                </div>
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-400">Target Completion:</span>
+                  <span className="text-slate-200 font-mono">Aug 25, 2026</span>
+                </div>
+              </div>
+            </div>
+          )
         )}
 
         {/* Practice Stats Card or Distributor Status Card */}

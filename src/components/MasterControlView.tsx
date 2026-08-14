@@ -205,7 +205,6 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
             Control platform hierarchy, active user sessions, role-based access permissions (RBAC), client tenant configurations, and global security logs.
           </p>
         </div>
-
         <div className="flex items-center gap-3">
           <button
             onClick={() => setIsInviteModalOpen(true)}
@@ -222,6 +221,22 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
             <Key className="h-4 w-4 text-slate-400" />
             <span>Switch Role / Sign In</span>
           </button>
+        </div>
+      </div>
+
+      {/* Admin Control Scope Card */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl space-y-4">
+        <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-2">
+          Admin Control Scope
+        </p>
+        <div className="p-4 bg-amber-950/30 border border-amber-500/30 rounded-xl space-y-2 text-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-slate-400">Role Scope:</span>
+            <span className="text-amber-300 font-bold">Admin Dashboard Only</span>
+          </div>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Your account is restricted exclusively to reviewing, approving, and provisioning user signups.
+          </p>
         </div>
       </div>
 

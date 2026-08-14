@@ -2,12 +2,8 @@ import React, { useState } from 'react';
 import { Header } from './components/Header';
 import { NavigationSidebar, ActiveTab } from './components/NavigationSidebar';
 import { DashboardView } from './components/DashboardView';
-import { AuditExecutionView } from './components/AuditExecutionView';
-import { ForensicAnalyticsView } from './components/ForensicAnalyticsView';
-import { FindingsCAPAView } from './components/FindingsCAPAView';
 import { InitialInformationRequestView } from './components/InitialInformationRequestView';
 import { EngagementWorkspaceView } from './components/EngagementWorkspaceView';
-import { BRDDocumentView } from './components/BRDDocumentView';
 import { AICopilotDrawer } from './components/AICopilotDrawer';
 import { NewAuditModal } from './components/NewAuditModal';
 import { AuthModal, UserSession } from './components/AuthModal';
@@ -36,7 +32,6 @@ import { AuditEngagement, AuditFinding, AuditAssignment } from './types';
 import { CurrencyMode } from './utils/currencyFormatter';
 
 export default function App() {
-  const [currentMode, setCurrentMode] = useState<'platform' | 'brd'>('platform');
   const [activeTab, setActiveTab] = useState<ActiveTab>(() => {
     if (typeof window !== 'undefined') {
       const pathname = window.location.pathname.toLowerCase();
@@ -208,12 +203,6 @@ export default function App() {
       
       {/* Top Header */}
       <Header 
-        currentMode={currentMode}
-        onModeChange={(mode) => {
-          setCurrentMode(mode);
-          if (mode === 'brd') setActiveTab('brd');
-          else if (activeTab === 'brd') setActiveTab('dashboard');
-        }}
         selectedClient={selectedClient}
         onClientChange={handleClientChange}
         selectedDistributor={selectedDistributor}
@@ -227,10 +216,18 @@ export default function App() {
         unreadAlertsCount={3}
         onNavigateToIIR={() => {
           setActiveTab('engagement_workspace');
-          setCurrentMode('platform');
         }}
         currentUser={currentUser}
         onOpenAuth={() => setIsAuthOpen(true)}
+        onLogout={handleLogout}
+        onNavigateToProfile={(tab) => {
+          setActiveTab('profile');
+          if (tab === 'security') {
+            setTimeout(() => {
+              document.getElementById('security-section')?.scrollIntoView({ behavior: 'smooth' });
+            }, 100);
+          }
+        }}
       />
 
       {/* Main Workspace Body */}
@@ -242,8 +239,6 @@ export default function App() {
             activeTab={activeTab}
             onTabChange={(tab) => {
               setActiveTab(tab);
-              if (tab === 'brd') setCurrentMode('brd');
-              else setCurrentMode('platform');
             }}
             openFindingsCount={filteredFindings.filter(f => f.status !== 'Resolved').length}
             flaggedAnomaliesCount={forensicAnomalies.length}
@@ -255,7 +250,7 @@ export default function App() {
         <main className="flex-1 min-w-0 max-w-full overflow-x-hidden bg-slate-950/90 pb-12">
           
           {(currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor')) && 
-           ['dashboard', 'engagements', 'sampling', 'forensics', 'master_control', 'audit_logs'].includes(activeTab) ? (
+           ['dashboard', 'master_control', 'audit_logs'].includes(activeTab) ? (
             <div className="p-12 text-center max-w-xl mx-auto my-16 bg-slate-900 border border-slate-800 rounded-3xl space-y-4 shadow-2xl animate-fade-in text-white">
               <div className="p-4 bg-red-500/10 text-red-400 border border-red-500/30 rounded-2xl w-16 h-16 mx-auto flex items-center justify-center">
                 <ShieldAlert className="h-8 w-8" />
@@ -274,8 +269,6 @@ export default function App() {
                 </button>
               </div>
             </div>
-          ) : currentMode === 'brd' || activeTab === 'brd' ? (
-            <BRDDocumentView />
           ) : activeTab === 'admin_approval' ? (
             <AdminApprovalView 
               currentUser={currentUser}
@@ -324,42 +317,7 @@ export default function App() {
               selectedClient={selectedClient}
               selectedDistributor={selectedDistributor}
             />
-          ) : activeTab === 'engagements' ? (
-            <DashboardView 
-              engagements={filteredEngagements.length > 0 ? filteredEngagements : engagements}
-              findings={filteredFindings.length > 0 ? filteredFindings : findings}
-              samplingRuns={samplingRuns}
-              assignments={assignments}
-              onSelectEngagement={(id) => {
-                setSelectedEngId(id);
-                setActiveTab('sampling');
-              }}
-              onOpenNewAudit={() => setIsNewAuditOpen(true)}
-              onTabChange={setActiveTab}
-              onOpenCopilot={() => setIsCopilotOpen(true)}
-              currencyMode={currencyMode}
-              currentUser={currentUser}
-            />
-          ) : activeTab === 'sampling' ? (
-            <AuditExecutionView 
-              engagements={filteredEngagements.length > 0 ? filteredEngagements : engagements}
-              selectedEngagementId={selectedEngId}
-              onSelectEngagement={setSelectedEngId}
-              samplingRuns={samplingRuns}
-              currencyMode={currencyMode}
-            />
-          ) : activeTab === 'forensics' ? (
-            <ForensicAnalyticsView 
-              anomalies={forensicAnomalies}
-              currencyMode={currencyMode}
-            />
-          ) : activeTab === 'findings' ? (
-            <FindingsCAPAView 
-              findings={filteredFindings.length > 0 ? filteredFindings : findings}
-              onUpdateFindingStatus={handleUpdateFindingStatus}
-              currencyMode={currencyMode}
-              currentUser={currentUser}
-            />
+
           ) : activeTab === 'master_control' ? (
             <MasterControlView 
               currentUser={currentUser}
@@ -408,7 +366,6 @@ export default function App() {
         onClose={() => setIsNotificationsOpen(false)}
         onNavigateToTab={(tab) => {
           setActiveTab(tab as ActiveTab);
-          setCurrentMode('platform');
         }}
       />
 

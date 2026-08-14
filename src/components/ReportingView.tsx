@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   FileText, Plus, Search, ChevronRight, FileDown, 
   CheckCircle, AlertCircle, Edit, Save, Lock, ArrowLeft,
-  Settings, ZoomIn, ZoomOut, Download
+  Settings, ZoomIn, ZoomOut, Download, Building
 } from 'lucide-react';
 import { UserSession } from './AuthModal';
 import { supabase } from '../lib/supabaseClient';
@@ -40,7 +40,7 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
         .select('*')
         .order('created_at', { ascending: false });
         
-      if (error && error.code !== '42P01') {
+      if (error && error.code !== '42P01' && error.code !== 'PGRST205') {
         console.error('Error fetching reports:', error);
       } else if (data) {
         setReports(data as ReportMetadata[]);
@@ -123,7 +123,7 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
           overview: newReport.overview
         }]);
         
-      if (error && error.code !== '42P01') throw error;
+      if (error && error.code !== '42P01' && error.code !== 'PGRST205') throw error;
       
       setReports([newReport, ...reports]);
       setIsCreating(false);
@@ -156,7 +156,7 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
         })
         .eq('id', activeReport.id);
         
-      if (error && error.code !== '42P01') throw error;
+      if (error && error.code !== '42P01' && error.code !== 'PGRST205') throw error;
       
       setActiveReport(updated);
       setReports(reports.map(r => r.id === updated.id ? updated : r));
