@@ -2107,7 +2107,7 @@ async function startServer() {
   });
 
   // ====================================================================
-  // STEP 10: THREADED COMMUNICATION API (PERMANENT MULTI-TENANT CHATS)
+  // STEP 10: THREADED COMMUNICATION API (PERMANENT MULTI-TENANT CHATS & PARTICIPANTS)
   // ====================================================================
   const DISTRIBUTOR_REGISTRY: Record<string, { id: string; name: string; code: string; region: string }> = {
     'dist-1': { id: 'dist-1', name: 'Midwest Trading Co.', code: 'MDT-8092', region: 'Midwest Region (USA)' },
@@ -2137,6 +2137,9 @@ async function startServer() {
     conversationId: string;
     auditId: string;
     distributorId: string;
+    contextType?: 'GENERAL' | 'IRL' | 'QUESTIONNAIRE' | 'SAMPLING';
+    contextId?: string;
+    contextLabel?: string;
     requestRef?: string;
     requestTitle?: string;
     senderName: string;
@@ -2158,180 +2161,90 @@ async function startServer() {
     createdAt: string;
   }
 
-  const DISCUSSIONS_FILE_PATH = path.join(process.cwd(), 'data', 'discussions_messages.json');
-
-  const INITIAL_SEED_DISCUSSION_MESSAGES: InStoreMessage[] = [
-    {
-      id: 'msg-aud-team-1',
-      conversationId: 'conv-eng-101-internal-auditors',
-      auditId: 'eng-101',
-      distributorId: 'internal-auditors',
-      requestRef: 'AUD-INTERNAL',
-      senderName: 'Sarah Jenkins',
-      senderEmail: 's.jenkins@apex-audit.com',
-      senderRole: 'AA Super Admin',
-      senderOrganization: 'Apex Audit Practice (AA)',
-      timestamp: 'Today at 08:30 AM',
-      content: 'Team: Use this channel for internal auditor alignment, finding reviews, and audit strategy notes. Messages posted here are completely hidden from all distributors.',
-      isReadByAuditor: true,
-      isReadByDistributor: false,
-      createdAt: new Date(Date.now() - 10800000).toISOString()
-    },
-    {
-      id: 'msg-101-1',
-      conversationId: 'conv-eng-101-dist-1',
-      auditId: 'eng-101',
-      distributorId: 'dist-1',
-      requestRef: '1.1',
-      senderName: 'Sarah Jenkins',
-      senderEmail: 's.jenkins@apex-audit.com',
-      senderRole: 'AA Super Admin',
-      senderOrganization: 'Apex Audit Practice (AA)',
-      timestamp: 'Today at 09:15 AM',
-      content: 'Hi David, thank you for uploading the corporate registration document for Midwest Trading. Could you also verify if the tax clearance certificate covers Q2 2026?',
-      mentions: ['@David Vance'],
-      isReadByAuditor: true,
-      isReadByDistributor: true,
-      createdAt: new Date(Date.now() - 7200000).toISOString()
-    },
-    {
-      id: 'msg-101-2',
-      conversationId: 'conv-eng-101-dist-1',
-      auditId: 'eng-101',
-      distributorId: 'dist-1',
-      requestRef: '1.1',
-      senderName: 'David Vance',
-      senderEmail: 'd.vance@midwesttrading.com',
-      senderRole: 'Distributor Admin',
-      senderOrganization: 'Midwest Trading Co.',
-      timestamp: 'Today at 09:42 AM',
-      content: 'Hello Sarah, yes! The attached state tax license is valid through December 2026. I have also attached our quarterly compliance statement for your reference.',
-      replyToId: 'msg-101-1',
-      attachments: [
-        { fileName: 'State_Tax_Compliance_Statement_2026.pdf', fileSizeMB: 1.8 }
-      ],
-      isReadByAuditor: false,
-      isReadByDistributor: true,
-      createdAt: new Date(Date.now() - 3600000).toISOString()
-    },
-    {
-      id: 'msg-101-3',
-      conversationId: 'conv-eng-101-dist-1',
-      auditId: 'eng-101',
-      distributorId: 'dist-1',
-      requestRef: '3.1',
-      senderName: 'Sarah Jenkins',
-      senderEmail: 's.jenkins@apex-audit.com',
-      senderRole: 'AA Super Admin',
-      senderOrganization: 'Apex Audit Practice (AA)',
-      timestamp: 'Today at 10:30 AM',
-      content: 'We noticed a variance in credit note #CN-9042 regarding the MDF rebate calculation. Please check item 3.1 in the IRL section.',
-      mentions: ['@David Vance'],
-      isReadByAuditor: true,
-      isReadByDistributor: false,
-      createdAt: new Date(Date.now() - 1800000).toISOString()
-    },
-    {
-      id: 'msg-102-1',
-      conversationId: 'conv-eng-101-dist-2',
-      auditId: 'eng-101',
-      distributorId: 'dist-2',
-      requestRef: '2.1',
-      senderName: 'Sarah Jenkins',
-      senderEmail: 's.jenkins@apex-audit.com',
-      senderRole: 'AA Super Admin',
-      senderOrganization: 'Apex Audit Practice (AA)',
-      timestamp: 'Yesterday at 02:15 PM',
-      content: 'Greeting Horizon Logistics India compliance team. Please upload the Q2 SAP ERP sales ledger with tax reconciliation numbers.',
-      isReadByAuditor: true,
-      isReadByDistributor: true,
-      createdAt: new Date(Date.now() - 86400000).toISOString()
-    },
-    {
-      id: 'msg-103-1',
-      conversationId: 'conv-eng-101-dist-3',
-      auditId: 'eng-101',
-      distributorId: 'dist-3',
-      requestRef: '3.1',
-      senderName: 'Sarah Jenkins',
-      senderEmail: 's.jenkins@apex-audit.com',
-      senderRole: 'AA Super Admin',
-      senderOrganization: 'Apex Audit Practice (AA)',
-      timestamp: 'Yesterday at 04:00 PM',
-      content: 'Pacific Rim Distribution: Awaiting clarification on volume rebate tier adjustments for Q1.',
-      isReadByAuditor: true,
-      isReadByDistributor: false,
-      createdAt: new Date(Date.now() - 43200000).toISOString()
-    }
-  ];
-
-  const DISCUSSION_MESSAGES_STORE: InStoreMessage[] = [...INITIAL_SEED_DISCUSSION_MESSAGES];
-
-  function loadDiskDiscussionMessages(): InStoreMessage[] {
-    try {
-      if (fs.existsSync(DISCUSSIONS_FILE_PATH)) {
-        const fileContent = fs.readFileSync(DISCUSSIONS_FILE_PATH, 'utf-8');
-        const parsed = JSON.parse(fileContent);
-        if (Array.isArray(parsed)) {
-          return parsed;
-        }
-      }
-    } catch (err) {
-      console.warn('Failed to read local discussions disk cache:', err);
-    }
-    return [];
+  interface InStoreParticipant {
+    id: string;
+    conversationId: string;
+    userEmail: string;
+    userName: string;
+    userRole: string;
+    userOrganization: string;
+    isActive: boolean;
+    joinedAt: string;
+    addedBy: string;
+    removedAt?: string;
+    removedBy?: string;
   }
 
-  function saveDiskDiscussionMessages(messages: InStoreMessage[]) {
-    try {
-      const dir = path.dirname(DISCUSSIONS_FILE_PATH);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.writeFileSync(DISCUSSIONS_FILE_PATH, JSON.stringify(messages, null, 2), 'utf-8');
-    } catch (err) {
-      console.warn('Failed to write local discussions disk cache:', err);
-    }
-  }
-
-  async function getOrSyncDiscussionMessages(): Promise<InStoreMessage[]> {
+  async function fetchMessagesFromSupabase(conversationId?: string): Promise<InStoreMessage[]> {
     const client = getSupabaseServerClient();
-    let dbMessages: InStoreMessage[] = [];
-
-    if (client) {
-      try {
-        const { data, error } = await client
-          .from('system_audit_logs')
-          .select('*')
-          .eq('event_type', 'DISCUSSION_MESSAGE');
-
-        if (!error && Array.isArray(data)) {
-          dbMessages = data.map(row => row.details).filter(Boolean);
-        } else if (error) {
-          console.warn('Supabase discussion fetch notice:', error.message);
-        }
-      } catch (dbErr: any) {
-        console.warn('Supabase discussion connection error:', dbErr.message);
-      }
+    if (!client) {
+      return [];
     }
+    try {
+      let query = client
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'DISCUSSION_MESSAGE');
 
-    const diskMessages = loadDiskDiscussionMessages();
+      if (conversationId) {
+        query = query.eq('target_user_email', conversationId);
+      }
 
-    const messageMap = new Map<string, InStoreMessage>();
+      const { data, error } = await query.order('created_at', { ascending: true });
+      if (error) {
+        console.warn('Supabase discussion messages fetch error:', error.message);
+        return [];
+      }
+      if (!data || !Array.isArray(data)) {
+        return [];
+      }
+      const messages: InStoreMessage[] = data
+        .map(r => r.details)
+        .filter(Boolean)
+        .sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+      return messages;
+    } catch (err: any) {
+      console.warn('Supabase discussion fetch exception:', err.message);
+      return [];
+    }
+  }
 
-    INITIAL_SEED_DISCUSSION_MESSAGES.forEach(m => messageMap.set(m.id, m));
-    diskMessages.forEach(m => messageMap.set(m.id, m));
-    DISCUSSION_MESSAGES_STORE.forEach(m => messageMap.set(m.id, m));
-    dbMessages.forEach(m => messageMap.set(m.id, m));
+  async function fetchParticipantsFromSupabase(conversationId: string): Promise<InStoreParticipant[]> {
+    const client = getSupabaseServerClient();
+    if (!client) {
+      return [];
+    }
+    try {
+      const { data, error } = await client
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'DISCUSSION_PARTICIPANT')
+        .eq('target_user_email', conversationId)
+        .order('created_at', { ascending: true });
 
-    const mergedMessages = Array.from(messageMap.values());
-    mergedMessages.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+      if (error || !data || !Array.isArray(data)) {
+        return [];
+      }
+      const map = new Map<string, InStoreParticipant>();
+      data.forEach(row => {
+        if (row.details && row.details.userEmail) {
+          map.set(row.details.userEmail.toLowerCase(), row.details);
+        }
+      });
+      return Array.from(map.values());
+    } catch (err: any) {
+      console.warn('Supabase participants fetch error:', err.message);
+      return [];
+    }
+  }
 
-    DISCUSSION_MESSAGES_STORE.length = 0;
-    DISCUSSION_MESSAGES_STORE.push(...mergedMessages);
-    saveDiskDiscussionMessages(mergedMessages);
-
-    return mergedMessages;
+  async function isUserParticipantActive(convId: string, email: string): Promise<boolean> {
+    const parts = await fetchParticipantsFromSupabase(convId);
+    const matching = parts.find(p => p.userEmail.toLowerCase() === email.toLowerCase());
+    if (!matching) {
+      return true;
+    }
+    return matching.isActive;
   }
 
   function authenticateRequestSession(req: express.Request) {
@@ -2359,7 +2272,7 @@ async function startServer() {
       const session = authenticateRequestSession(req);
       const auditId = (req.query.auditId as string) || 'eng-101';
 
-      const allMessages = await getOrSyncDiscussionMessages();
+      const allMessages = await fetchMessagesFromSupabase();
 
       let activeDistributors = Object.values(DISTRIBUTOR_REGISTRY);
 
@@ -2474,11 +2387,14 @@ async function startServer() {
 
       const expectedConvId = conversationId || `conv-${auditId}-${targetDistributorId || 'dist-1'}`;
 
-      const allMessages = await getOrSyncDiscussionMessages();
+      const isMemberActive = await isUserParticipantActive(expectedConvId, session.email);
+      if (!isMemberActive) {
+        return res.status(403).json({
+          error: 'Access Denied: You have been removed from this conversation and can no longer view or retrieve messages.'
+        });
+      }
 
-      const messages = allMessages.filter(m => m.conversationId === expectedConvId || (m.auditId === auditId && m.distributorId === targetDistributorId));
-
-      messages.sort((a, b) => new Date(a.createdAt || 0).getTime() - new Date(b.createdAt || 0).getTime());
+      const messages = await fetchMessagesFromSupabase(expectedConvId);
 
       return res.json({
         success: true,
@@ -2496,7 +2412,7 @@ async function startServer() {
   app.post('/api/discussions/post', async (req, res) => {
     try {
       const session = authenticateRequestSession(req);
-      const { auditId, requestRef, requestTitle, content, attachments } = req.body;
+      const { auditId, requestRef, requestTitle, content, attachments, contextType, contextId, contextLabel } = req.body;
       let { conversationId, distributorId } = req.body;
 
       if (!content || !content.trim()) {
@@ -2521,6 +2437,20 @@ async function startServer() {
 
       const validConvId = conversationId || `conv-${currentAuditId}-${distributorId}`;
 
+      const isMemberActive = await isUserParticipantActive(validConvId, session.email);
+      if (!isMemberActive) {
+        return res.status(403).json({
+          error: 'Access Denied: You have been removed from this conversation and cannot send new messages.'
+        });
+      }
+
+      const client = getSupabaseServerClient();
+      if (!client) {
+        return res.status(500).json({
+          error: 'Database persistence unavailable: Supabase database client could not be initialized.'
+        });
+      }
+
       const now = new Date();
       const formattedTimestamp = `Today at ${now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 
@@ -2529,8 +2459,11 @@ async function startServer() {
         conversationId: validConvId,
         auditId: currentAuditId,
         distributorId,
-        requestRef: requestRef || undefined,
-        requestTitle: requestTitle || undefined,
+        contextType: contextType || 'GENERAL',
+        contextId: contextId || requestRef || undefined,
+        contextLabel: contextLabel || (contextType === 'IRL' ? `Requirement ${contextId || requestRef}` : contextType === 'QUESTIONNAIRE' ? `Question ${contextId || requestRef}` : contextType === 'SAMPLING' ? `Sample ${contextId || requestRef}` : 'General Audit Discussion'),
+        requestRef: requestRef || contextId || undefined,
+        requestTitle: requestTitle || contextLabel || undefined,
         senderName: session.name,
         senderEmail: session.email,
         senderRole: session.role,
@@ -2543,27 +2476,21 @@ async function startServer() {
         createdAt: now.toISOString()
       };
 
-      DISCUSSION_MESSAGES_STORE.push(newMessage);
-      saveDiskDiscussionMessages(DISCUSSION_MESSAGES_STORE);
+      const insertRes = await client.from('system_audit_logs').insert({
+        event_type: 'DISCUSSION_MESSAGE',
+        target_user_email: validConvId,
+        details: newMessage,
+        created_at: now.toISOString()
+      });
 
-      try {
-        const client = getSupabaseServerClient();
-        if (client) {
-          const insertRes = await client.from('system_audit_logs').insert({
-            event_type: 'DISCUSSION_MESSAGE',
-            target_user_email: validConvId,
-            details: newMessage,
-            created_at: now.toISOString()
-          });
-          if (insertRes.error) {
-            console.warn('Supabase discussion message insert error:', insertRes.error.message);
-          }
-        }
-      } catch (dbErr: any) {
-        console.warn('Supabase discussions notice:', dbErr.message);
+      if (insertRes.error) {
+        console.error('Supabase message insert error:', insertRes.error);
+        return res.status(500).json({
+          error: `Database persistence failed: ${insertRes.error.message}`
+        });
       }
 
-      console.log(`💬 Message permanently saved in '${validConvId}' by ${session.name} (${session.org})`);
+      console.log(`💬 Message permanently saved in Supabase for '${validConvId}' by ${session.name} (${session.org})`);
 
       return res.json({
         success: true,
@@ -2571,6 +2498,170 @@ async function startServer() {
       });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || 'Failed to post message' });
+    }
+  });
+
+  // GET /api/discussions/participants — Get conversation participants from Supabase
+  app.get('/api/discussions/participants', async (req, res) => {
+    try {
+      const session = authenticateRequestSession(req);
+      const conversationId = (req.query.conversationId as string) || '';
+
+      if (!conversationId) {
+        return res.status(400).json({ error: 'Conversation ID is required' });
+      }
+
+      if (session.isDistributor && session.distributorInfo) {
+        if (!conversationId.includes(session.distributorInfo.id)) {
+          return res.status(403).json({ error: 'Access Denied: You cannot view participants for another conversation.' });
+        }
+      }
+
+      const partsForConv = await fetchParticipantsFromSupabase(conversationId);
+
+      if (partsForConv.length === 0) {
+        const dynamicDefaultParticipants: InStoreParticipant[] = [
+          {
+            id: `part-${session.email}`,
+            conversationId,
+            userEmail: session.email,
+            userName: session.name,
+            userRole: session.role,
+            userOrganization: session.org,
+            isActive: true,
+            joinedAt: new Date().toISOString(),
+            addedBy: 'Active Session'
+          }
+        ];
+        return res.json({
+          success: true,
+          conversationId,
+          participants: dynamicDefaultParticipants
+        });
+      }
+
+      return res.json({
+        success: true,
+        conversationId,
+        participants: partsForConv
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Failed to fetch participants' });
+    }
+  });
+
+  // POST /api/discussions/participants/add — Add person to conversation in Supabase
+  app.post('/api/discussions/participants/add', async (req, res) => {
+    try {
+      const session = authenticateRequestSession(req);
+      const { conversationId, userEmail, userName, userRole, userOrganization } = req.body;
+
+      if (!conversationId || !userEmail || !userName) {
+        return res.status(400).json({ error: 'Missing required participant fields' });
+      }
+
+      if (session.isDistributor) {
+        return res.status(403).json({ error: 'Access Denied: Only Admin or Audit Lead can manage participants.' });
+      }
+
+      const client = getSupabaseServerClient();
+      if (!client) {
+        return res.status(500).json({ error: 'Database unavailable. Cannot save participant.' });
+      }
+
+      const newPart: InStoreParticipant = {
+        id: `part-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        conversationId,
+        userEmail: userEmail.trim().toLowerCase(),
+        userName: userName.trim(),
+        userRole: userRole || 'Auditor',
+        userOrganization: userOrganization || 'Apex Audit Practice (AA)',
+        isActive: true,
+        joinedAt: new Date().toISOString(),
+        addedBy: session.email
+      };
+
+      const insRes = await client.from('system_audit_logs').insert({
+        event_type: 'DISCUSSION_PARTICIPANT',
+        target_user_email: conversationId,
+        details: newPart,
+        created_at: new Date().toISOString()
+      });
+
+      if (insRes.error) {
+        return res.status(500).json({ error: `Database error adding participant: ${insRes.error.message}` });
+      }
+
+      const updatedParticipants = await fetchParticipantsFromSupabase(conversationId);
+
+      return res.json({
+        success: true,
+        message: `Added participant ${userName} (${userEmail}) to ${conversationId}`,
+        participants: updatedParticipants
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Failed to add participant' });
+    }
+  });
+
+  // POST /api/discussions/participants/remove — Remove person from conversation in Supabase (preserves messages!)
+  app.post('/api/discussions/participants/remove', async (req, res) => {
+    try {
+      const session = authenticateRequestSession(req);
+      const { conversationId, userEmail } = req.body;
+
+      if (!conversationId || !userEmail) {
+        return res.status(400).json({ error: 'Conversation ID and user email are required' });
+      }
+
+      if (session.isDistributor) {
+        return res.status(403).json({ error: 'Access Denied: Only Admin or Audit Lead can remove participants.' });
+      }
+
+      const client = getSupabaseServerClient();
+      if (!client) {
+        return res.status(500).json({ error: 'Database unavailable. Cannot remove participant.' });
+      }
+
+      const allParts = await fetchParticipantsFromSupabase(conversationId);
+      const matching = allParts.find(p => p.userEmail.toLowerCase() === userEmail.toLowerCase());
+
+      const removedPart: InStoreParticipant = {
+        id: `part-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        conversationId,
+        userEmail: userEmail.trim().toLowerCase(),
+        userName: matching?.userName || userEmail,
+        userRole: matching?.userRole || 'Auditor',
+        userOrganization: matching?.userOrganization || 'Apex Audit Practice (AA)',
+        isActive: false,
+        joinedAt: matching?.joinedAt || new Date().toISOString(),
+        addedBy: matching?.addedBy || 'System',
+        removedAt: new Date().toISOString(),
+        removedBy: session.email
+      };
+
+      const insRes = await client.from('system_audit_logs').insert({
+        event_type: 'DISCUSSION_PARTICIPANT',
+        target_user_email: conversationId,
+        details: removedPart,
+        created_at: new Date().toISOString()
+      });
+
+      if (insRes.error) {
+        return res.status(500).json({ error: `Database error removing participant: ${insRes.error.message}` });
+      }
+
+      console.log(`👤 Participant ${userEmail} removed from ${conversationId} in Supabase. Historical messages preserved.`);
+
+      const updatedParticipants = await fetchParticipantsFromSupabase(conversationId);
+
+      return res.json({
+        success: true,
+        message: `Removed ${userEmail} from conversation. Historical messages remain preserved in audit log.`,
+        participants: updatedParticipants
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Failed to remove participant' });
     }
   });
 
@@ -2590,18 +2681,7 @@ async function startServer() {
         }
       }
 
-      DISCUSSION_MESSAGES_STORE.forEach(m => {
-        if (m.conversationId === conversationId || conversationId.includes(m.distributorId)) {
-          if (session.isDistributor) {
-            m.isReadByDistributor = true;
-          } else {
-            m.isReadByAuditor = true;
-          }
-        }
-      });
-
-      saveDiskDiscussionMessages(DISCUSSION_MESSAGES_STORE);
-
+      // Messages are tracked authoritatively in Supabase. Mark read acknowledges request.
       return res.json({
         success: true,
         message: `Messages marked as read for ${conversationId}`

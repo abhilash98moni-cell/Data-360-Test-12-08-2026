@@ -53,6 +53,9 @@ export interface ThreadedMessage {
   conversationId: string;
   auditId: string;
   distributorId: string;
+  contextType?: 'GENERAL' | 'IRL' | 'QUESTIONNAIRE' | 'SAMPLING';
+  contextId?: string;
+  contextLabel?: string;
   requestRef?: string;
   requestTitle?: string;
   senderName: string;
@@ -72,6 +75,20 @@ export interface ThreadedMessage {
   isReadByAuditor?: boolean;
   isReadByDistributor?: boolean;
   createdAt?: string;
+}
+
+export interface ConversationParticipant {
+  id: string;
+  conversationId: string;
+  userEmail: string;
+  userName: string;
+  userRole: EnterpriseRole | string;
+  userOrganization: string;
+  isActive: boolean;
+  joinedAt: string;
+  addedBy: string;
+  removedAt?: string;
+  removedBy?: string;
 }
 
 export interface EvidenceRecord {
