@@ -175,3 +175,71 @@ export async function saveQuestionnaireAuditorNotes(
     };
   }
 }
+
+export async function requestEditAccessQuestionnaire(
+  client: string,
+  distributor: string,
+  auditId: string = 'eng-101',
+  userEmail: string,
+  userName: string
+): Promise<{ success: boolean; state?: AuthoritativeQuestionnaireState; error?: string }> {
+  try {
+    const res = await fetch('/api/questionnaire/edit-access-request', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client, distributor, auditId, userEmail, userName })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to request edit access');
+    return data;
+  } catch (err: any) {
+    console.error('requestEditAccessQuestionnaire error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function reviewEditAccessQuestionnaire(
+  client: string,
+  distributor: string,
+  auditId: string = 'eng-101',
+  action: 'APPROVE' | 'REJECT',
+  userEmail: string,
+  userName: string
+): Promise<{ success: boolean; state?: AuthoritativeQuestionnaireState; error?: string }> {
+  try {
+    const res = await fetch('/api/questionnaire/edit-access-review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client, distributor, auditId, action, userEmail, userName })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to review edit access');
+    return data;
+  } catch (err: any) {
+    console.error('reviewEditAccessQuestionnaire error:', err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function customizeQuestionnaire(
+  client: string,
+  distributor: string,
+  auditId: string = 'eng-101',
+  customSections: any[],
+  userEmail: string,
+  userName: string
+): Promise<{ success: boolean; state?: AuthoritativeQuestionnaireState; error?: string }> {
+  try {
+    const res = await fetch('/api/questionnaire/customize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client, distributor, auditId, customSections, userEmail, userName })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to customize questionnaire');
+    return data;
+  } catch (err: any) {
+    console.error('customizeQuestionnaire error:', err);
+    return { success: false, error: err.message };
+  }
+}

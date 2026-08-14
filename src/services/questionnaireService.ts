@@ -38,6 +38,13 @@ export interface AuthoritativeQuestionnaireState {
   auditId: string;
   status: 'Not Started' | 'In Progress' | 'Submitted' | 'Under Review' | 'Accepted';
   isLocked: boolean;
+  editAccessStatus?: 'LOCKED' | 'REQUESTED' | 'APPROVED' | 'REJECTED';
+  editAccessRequestedAt?: string;
+  editAccessRequestedBy?: string;
+  editAccessApprovedAt?: string;
+  editAccessApprovedBy?: string;
+  customSections?: any[];
+  customTotalCount?: number;
   submissionDate?: string;
   completionPercentage: number;
   answeredCount: number;
@@ -60,18 +67,19 @@ export interface AuthoritativeQuestionnaireRecord {
 /**
  * Calculates answer completion count based on whether answers have meaningful values
  */
-export function calculateQuestionnaireProgress(answers: Record<string, QuestionnaireAnswerItem>): {
+export function calculateQuestionnaireProgress(answers: Record<string, QuestionnaireAnswerItem>, customSections?: any[]): {
   answeredCount: number;
   totalCount: number;
   completionPercentage: number;
 } {
-  const totalCount = TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS;
+  const sectionsToUse = customSections && customSections.length > 0 ? customSections : BUSINESS_QUESTIONNAIRE_SECTIONS;
+  const totalCount = sectionsToUse.reduce((acc: number, sec: any) => acc + (sec.questions ? sec.questions.filter((q: any) => q.isActive !== false).length : 0), 0);
   let answeredCount = 0;
 
-  for (const section of BUSINESS_QUESTIONNAIRE_SECTIONS) {
+  for (const section of sectionsToUse) {
     for (const q of section.questions) {
       const ans = answers[q.id];
-      if (ans && ans.responseValue && ans.responseValue.trim().length > 0) {
+      if (q.isActive !== false && ans && ans.responseValue && ans.responseValue.trim().length > 0) {
         // If question requires details when Yes/No
         if (q.responseType === 'yes_no_details') {
           if (ans.responseValue === 'Yes' || ans.responseValue === 'No') {
@@ -128,6 +136,7 @@ export async function getAuthoritativeQuestionnaireState(
       auditId,
       status: 'In Progress',
       isLocked: false,
+      editAccessStatus: 'LOCKED',
       completionPercentage: 0,
       answeredCount: 0,
       totalCount: TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS,
@@ -361,4 +370,125 @@ export async function saveAuthoritativeQuestionnaireAuditorNotes(
     success: true,
     auditorNotes
   };
+}
+
+
+export async function requestAuthoritativeQuestionnaireEditAccess(
+  clientName: string,
+  distName: string,
+  auditId: string,
+  userEmail: string,
+  userName: string
+): Promise<AuthoritativeQuestionnaireRecord> {
+  const supabase = getSupabaseServerClient();
+  const stateKey = `${clientName}::${distName}::${auditId}`;
+
+  const { state: currentState } = await getAuthoritativeQuestionnaireState(clientName, distName, auditId, false);
+  
+  const newState = {
+    ...currentState,
+    editAccessStatus: 'REQUESTED' as const,
+    editAccessRequestedAt: new Date().toISOString(),
+    editAccessRequestedBy: userName || userEmail,
+    version: currentState.version + 1,
+    updatedAt: new Date().toISOString(),
+    updatedBy: userEmail
+  };
+
+  const insertRes = await supabase.from('system_audit_logs').insert({
+    event_type: 'QUESTIONNAIRE_DISTRIBUTOR_STATE',
+    target_user_email: stateKey,
+    details: newState,
+    created_at: new Date().toISOString()
+  });
+
+  if (insertRes.error) throw new Error(insertRes.error.message);
+
+  return { found: true, state: newState };
+}
+
+export async function reviewAuthoritativeQuestionnaireEditAccess(
+  clientName: string,
+  distName: string,
+  auditId: string,
+  action: 'APPROVE' | 'REJECT',
+  userEmail: string,
+  userName: string
+): Promise<AuthoritativeQuestionnaireRecord> {
+  const supabase = getSupabaseServerClient();
+  const stateKey = `${clientName}::${distName}::${auditId}`;
+
+  const { state: currentState } = await getAuthoritativeQuestionnaireState(clientName, distName, auditId, true);
+  
+  const newState = {
+    ...currentState,
+    editAccessStatus: action === 'APPROVE' ? 'APPROVED' as const : 'REJECTED' as const,
+    isLocked: action === 'APPROVE' ? false : true,
+    editAccessApprovedAt: new Date().toISOString(),
+    editAccessApprovedBy: userName || userEmail,
+    version: currentState.version + 1,
+    updatedAt: new Date().toISOString(),
+    updatedBy: userEmail
+  };
+  
+  if (action === 'APPROVE' && newState.status === 'Submitted') {
+     newState.status = 'In Progress';
+  }
+
+  // We save distributor state
+  const distributorState = { ...newState };
+  delete distributorState.auditorNotes;
+
+  const insertRes = await supabase.from('system_audit_logs').insert({
+    event_type: 'QUESTIONNAIRE_DISTRIBUTOR_STATE',
+    target_user_email: stateKey,
+    details: distributorState,
+    created_at: new Date().toISOString()
+  });
+
+  if (insertRes.error) throw new Error(insertRes.error.message);
+
+  return { found: true, state: newState };
+}
+
+export async function customizeAuthoritativeQuestionnaire(
+  clientName: string,
+  distName: string,
+  auditId: string,
+  customSections: any[],
+  userEmail: string,
+  userName: string
+): Promise<AuthoritativeQuestionnaireRecord> {
+  const supabase = getSupabaseServerClient();
+  const stateKey = `${clientName}::${distName}::${auditId}`;
+
+  const { state: currentState } = await getAuthoritativeQuestionnaireState(clientName, distName, auditId, true);
+  
+  const progress = calculateQuestionnaireProgress(currentState.answers, customSections);
+  
+  const newState = {
+    ...currentState,
+    customSections,
+    customTotalCount: progress.totalCount,
+    answeredCount: progress.answeredCount,
+    totalCount: progress.totalCount,
+    completionPercentage: progress.completionPercentage,
+    version: currentState.version + 1,
+    updatedAt: new Date().toISOString(),
+    updatedBy: userEmail
+  };
+
+  const distributorState = { ...newState };
+  delete distributorState.auditorNotes;
+
+  const insertRes = await supabase.from('system_audit_logs').insert({
+    event_type: 'QUESTIONNAIRE_DISTRIBUTOR_STATE',
+    target_user_email: stateKey,
+    details: distributorState,
+    created_at: new Date().toISOString()
+  });
+
+  if (insertRes.error) throw new Error(insertRes.error.message);
+
+  return { found: true, state: newState };
 }

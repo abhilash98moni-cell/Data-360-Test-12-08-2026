@@ -17,7 +17,7 @@ import {
   Users,
   Sliders,
   UserCheck,
-  Layers,
+  Layers, FileText,
   Settings,
   ChevronDown,
   ChevronRight
@@ -40,7 +40,7 @@ export type ActiveTab =
   | 'master_control' 
   | 'audit_logs' 
   | 'profile' 
-  | 'brd';
+  | 'brd' | 'reporting';
 
 interface NavigationSidebarProps {
   activeTab: ActiveTab;
@@ -174,6 +174,21 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
               <div className="flex items-center gap-3 min-w-0">
                 <Layers className={`h-4 w-4 shrink-0 ${activeTab === 'engagement_workspace' ? 'text-white' : 'text-slate-400'}`} />
                 <span className="truncate">Engagement Workspace</span>
+              </div>
+            </button>
+
+            {/* Reporting */}
+            <button
+              onClick={() => onTabChange('reporting')}
+              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'reporting'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+              }`}
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <FileText className={`h-4 w-4 shrink-0 ${activeTab === 'reporting' ? 'text-white' : 'text-slate-400'}`} />
+                <span className="truncate">Reporting</span>
               </div>
             </button>
 

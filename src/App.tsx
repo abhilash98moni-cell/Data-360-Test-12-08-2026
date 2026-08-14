@@ -16,6 +16,7 @@ import { MasterControlView } from './components/MasterControlView';
 import { AdminApprovalView } from './components/AdminApprovalView';
 import { EvidenceManagementView } from './components/EvidenceManagementView';
 import { CommunicationView } from './components/CommunicationView';
+import { ReportingView } from './components/ReportingView';
 import { AuditLogsView } from './components/AuditLogsView';
 import { ProfileView } from './components/ProfileView';
 import { NotificationsModal } from './components/NotificationsModal';
@@ -309,6 +310,12 @@ export default function App() {
           ) : activeTab === 'evidence' ? (
             <EvidenceManagementView 
               currentUser={currentUser}
+              selectedDistributor={selectedDistributor}
+            />
+          ) : activeTab === 'reporting' ? (
+            <ReportingView 
+              currentUser={currentUser}
+              selectedClient={selectedClient}
               selectedDistributor={selectedDistributor}
             />
           ) : activeTab === 'communication' ? (

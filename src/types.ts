@@ -407,3 +407,57 @@ export interface BRDSection {
     };
   };
 }
+
+export interface ReportFinding {
+  id: string;
+  findingNumber: number;
+  severity: 'Critical' | 'High' | 'Significant' | 'Medium' | 'Low';
+  title: string;
+  description: string;
+  contractSection: string;
+  rootCause: string;
+  impact: string;
+  evidence: string[];
+  recommendedActionClient: string;
+  recommendedActionDistributor: string;
+  owner: string;
+  dueDate: string;
+  sources: string[];
+}
+
+export interface DistributorOverview {
+  name: string;
+  location: string;
+  employees: number | string;
+  contracts: string;
+  contacts: string;
+  products: string;
+  sales: string;
+  services: string;
+  territories: string;
+  percentBusiness: string;
+  grossMargin: string;
+  inventory: string;
+  accountsReceivable: string;
+}
+
+export interface ReportMetadata {
+  id: string;
+  clientId: string;
+  distributorId: string;
+  auditId: string;
+  reportType: string;
+  templateId: string;
+  templateVersion: string;
+  reportVersion: string;
+  status: 'DRAFT' | 'IN REVIEW' | 'FINAL';
+  docxFileId?: string;
+  pdfFileId?: string;
+  createdBy: string;
+  createdAt: string;
+  finalizedBy?: string;
+  finalizedAt?: string;
+  executiveSummary?: string;
+  findings: ReportFinding[];
+  overview: DistributorOverview;
+}

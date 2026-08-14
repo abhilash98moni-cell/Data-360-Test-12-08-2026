@@ -36,7 +36,10 @@ import {
   fetchQuestionnaireState,
   saveQuestionnaireAnswers,
   submitQuestionnaire,
-  saveQuestionnaireAuditorNotes
+  saveQuestionnaireAuditorNotes,
+  requestEditAccessQuestionnaire,
+  reviewEditAccessQuestionnaire,
+  customizeQuestionnaire
 } from '../../services/questionnaireApiClient';
 import {
   AuthoritativeQuestionnaireState,
@@ -52,7 +55,7 @@ interface BusinessQuestionnaireViewProps {
   onNavigateToIRL?: (refNumber?: string) => void;
 }
 
-export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps> = ({
+export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps & { currentUser: any }> = ({
   selectedClient,
   selectedDistributor,
   currentUser,
@@ -83,8 +86,14 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps>
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [uploadingQuestionId, setUploadingQuestionId] = useState<string | null>(null);
 
+  const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState<boolean>(false);
+  const [customSectionsDraft, setCustomSectionsDraft] = useState<any[]>([]);
+  const [isEditRequesting, setIsEditRequesting] = useState<boolean>(false);
+  const [isEditReviewing, setIsEditReviewing] = useState<boolean>(false);
+
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const activeSection = BUSINESS_QUESTIONNAIRE_SECTIONS[activeSectionIdx] || BUSINESS_QUESTIONNAIRE_SECTIONS[0];
+  // Moved below
 
   // Load state from API
   const loadState = async () => {
@@ -117,13 +126,81 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps>
     }
   };
 
+
+  const activeSections = useMemo(() => {
+    return questionnaireState?.customSections || BUSINESS_QUESTIONNAIRE_SECTIONS;
+  }, [questionnaireState]);
+
+  const activeSection = activeSections[activeSectionIdx] || activeSections[0];
+
+  const handleRequestEditAccess = async () => {
+    if (!questionnaireState || isEditRequesting) return;
+    setIsEditRequesting(true);
+    setSyncStatus('saving');
+    try {
+      const res = await requestEditAccessQuestionnaire(selectedClient, selectedDistributor, undefined, (currentUser?.email || 'user@example.com'), (currentUser?.name || 'User'));
+      if (res.success && res.state) {
+        setQuestionnaireState(res.state);
+        setSyncStatus('synced');
+        setLastSyncTime('Just now');
+      } else {
+        throw new Error(res.error || 'Failed to request edit access');
+      }
+    } catch (err: any) {
+      setSyncStatus('error');
+      setErrorMessage(err.message);
+    } finally {
+      setIsEditRequesting(false);
+    }
+  };
+
+  const handleReviewEditAccess = async (action: 'APPROVE' | 'REJECT') => {
+    if (!questionnaireState || isEditReviewing) return;
+    setIsEditReviewing(true);
+    setSyncStatus('saving');
+    try {
+      const res = await reviewEditAccessQuestionnaire(selectedClient, selectedDistributor, undefined, action, (currentUser?.email || 'user@example.com'), (currentUser?.name || 'User'));
+      if (res.success && res.state) {
+        setQuestionnaireState(res.state);
+        setSyncStatus('synced');
+        setLastSyncTime('Just now');
+      } else {
+        throw new Error(res.error || 'Failed to review edit access');
+      }
+    } catch (err: any) {
+      setSyncStatus('error');
+      setErrorMessage(err.message);
+    } finally {
+      setIsEditReviewing(false);
+    }
+  };
+
+  const handleSaveCustomization = async (updatedSections: any[]) => {
+    if (!questionnaireState) return;
+    setSyncStatus('saving');
+    try {
+      const res = await customizeQuestionnaire(selectedClient, selectedDistributor, undefined, updatedSections, (currentUser?.email || 'user@example.com'), (currentUser?.name || 'User'));
+      if (res.success && res.state) {
+        setQuestionnaireState(res.state);
+        setSyncStatus('synced');
+        setLastSyncTime('Just now');
+        setIsCustomizeModalOpen(false);
+      } else {
+        throw new Error(res.error || 'Failed to customize questionnaire');
+      }
+    } catch (err: any) {
+      setSyncStatus('error');
+      setErrorMessage(err.message);
+    }
+  };
+
   useEffect(() => {
     loadState();
   }, [selectedClient, selectedDistributor, currentUser?.role, currentUser?.organization]);
 
   // Section completion counts
   const sectionStats = useMemo(() => {
-    return BUSINESS_QUESTIONNAIRE_SECTIONS.map((sec) => {
+    return activeSections.map((sec) => {
       let answered = 0;
       let flagged = 0;
       sec.questions.forEach((q) => {
@@ -154,7 +231,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps>
     const total = TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS;
     let answered = 0;
     let flaggedTotal = 0;
-    BUSINESS_QUESTIONNAIRE_SECTIONS.forEach((sec) => {
+    activeSections.forEach((sec) => {
       sec.questions.forEach((q) => {
         const ans = localAnswers[q.id];
         if (ans && ans.responseValue && ans.responseValue.trim().length > 0) {
@@ -428,6 +505,157 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps>
 
   return (
     <div className="space-y-4 max-w-7xl mx-auto pb-16">
+
+      {/* Customization Modal */}
+      {isCustomizeModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col shadow-2xl">
+            <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900">
+              <div>
+                <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                  <Filter className="h-5 w-5 text-indigo-400" />
+                  Customize Questionnaire
+                </h3>
+                <p className="text-sm text-slate-400 mt-1">
+                  Modify questions, descriptions, or requirements for {selectedDistributor}.
+                </p>
+              </div>
+              <button 
+                onClick={() => setIsCustomizeModalOpen(false)}
+                className="text-slate-400 hover:text-white p-2"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-900/50 space-y-8">
+              {customSectionsDraft.map((section, sIdx) => (
+                <div key={section.id} className="bg-slate-800/50 border border-slate-700/50 rounded-xl p-5">
+                  <div className="flex justify-between items-center mb-4">
+                    <h4 className="font-semibold text-white text-lg">{section.title}</h4>
+                    <button 
+                      onClick={() => {
+                        const newDraft = [...customSectionsDraft];
+                        newDraft[sIdx].questions.push({
+                          id: `q-${section.sectionNumber}.${newDraft[sIdx].questions.length + 1}-custom`,
+                          sectionId: section.id,
+                          questionNumber: `${section.sectionNumber}.${newDraft[sIdx].questions.length + 1}`,
+                          questionText: 'New Question',
+                          guidance: '',
+                          responseType: 'yes_no_details',
+                          isRequired: true,
+                          allowAttachment: false,
+                          isActive: true
+                        });
+                        setCustomSectionsDraft(newDraft);
+                      }}
+                      className="text-xs bg-indigo-500/10 text-indigo-400 px-3 py-1.5 rounded-lg border border-indigo-500/20 hover:bg-indigo-500/20 transition-colors"
+                    >
+                      + Add Question
+                    </button>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    {section.questions.map((q: any, qIdx: number) => (
+                      <div key={q.id} className={`p-4 rounded-lg border ${q.isActive !== false ? 'bg-slate-900 border-slate-700' : 'bg-slate-900/50 border-slate-800 opacity-60'}`}>
+                        <div className="flex justify-between gap-4 mb-3">
+                          <div className="flex-1">
+                            <input 
+                              type="text" 
+                              value={q.questionText}
+                              onChange={(e) => {
+                                const newDraft = [...customSectionsDraft];
+                                newDraft[sIdx].questions[qIdx].questionText = e.target.value;
+                                setCustomSectionsDraft(newDraft);
+                              }}
+                              className="w-full bg-slate-950 border border-slate-800 rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                              placeholder="Question text..."
+                            />
+                          </div>
+                          <button
+                            onClick={() => {
+                              const newDraft = [...customSectionsDraft];
+                              newDraft[sIdx].questions[qIdx].isActive = q.isActive === false ? true : false;
+                              setCustomSectionsDraft(newDraft);
+                            }}
+                            className={`px-3 py-1.5 rounded-md text-xs font-medium border ${q.isActive !== false ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}
+                          >
+                            {q.isActive !== false ? 'Deactivate' : 'Activate'}
+                          </button>
+                        </div>
+                        
+                        <div className="flex flex-wrap gap-4 text-xs">
+                          <div className="flex items-center gap-2">
+                            <label className="text-slate-400">Response Type:</label>
+                            <select 
+                              value={q.responseType}
+                              onChange={(e) => {
+                                const newDraft = [...customSectionsDraft];
+                                newDraft[sIdx].questions[qIdx].responseType = e.target.value;
+                                setCustomSectionsDraft(newDraft);
+                              }}
+                              className="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-300"
+                            >
+                              <option value="yes_no_details">Yes/No + Details</option>
+                              <option value="long_text">Long Text</option>
+                              <option value="multiple_choice">Multiple Choice</option>
+                            </select>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="checkbox" 
+                              checked={q.isRequired !== false}
+                              onChange={(e) => {
+                                const newDraft = [...customSectionsDraft];
+                                newDraft[sIdx].questions[qIdx].isRequired = e.target.checked;
+                                setCustomSectionsDraft(newDraft);
+                              }}
+                              id={`req-${q.id}`}
+                              className="rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500/20"
+                            />
+                            <label htmlFor={`req-${q.id}`} className="text-slate-400">Required</label>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <input 
+                              type="checkbox" 
+                              checked={q.allowAttachment === true}
+                              onChange={(e) => {
+                                const newDraft = [...customSectionsDraft];
+                                newDraft[sIdx].questions[qIdx].allowAttachment = e.target.checked;
+                                setCustomSectionsDraft(newDraft);
+                              }}
+                              id={`att-${q.id}`}
+                              className="rounded border-slate-700 bg-slate-950 text-indigo-500 focus:ring-indigo-500/20"
+                            />
+                            <label htmlFor={`att-${q.id}`} className="text-slate-400">Allow Attachment</label>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+            
+            <div className="p-6 border-t border-slate-800 bg-slate-900 flex justify-end gap-3">
+              <button
+                onClick={() => setIsCustomizeModalOpen(false)}
+                className="px-5 py-2.5 text-slate-300 hover:text-white font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleSaveCustomization(customSectionsDraft)}
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2"
+              >
+                <Check className="h-4 w-4" />
+                Save Customization
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Top Banner / Context Header */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -558,7 +786,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps>
             </div>
 
             <div className="space-y-1">
-              {BUSINESS_QUESTIONNAIRE_SECTIONS.map((sec, idx) => {
+              {activeSections.map((sec, idx) => {
                 const stat = sectionStats[idx];
                 const isActive = activeSectionIdx === idx;
                 return (
@@ -676,7 +904,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps>
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  Section {activeSection.sectionNumber} of {BUSINESS_QUESTIONNAIRE_SECTIONS.length}
+                  Section {activeSection.sectionNumber} of {activeSections.length}
                 </span>
                 <span className="text-xs text-slate-400 font-medium">
                   {sectionStats[activeSectionIdx]?.answered} / {activeSection.questions.length} answered
@@ -696,8 +924,8 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps>
                 <span className="hidden sm:inline">Prev Section</span>
               </button>
               <button
-                disabled={activeSectionIdx === BUSINESS_QUESTIONNAIRE_SECTIONS.length - 1}
-                onClick={() => setActiveSectionIdx((prev) => Math.min(BUSINESS_QUESTIONNAIRE_SECTIONS.length - 1, prev + 1))}
+                disabled={activeSectionIdx === activeSections.length - 1}
+                onClick={() => setActiveSectionIdx((prev) => Math.min(activeSections.length - 1, prev + 1))}
                 className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed text-xs font-semibold flex items-center gap-1 transition-colors"
               >
                 <span className="hidden sm:inline">Next Section</span>
@@ -716,10 +944,11 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps>
               </div>
             ) : (
               visibleQuestions.map((q, qIndex) => {
+                if (q.isActive === false && !isAuditor) return null;
                 const answer = localAnswers[q.id];
                 const auditorNote = localAuditorNotes[q.id];
                 const isAnswered = Boolean(answer?.responseValue && answer.responseValue.trim().length > 0);
-                const isLocked = questionnaireState?.isLocked && isDistributor;
+                const isLocked = questionnaireState?.isLocked && isDistributor && questionnaireState?.editAccessStatus !== 'APPROVED';
 
                 return (
                   <div
@@ -1052,11 +1281,11 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps>
                 </button>
               )}
 
-              {activeSectionIdx < BUSINESS_QUESTIONNAIRE_SECTIONS.length - 1 ? (
+              {activeSectionIdx < activeSections.length - 1 ? (
                 <button
                   onClick={() => {
                     handleSaveDraft();
-                    setActiveSectionIdx((prev) => Math.min(BUSINESS_QUESTIONNAIRE_SECTIONS.length - 1, prev + 1));
+                    setActiveSectionIdx((prev) => Math.min(activeSections.length - 1, prev + 1));
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
                   className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
