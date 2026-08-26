@@ -1,0 +1,1 @@
+sed -i 's/throw new Error(`Requested document binary for \x27${googleDriveFileId}\x27 was not found in Google Drive storage.`);/throw new Error(`Requested document binary for \x27${googleDriveFileId}\x27 was not found in Google Drive storage. fileName was: ${fileName} fallbackFileName was: ${fallbackFileName}`);/g' src/services/storageService.ts

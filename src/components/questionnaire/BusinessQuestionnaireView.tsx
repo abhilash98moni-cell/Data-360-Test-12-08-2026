@@ -1125,7 +1125,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
 
                                   <div className="flex items-center gap-1">
                                     <a
-                                      href={`/api/storage/download/${att.googleDriveFileId || att.id}`}
+                                      href={`/api/storage/download/${att.googleDriveFileId || att.id}?fileName=${encodeURIComponent(att.name || 'document.pdf')}`}
                                       target="_blank"
                                       rel="noreferrer"
                                       className="p-1 text-slate-400 hover:text-indigo-300 rounded hover:bg-slate-800"

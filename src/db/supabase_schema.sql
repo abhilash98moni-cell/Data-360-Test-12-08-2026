@@ -305,3 +305,52 @@ CREATE POLICY "Distributor Edit Requests Isolation Policy" ON public.irl_edit_re
       SELECT role FROM public.users WHERE id = auth.uid()
     ) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Auditor', 'Reviewer', 'service_role')
   );
+
+-- 13. Audit Reports Table
+CREATE TABLE IF NOT EXISTS public.audit_reports (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  report_id VARCHAR(255) UNIQUE,
+  report_type VARCHAR(100),
+  distributor_id VARCHAR(255) NOT NULL,
+  distributor_name VARCHAR(255),
+  client_id VARCHAR(255),
+  client_name VARCHAR(255),
+  audit_id VARCHAR(255),
+  template_id VARCHAR(100),
+  template_version VARCHAR(50),
+  report_version VARCHAR(50),
+  status VARCHAR(50) DEFAULT 'DRAFT',
+  created_by VARCHAR(255),
+  created_by_name VARCHAR(255),
+  created_by_email VARCHAR(255),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  finalized_by VARCHAR(255),
+  finalized_at TIMESTAMP WITH TIME ZONE,
+  docx_file_id VARCHAR(255),
+  pdf_file_id VARCHAR(255),
+  google_drive_file_id VARCHAR(255),
+  google_drive_folder_id VARCHAR(255),
+  google_drive_file_url VARCHAR(1024),
+  last_drive_sync_at TIMESTAMP WITH TIME ZONE,
+  report_content JSONB DEFAULT '{}'::jsonb,
+  overview JSONB DEFAULT '{}'::jsonb,
+  findings JSONB DEFAULT '[]'::jsonb,
+  metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_reports_distributor ON public.audit_reports(distributor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_reports_status ON public.audit_reports(status);
+
+ALTER TABLE public.audit_reports ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Auditors can access all reports" ON public.audit_reports
+  FOR ALL USING (
+    (SELECT role FROM public.users WHERE id = auth.uid()) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Auditor', 'Reviewer', 'service_role')
+  );
+
+CREATE POLICY "Distributors can access their final reports" ON public.audit_reports
+  FOR SELECT USING (
+    status = 'FINAL' AND
+    distributor_name = (SELECT organization_name FROM public.users WHERE id = auth.uid())
+  );

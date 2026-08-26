@@ -51,6 +51,29 @@ export default function App() {
     }
     return 'dashboard';
   });
+  const [evidenceMode, setEvidenceMode] = useState<'All Evidence' | 'Sampling Eligible'>('All Evidence');
+  const [isNavCollapsed, setIsNavCollapsed] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('data360_nav_collapsed') === 'true';
+    }
+    return false;
+  });
+
+  React.useEffect(() => {
+    const handleNavToSampling = () => {
+      setActiveTab('engagement_workspace');
+      setTimeout(() => window.dispatchEvent(new CustomEvent('SWITCH_TO_SAMPLING_TAB')), 50);
+    };
+    window.addEventListener('NAVIGATE_TO_SAMPLING', handleNavToSampling);
+    return () => window.removeEventListener('NAVIGATE_TO_SAMPLING', handleNavToSampling);
+  }, []);
+
+  const handleToggleNavCollapse = () => {
+    const newVal = !isNavCollapsed;
+    setIsNavCollapsed(newVal);
+    localStorage.setItem('data360_nav_collapsed', String(newVal));
+  };
+
   const [selectedClient, setSelectedClient] = useState<string>('Apex Electronics Corp');
   const [selectedDistributor, setSelectedDistributor] = useState<string>('Midwest Trading Co.');
   const [currencyMode, setCurrencyMode] = useState<CurrencyMode>('INR');
@@ -84,6 +107,15 @@ export default function App() {
 
   // Findings & CAPAs State
   const [findings, setFindings] = useState<AuditFinding[]>(INITIAL_FINDINGS);
+  const handleCreateFinding = (findingData: any) => {
+    const newFinding = {
+      id: `FND-${Math.floor(Math.random() * 10000).toString().padStart(4, '0')}`,
+      status: 'Open',
+      ...findingData
+    };
+    setFindings(prev => [newFinding, ...prev]);
+  };
+
 
   // Sampling, Forensic & Assignments State
   const [samplingRuns] = useState(INITIAL_SAMPLING_RUNS);
@@ -175,8 +207,8 @@ export default function App() {
     const eng = engagements.find(e => e.id === f.engagementId);
     const matchesClient = selectedClient === 'All Clients' || (eng && eng.clientName === selectedClient);
     const matchesDistributor = activeDistributorFilter === 'All Distributors' ||
-      f.auditedEntity.toLowerCase().includes(activeDistributorFilter.toLowerCase()) ||
-      f.title.toLowerCase().includes(activeDistributorFilter.toLowerCase());
+      (f.auditedEntity && f.auditedEntity.toLowerCase().includes(activeDistributorFilter.toLowerCase())) ||
+      (f.title && f.title.toLowerCase().includes(activeDistributorFilter.toLowerCase()));
     return matchesClient && matchesDistributor;
   });
 
@@ -243,6 +275,8 @@ export default function App() {
             openFindingsCount={filteredFindings.filter(f => f.status !== 'Resolved').length}
             flaggedAnomaliesCount={forensicAnomalies.length}
             currentUser={currentUser}
+            isCollapsed={isNavCollapsed}
+            onToggleCollapse={handleToggleNavCollapse}
           />
         )}
 
@@ -291,7 +325,7 @@ export default function App() {
               currentUser={currentUser}
             />
           ) : activeTab === 'engagement_workspace' || activeTab === 'iir' ? (
-            <EngagementWorkspaceView 
+            <EngagementWorkspaceView onFindingCreated={handleCreateFinding} onNavigateToEvidence={() => { setActiveTab('evidence'); setEvidenceMode('Sampling Eligible'); }} 
               selectedClient={selectedClient}
               selectedDistributor={currentUser?.role?.includes('Distributor') ? (currentUser.organization || selectedDistributor) : selectedDistributor}
               currentUser={currentUser}
@@ -304,6 +338,9 @@ export default function App() {
             <EvidenceManagementView 
               currentUser={currentUser}
               selectedDistributor={selectedDistributor}
+              defaultMode={evidenceMode}
+              selectedClient={selectedClient}
+              defaultAuditFilter={selectedEngId}
             />
           ) : activeTab === 'reporting' ? (
             <ReportingView 

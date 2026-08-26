@@ -38,6 +38,8 @@ interface EvidenceManagementViewProps {
   currentUser: UserSession | null;
   selectedClient?: string;
   selectedDistributor?: string;
+  defaultAuditFilter?: string;
+  defaultMode?: 'All Evidence' | 'Sampling Eligible';
 }
 
 interface EvidenceVersionHistoryItem {
@@ -56,18 +58,48 @@ interface EvidenceVersionHistoryItem {
 export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
   currentUser,
   selectedClient = 'All Clients',
-  selectedDistributor = 'All Distributors'
+  selectedDistributor = 'All Distributors',
+  defaultAuditFilter = 'All Audits',
+  defaultMode = 'All Evidence'
 }) => {
   const [evidenceList, setEvidenceList] = useState<EvidenceRecord[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
+  useEffect(() => {
+    if (defaultMode) {
+      setEvidenceMode(defaultMode);
+    }
+  }, [defaultMode]);
   const [activeStatusFilter, setActiveStatusFilter] = useState<'All' | 'PENDING_REVIEW' | 'ACCEPTED' | 'CLARIFICATION_REQUIRED' | 'REJECTED'>('PENDING_REVIEW');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFileType, setSelectedFileType] = useState<string>('All');
-  const [selectedAuditFilter, setSelectedAuditFilter] = useState<string>('All Audits');
+  const [selectedSourceFilter, setSelectedSourceFilter] = useState<string>('All Sources');
+  const [selectedAuditFilter, setSelectedAuditFilter] = useState<string>(defaultAuditFilter);
+  useEffect(() => {
+    setSelectedAuditFilter(defaultAuditFilter);
+  }, [defaultAuditFilter]);
+  const [activeMainTab, setActiveMainTab] = useState<'list' | 'upload'>('list');
+  const [evidenceMode, setEvidenceMode] = useState<'All Evidence' | 'Sampling Eligible'>(defaultMode);
+  
+  // Upload State
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploadDistributor, setUploadDistributor] = useState<string>('');
+  const [uploadEngagement, setUploadEngagement] = useState<string>(defaultAuditFilter || 'eng-101');
+  const [uploadAuditPeriod, setUploadAuditPeriod] = useState<string>('FY 2025-26');
+  const [uploadDocType, setUploadDocType] = useState<string>('Expense Register');
+  const [uploadDocUsage, setUploadDocUsage] = useState<string[]>(['EVIDENCE']);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadSuccessMsg, setUploadSuccessMsg] = useState('');
   
   // Modal & Detail Review State
   const [selectedRecord, setSelectedRecord] = useState<EvidenceRecord | null>(null);
   const [reviewerCommentInput, setReviewerCommentInput] = useState('');
+  const [modalDocUsage, setModalDocUsage] = useState<string[]>([]);
+  const [samplingModalRecord, setSamplingModalRecord] = useState<EvidenceRecord | null>(null);
+  const [isAddingSampling, setIsAddingSampling] = useState(false);
+  const [samplingSuccessRecord, setSamplingSuccessRecord] = useState<EvidenceRecord | null>(null);
+  const [isUpdatingUsage, setIsUpdatingUsage] = useState(false);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [removeSamplingModalRecord, setRemoveSamplingModalRecord] = useState<any>(null);
   const [versionHistory, setVersionHistory] = useState<EvidenceVersionHistoryItem[]>([]);
   const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
   const [isSubmittingReview, setIsSubmittingReview] = useState<boolean>(false);
@@ -90,7 +122,13 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
         userOrg: userOrg
       });
 
-      const res = await fetch(`/api/evidence?${params.toString()}`);
+      const res = await fetch(`/api/evidence?${params.toString()}`, {
+        headers: {
+          'x-user-email': currentUser?.email || '',
+          'x-user-role': currentUser?.role || '',
+          'x-user-organization': currentUser?.organization || ''
+        }
+      });
       const data = await res.json();
 
       if (data.success && Array.isArray(data.records)) {
@@ -98,8 +136,11 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
       } else {
         console.warn('Fallback: unable to load evidence from server');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to fetch evidence records from API:', err);
+      if (err?.message?.includes('Failed to fetch')) {
+        console.warn('Network error: Dev server may be restarting.');
+      }
     } finally {
       setLoading(false);
     }
@@ -124,12 +165,18 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
   const fetchVersionHistory = async (recordId: string) => {
     setLoadingHistory(true);
     try {
-      const res = await fetch(`/api/evidence/${recordId}/history`);
+      const res = await fetch(`/api/evidence/${recordId}/history`, {
+        headers: {
+          'x-user-email': currentUser?.email || '',
+          'x-user-role': currentUser?.role || '',
+          'x-user-organization': currentUser?.organization || ''
+        }
+      });
       const data = await res.json();
       if (data.success && Array.isArray(data.history)) {
         setVersionHistory(data.history);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to fetch evidence history:', err);
     } finally {
       setLoadingHistory(false);
@@ -139,6 +186,18 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
   const handleOpenRecordModal = (record: EvidenceRecord) => {
     setSelectedRecord(record);
     setReviewerCommentInput(record.reviewerComment || '');
+    if (Array.isArray(record.documentUsage)) {
+      setModalDocUsage(record.documentUsage);
+    } else if (typeof record.documentUsage === 'string') {
+      try {
+        if (record.documentUsage.startsWith('[')) setModalDocUsage(JSON.parse(record.documentUsage));
+        else setModalDocUsage(record.documentUsage.split(',').map(s => s.trim()));
+      } catch (e) {
+        setModalDocUsage([record.documentUsage]);
+      }
+    } else {
+      setModalDocUsage(['EVIDENCE']);
+    }
     setValidationError('');
     setActionSuccessMsg('');
     setActiveModalTab('preview');
@@ -170,6 +229,17 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
       }
     }
 
+    // Evidence Mode Filter
+    if (evidenceMode === 'Sampling Eligible') {
+      const normRecStatus = (rec.status || '').toUpperCase().replace(/\s+/g, '_');
+      if (normRecStatus !== 'ACCEPTED' && normRecStatus !== 'AVAILABLE' && normRecStatus !== 'PENDING_REVIEW' && normRecStatus !== 'PENDING') return false;
+      const t = (rec.fileType || '').toLowerCase();
+      const n = (rec.fileName || '').toLowerCase();
+      const isSpreadsheet = t.includes('sheet') || t.includes('excel') || t.includes('csv') || n.endsWith('.csv') || n.endsWith('.xlsx') || n.endsWith('.xls');
+      const hasKeywords = n.includes('register') || n.includes('ledger') || n.includes('list') || n.includes('tracker') || n.includes('population');
+      if (!isSpreadsheet && !hasKeywords) return false;
+    }
+
     // Status Filter
     if (activeStatusFilter !== 'All') {
       const normRecStatus = (rec.status || '').toUpperCase().replace(/\s+/g, '_');
@@ -178,6 +248,14 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
       } else if (normRecStatus !== activeStatusFilter) {
         return false;
       }
+    }
+
+    
+    // Source Filter
+    if (selectedSourceFilter !== 'All Sources') {
+      const src = rec.source || (rec.uploadedBy?.toLowerCase().includes('auditor') ? 'Auditor Upload' : 'Distributor Upload');
+      if (selectedSourceFilter === 'Distributor Upload' && src !== 'Distributor Upload') return false;
+      if (selectedSourceFilter === 'Auditor Upload' && src !== 'Auditor Upload') return false;
     }
 
     // File Type Filter
@@ -224,6 +302,132 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
   };
 
   // Submit Evidence Review Action (Auditor)
+  const handleAddSampling = async () => {
+    if (!samplingModalRecord) return;
+    setIsAddingSampling(true);
+    try {
+      const currentUsage = Array.isArray(samplingModalRecord.documentUsage) ? samplingModalRecord.documentUsage : 
+                           (typeof samplingModalRecord.documentUsage === 'string' ? samplingModalRecord.documentUsage.split(',') : ['EVIDENCE']);
+      const newUsage = [...new Set([...currentUsage, 'SAMPLING_POPULATION'])];
+      const res = await fetch(`/api/evidence/${samplingModalRecord.id}/usage`, {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-email': currentUser?.email || '',
+          'x-user-role': currentUser?.role || '',
+          'x-user-organization': currentUser?.organization || ''
+        },
+        body: JSON.stringify({ documentUsage: newUsage, samplingEnabled: true })
+      });
+      const resData = await res.json().catch(() => ({}));
+      if (res.ok) {
+      console.log("==================================================");
+      console.log("ADD TO SAMPLING");
+      console.log("Engagement ID:", samplingModalRecord.auditId || "eng-101");
+      console.log("Distributor ID:", samplingModalRecord.distributorName);
+      console.log("Evidence ID:", samplingModalRecord.id);
+      console.log("File ID:", samplingModalRecord.googleDriveFileId || samplingModalRecord.id);
+      console.log("File Name:", samplingModalRecord.fileName);
+      console.log("Sampling Record ID:", samplingModalRecord.id);
+      console.log("Sampling Status: AVAILABLE");
+      console.log("==================================================");
+        setToastMessage(`✓ ${samplingModalRecord.fileName} is now available in Sampling.`);
+        setTimeout(() => setToastMessage(null), 4000);
+        if (selectedRecord && selectedRecord.id === samplingModalRecord.id) {
+          setSelectedRecord({ 
+            ...selectedRecord, 
+            documentUsage: newUsage, 
+            samplingEnabled: true,
+            samplingStatus: 'AVAILABLE'
+          });
+        }
+        setSamplingModalRecord(null);
+        fetchEvidenceRecords();
+      } else {
+        console.error("ADD TO SAMPLING ERROR:", resData);
+        setToastMessage(`❌ Failed to add document to Sampling. ${resData.error || ''}`);
+        setTimeout(() => setToastMessage(null), 4000);
+      }
+    } catch (err) {
+      console.error(err);
+      setToastMessage(`❌ Failed to add document to Sampling. Please try again.`);
+      setTimeout(() => setToastMessage(null), 4000);
+    } finally {
+      setIsAddingSampling(false);
+    }
+  };
+
+  const isSamplingAdded = selectedRecord?.samplingEnabled === true && selectedRecord?.samplingStatus === 'AVAILABLE' && selectedRecord?.documentUsage?.includes('SAMPLING_POPULATION');
+
+  const handleRemoveSampling = async () => {
+    if (!removeSamplingModalRecord) return;
+    setIsAddingSampling(true);
+    try {
+      const currentUsage = Array.isArray(removeSamplingModalRecord.documentUsage) ? removeSamplingModalRecord.documentUsage : 
+                           (typeof removeSamplingModalRecord.documentUsage === 'string' ? removeSamplingModalRecord.documentUsage.split(',') : ['EVIDENCE']);
+      const newUsage = currentUsage.filter((u) => u !== 'SAMPLING_POPULATION');
+      const res = await fetch(`/api/evidence/${removeSamplingModalRecord.id}/usage`, {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-email': currentUser?.email || '',
+          'x-user-role': currentUser?.role || '',
+          'x-user-organization': currentUser?.organization || ''
+        },
+        body: JSON.stringify({ documentUsage: newUsage, samplingEnabled: false })
+      });
+      if (res.ok) {
+        setToastMessage(`✓ ${removeSamplingModalRecord.fileName} removed from Sampling.`);
+        setTimeout(() => setToastMessage(null), 4000);
+        if (selectedRecord && selectedRecord.id === removeSamplingModalRecord.id) {
+          setSelectedRecord({ ...selectedRecord, documentUsage: newUsage, samplingEnabled: false, samplingStatus: undefined });
+        }
+        setRemoveSamplingModalRecord(null);
+        fetchEvidenceRecords();
+      } else {
+        setToastMessage(`❌ Unable to remove document from Sampling. Please try again.`);
+        setTimeout(() => setToastMessage(null), 4000);
+      }
+    } catch (err) {
+      console.error(err);
+      setToastMessage(`❌ Unable to remove document from Sampling. Please try again.`);
+      setTimeout(() => setToastMessage(null), 4000);
+    } finally {
+      setIsAddingSampling(false);
+    }
+  };
+
+  const handleUsageUpdate = async () => {
+    if (!selectedRecord) return;
+    setIsUpdatingUsage(true);
+    setValidationError('');
+    setActionSuccessMsg('');
+    try {
+      const res = await fetch(`/api/evidence/${selectedRecord.id}/usage`, {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-email': currentUser?.email || '',
+          'x-user-role': currentUser?.role || '',
+          'x-user-organization': currentUser?.organization || ''
+        },
+        body: JSON.stringify({ documentUsage: modalDocUsage })
+      });
+      if (res.ok) {
+        setActionSuccessMsg('Document usage updated successfully!');
+        fetchEvidenceRecords();
+        setSelectedRecord({...selectedRecord, documentUsage: modalDocUsage});
+      } else {
+        const data = await res.json();
+        setValidationError('Failed to update usage: ' + (data.error || 'Unknown error'));
+      }
+    } catch (err: any) {
+      setValidationError('Failed to update document usage.');
+    } finally {
+      setIsUpdatingUsage(false);
+    }
+  };
+
   const handleReviewSubmit = async (decisionStatus: 'ACCEPTED' | 'CLARIFICATION_REQUIRED' | 'REJECTED') => {
     if (!selectedRecord) return;
 
@@ -246,7 +450,12 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
     try {
       const res = await fetch(`/api/evidence/${selectedRecord.id}/review`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-email': currentUser?.email || '',
+          'x-user-role': currentUser?.role || '',
+          'x-user-organization': currentUser?.organization || ''
+        },
         body: JSON.stringify({
           status: decisionStatus,
           comment: trimmedComment,
@@ -335,6 +544,192 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
           </div>
         </div>
       </div>
+
+      {activeMainTab === 'upload' && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl max-w-3xl mx-auto mt-6">
+          <h2 className="text-xl font-bold text-white mb-4">Upload Central Document</h2>
+          <p className="text-xs text-slate-400 mb-6">Upload a document to the centralized repository. It will be available for Evidence, Sampling, and other workflows based on its designated usage.</p>
+          
+          {uploadSuccessMsg && (
+            <div className="mb-6 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-xl flex items-start gap-2 text-emerald-400 text-sm">
+              <CheckCircle2 className="h-5 w-5 shrink-0" />
+              <span>{uploadSuccessMsg}</span>
+            </div>
+          )}
+
+          <div className="space-y-5">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-2">File</label>
+              <input 
+                type="file" 
+                onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+            
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-2">Distributor</label>
+                <select 
+                  value={uploadDistributor}
+                  onChange={(e) => setUploadDistributor(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">Select Distributor...</option>
+                  <option value="Midwest Trading Co.">Midwest Trading Co.</option>
+                  <option value="Global Logistics Corp">Global Logistics Corp</option>
+                  <option value="TechFlow Distributors">TechFlow Distributors</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-2">Engagement</label>
+                <input 
+                  type="text" 
+                  value={uploadEngagement}
+                  onChange={(e) => setUploadEngagement(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-2">Audit Period</label>
+                <input 
+                  type="text" 
+                  value={uploadAuditPeriod}
+                  onChange={(e) => setUploadAuditPeriod(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-2">Document Type</label>
+                <select 
+                  value={uploadDocType}
+                  onChange={(e) => setUploadDocType(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="Expense Register">Expense Register</option>
+                  <option value="Revenue Register">Revenue Register</option>
+                  <option value="Purchase Register">Purchase Register</option>
+                  <option value="Bank Statement">Bank Statement</option>
+                  <option value="Invoice">Invoice</option>
+                  <option value="Contract">Contract</option>
+                  <option value="Other">Other</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-3">Document Usage</label>
+              <div className="flex flex-wrap gap-4">
+                {[
+                  { id: 'EVIDENCE', label: 'Evidence' },
+                  { id: 'SAMPLING_POPULATION', label: 'Sampling Population' },
+                  { id: 'QUESTIONNAIRE_SOURCE', label: 'Questionnaire Source' },
+                  { id: 'SUPPORTING_DOCUMENT', label: 'Supporting Document' }
+                ].map(usage => (
+                  <label key={usage.id} className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={uploadDocUsage.includes(usage.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setUploadDocUsage([...uploadDocUsage, usage.id]);
+                        } else {
+                          setUploadDocUsage(uploadDocUsage.filter(u => u !== usage.id));
+                        }
+                      }}
+                      className="rounded border-slate-700 bg-slate-900 text-indigo-500 focus:ring-indigo-500"
+                    />
+                    <span className="text-sm text-slate-300">{usage.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-slate-800 flex justify-end">
+              <button
+                onClick={async () => {
+                  if (!uploadFile) return alert('Please select a file');
+                  if (!uploadDistributor) return alert('Please select a distributor');
+                  
+                  setIsUploading(true);
+                  setUploadSuccessMsg('');
+                  try {
+                    const formData = new FormData();
+                    formData.append('file', uploadFile);
+                    formData.append('clientName', 'Apex Electronics Corp');
+                    formData.append('distributorName', uploadDistributor);
+                    formData.append('auditName', uploadEngagement);
+                    formData.append('auditPeriod', uploadAuditPeriod);
+                    formData.append('documentType', uploadDocType);
+                    formData.append('documentUsage', JSON.stringify(uploadDocUsage));
+                    formData.append('requirementId', 'CEN-' + Math.floor(Math.random()*1000));
+                    
+                    const res = await fetch('/api/storage/upload', {
+                      method: 'POST',
+                      headers: {
+                        'x-user-email': currentUser?.email || '',
+                        'x-user-role': currentUser?.role || '',
+                        'x-user-organization': currentUser?.organization || ''
+                      },
+                      body: formData
+                    });
+                    
+                    if (res.ok) {
+                      setUploadSuccessMsg('Document uploaded successfully and added to My Evidence.');
+                      setUploadFile(null);
+                      const fileInputs = document.querySelectorAll('input[type="file"]');
+                      fileInputs.forEach((input) => (input as any).value = '');
+                      fetchEvidenceRecords();
+                    } else {
+                      const data = await res.json();
+                      alert('Upload failed: ' + data.error);
+                    }
+                  } catch (e) {
+                    alert('Upload failed');
+                  } finally {
+                    setIsUploading(false);
+                  }
+                }}
+                disabled={isUploading || !uploadFile}
+                className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm transition-colors disabled:opacity-50 flex items-center gap-2"
+              >
+                {isUploading ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    <span>Uploading...</span>
+                  </>
+                ) : (
+                  <>
+                    <FolderArchive className="h-4 w-4" />
+                    <span>Upload Document</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: activeMainTab === 'list' ? 'block' : 'none' }}>
+        {/* Evidence Mode Tabs */}
+        <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1 mb-6 max-w-[600px] mx-auto sm:mx-0">
+          {['All Evidence', 'Sampling Eligible'].map(mode => (
+            <button
+              key={mode}
+              onClick={() => setEvidenceMode(mode as any)}
+              className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${
+                evidenceMode === mode 
+                  ? 'bg-slate-700 text-white shadow-sm' 
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+              }`}
+            >
+              {mode}
+            </button>
+          ))}
+        </div>
 
       {/* Metrics & Analytics Dashboard Bar */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
@@ -477,6 +872,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
               <tr>
                 <th className="py-3.5 px-4">Requirement Ref & Title</th>
                 <th className="py-3.5 px-4">Evidence Document</th>
+                <th className="py-3.5 px-4">Source</th>
                 <th className="py-3.5 px-4">Distributor Entity</th>
                 <th className="py-3.5 px-4">Uploader & Date</th>
                 <th className="py-3.5 px-4">Version</th>
@@ -487,21 +883,21 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
             <tbody className="divide-y divide-slate-800/60">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400 text-xs">
+                  <td colSpan={8} className="py-12 text-center text-slate-400 text-xs">
                     <RefreshCw className="h-6 w-6 text-indigo-400 animate-spin mx-auto mb-2" />
                     <span>Loading Evidence Review Records...</span>
                   </td>
                 </tr>
               ) : filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400 text-xs space-y-2">
+                  <td colSpan={8} className="py-12 text-center text-slate-400 text-xs space-y-2">
                     <FolderArchive className="h-8 w-8 text-slate-600 mx-auto" />
                     <p className="font-semibold text-slate-300">No evidence files match the selected filters.</p>
                     <p className="text-[11px] text-slate-500">Try adjusting your search terms or status filter tab.</p>
                   </td>
                 </tr>
               ) : (
-                filteredRecords.map((item) => {
+                filteredRecords.map((item, idx) => {
                   const normStatus = (item.status || '').toUpperCase().replace(/\s+/g, '_');
                   const isAccepted = normStatus === 'ACCEPTED';
                   const isPending = normStatus === 'PENDING_REVIEW' || normStatus === 'PENDING';
@@ -509,7 +905,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                   const isRejected = normStatus === 'REJECTED';
 
                   return (
-                    <tr key={item.id} className="hover:bg-slate-800/40 transition-colors">
+                    <tr key={`evd-${item.id}-${idx}`} className="hover:bg-slate-800/40 transition-colors">
                       <td className="py-3.5 px-4">
                         <div className="flex items-center gap-2">
                           <span className="px-2 py-0.5 bg-slate-950 border border-slate-800 rounded font-mono text-[10px] font-bold text-indigo-300">
@@ -540,6 +936,11 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                         </div>
                       </td>
 
+                      <td className="py-3.5 px-4">
+                        <span className="px-2.5 py-1 bg-slate-950 text-slate-300 rounded text-[10px] font-bold border border-slate-800 uppercase tracking-wider">
+                          {item.source || (item.uploadedBy?.toLowerCase().includes('auditor') ? 'Auditor Upload' : 'Distributor Upload')}
+                        </span>
+                      </td>
                       <td className="py-3.5 px-4 text-slate-300">
                         <div className="flex items-center gap-1.5 font-medium">
                           <Building2 className="h-3.5 w-3.5 text-slate-500" />
@@ -608,7 +1009,79 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
         </div>
       </div>
 
+      </div>
       {/* EVIDENCE REVIEW & DETAIL MODAL */}
+      
+      
+      {/* Remove Sampling Confirmation Modal */}
+      {removeSamplingModalRecord && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative">
+            <div className="p-6">
+              <h3 className="text-xl font-bold text-white mb-2">Remove from Sampling?</h3>
+              <p className="text-slate-400 text-sm mb-6">
+                Are you sure you want to remove <strong className="text-slate-200">{removeSamplingModalRecord.fileName}</strong> from Sampling Populations? This will not delete the original evidence file.
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button 
+                  onClick={() => setRemoveSamplingModalRecord(null)}
+                  disabled={isAddingSampling}
+                  className="px-4 py-2 text-sm font-semibold text-slate-300 hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleRemoveSampling}
+                  disabled={isAddingSampling}
+                  className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2"
+                >
+                  {isAddingSampling && <RefreshCw className="h-4 w-4 animate-spin" />}
+                  Remove from Sampling
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sampling Confirmation Modal */}
+      {samplingModalRecord && !samplingSuccessRecord && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden relative">
+            <div className="p-6">
+              <h3 className="text-xl font-bold text-white mb-2">Add to Sampling?</h3>
+              <p className="text-slate-400 text-sm mb-4">
+                This document will be available as a sampling population for the current distributor, engagement, audit, and audit period.
+              </p>
+              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 mb-6 space-y-1.5 text-left">
+                <p className="text-xs text-slate-400">File: <span className="text-slate-200 font-semibold">{samplingModalRecord.fileName}</span></p>
+                <p className="text-xs text-slate-400">Distributor: <span className="text-slate-200 font-semibold">{samplingModalRecord.distributorName}</span></p>
+                <p className="text-xs text-slate-400">Audit Period: <span className="text-slate-200 font-semibold">{samplingModalRecord.auditPeriod || 'FY 2025-26'}</span></p>
+              </div>
+              <div className="flex gap-3 justify-end">
+                <button 
+                  onClick={() => setSamplingModalRecord(null)}
+                  disabled={isAddingSampling}
+                  className="px-4 py-2 text-sm font-semibold text-slate-300 hover:text-white transition-colors"
+                >
+                  Cancel
+                </button>
+                <button 
+                  onClick={handleAddSampling}
+                  disabled={isAddingSampling}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded-lg transition-colors flex items-center gap-2"
+                >
+                  {isAddingSampling && <RefreshCw className="h-4 w-4 animate-spin" />}
+                  Add to Sampling
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      
+
       {selectedRecord && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-md p-4 animate-fade-in overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl overflow-hidden shadow-2xl text-white my-8">
@@ -686,7 +1159,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                         Embedded Document Preview
                       </span>
                       <a
-                        href={`/api/storage/preview/${selectedRecord.googleDriveFileId || selectedRecord.id}`}
+                        href={`/api/storage/preview/${selectedRecord.googleDriveFileId || selectedRecord.id}?fileName=${encodeURIComponent(selectedRecord.fileName || 'document.pdf')}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-[11px] text-indigo-400 hover:underline flex items-center gap-1 font-mono"
@@ -700,7 +1173,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                       {selectedRecord.fileType.includes('pdf') ? (
                         <div className="w-full h-[400px]">
                           <iframe 
-                            src={`/api/storage/preview/${selectedRecord.googleDriveFileId || selectedRecord.id}`} 
+                            src={`/api/storage/preview/${selectedRecord.googleDriveFileId || selectedRecord.id}?fileName=${encodeURIComponent(selectedRecord.fileName || 'document.pdf')}`} 
                             className="w-full h-full border border-slate-800 rounded-lg bg-slate-900"
                             title="PDF Preview"
                           />
@@ -755,7 +1228,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                       ) : (
                         <div className="w-full h-[400px]">
                           <iframe 
-                            src={`/api/storage/preview/${selectedRecord.googleDriveFileId || selectedRecord.id}`} 
+                            src={`/api/storage/preview/${selectedRecord.googleDriveFileId || selectedRecord.id}?fileName=${encodeURIComponent(selectedRecord.fileName || 'document.pdf')}`} 
                             className="w-full h-full border border-slate-800 rounded-lg bg-slate-900"
                             title="Document Preview"
                           />
@@ -769,7 +1242,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <div className="flex items-center gap-2">
                         <a
-                          href={`/api/storage/download/${selectedRecord.googleDriveFileId || selectedRecord.id}`}
+                          href={`/api/storage/download/${selectedRecord.googleDriveFileId || selectedRecord.id}?fileName=${encodeURIComponent(selectedRecord.fileName || 'document.pdf')}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors shadow-md"
@@ -823,8 +1296,58 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 disabled:opacity-70 transition-colors"
                     />
 
+                    
+                    {/* Sampling Section */}
+                    <div className="mt-8 border-t border-slate-800 pt-6">
+                      <div className="mb-4">
+                        <h4 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-1">SAMPLING USAGE</h4>
+                        <div className="h-px w-full bg-slate-800"></div>
+                      </div>
+                      
+                      <div className="space-y-4">
+                        <div className="flex items-center justify-between bg-slate-900 border border-slate-800 rounded-lg p-3">
+                          <span className="text-xs font-semibold text-slate-400">Sampling Eligibility:</span>
+                          <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" /> Eligible</span>
+                        </div>
+
+                        {!isDistributor && !isSamplingAdded && (
+                          <button
+                            onClick={() => setSamplingModalRecord(selectedRecord)}
+                            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-xl transition-colors"
+                          >
+                            Add to Sampling
+                          </button>
+                        )}
+                        {!isDistributor && isSamplingAdded && (
+                          <div className="space-y-3">
+                            <div className="w-full py-2.5 bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 text-sm font-bold rounded-xl flex items-center justify-center gap-2">
+                              <CheckCircle2 className="h-4 w-4" /> Added to Sampling
+                            </div>
+                            <p className="text-xs text-slate-400 text-center">This document is currently available in:<br/><strong className="text-slate-300">Sampling &rarr; Available Populations</strong></p>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => {
+                                  setSelectedRecord(null);
+                                  window.dispatchEvent(new CustomEvent('NAVIGATE_TO_SAMPLING'));
+                                }}
+                                className="flex-1 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-bold rounded-lg transition-colors"
+                              >
+                                Go to Sampling
+                              </button>
+                              <button
+                                onClick={() => setRemoveSamplingModalRecord(selectedRecord)}
+                                className="flex-1 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-sm font-bold rounded-lg transition-colors border border-slate-700"
+                              >
+                                Remove from Sampling
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
                     {!isDistributor && (
-                      <div className="space-y-2">
+                      <div className="space-y-2 mt-8 border-t border-slate-800 pt-6">
                         <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
                           Select Auditor Action Decision:
                         </p>
@@ -946,6 +1469,16 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
         </div>
       )}
 
+    
+      {/* Toast Notification */}
+      {toastMessage && (
+        <div className="fixed bottom-4 right-4 z-[200] animate-in slide-in-from-bottom-5 fade-in bg-slate-900 border border-slate-700 shadow-2xl rounded-lg p-4 flex items-center gap-3">
+          <div className="h-8 w-8 rounded-full bg-emerald-500/20 flex items-center justify-center shrink-0">
+            {toastMessage.startsWith('❌') ? <XCircle className="h-4 w-4 text-red-400" /> : <CheckCircle2 className="h-4 w-4 text-emerald-400" />}
+          </div>
+          <p className="text-sm font-semibold text-white">{toastMessage.replace('✓ ', '').replace('❌ ', '')}</p>
+        </div>
+      )}
     </div>
   );
 };

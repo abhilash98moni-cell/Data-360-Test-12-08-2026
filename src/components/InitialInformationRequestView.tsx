@@ -1894,8 +1894,8 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {editRequestsList.filter(r => r.status === 'PENDING').map((req) => (
-              <div key={req.id} className="bg-slate-950 border border-amber-500/30 rounded-xl p-3.5 space-y-2 text-xs relative">
+            {editRequestsList.filter(r => r.status === 'PENDING').map((req, idx) => (
+<div key={`req-pend-${idx}`} className="bg-slate-950 border border-amber-500/30 rounded-xl p-3.5 space-y-2 text-xs relative">
                 <div className="flex items-center justify-between">
                   <span className="font-mono font-bold text-amber-400 text-[11px]">{req.id}</span>
                   <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px] uppercase">
@@ -2857,7 +2857,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                   <span>Document Preview</span>
                 </span>
                 <a
-                  href={selectedFileForPreview.webViewLink || `/api/storage/preview/${encodeURIComponent(selectedFileForPreview.id || selectedFileForPreview.evidenceId)}`}
+                  href={selectedFileForPreview.webViewLink || `/api/storage/preview/${encodeURIComponent(selectedFileForPreview.id || selectedFileForPreview.evidenceId)}?fileName=${encodeURIComponent(selectedFileForPreview.fileName || selectedFileForPreview.name || 'document.pdf')}`}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="text-[11px] text-indigo-400 hover:text-indigo-300 hover:underline flex items-center gap-1 font-mono font-medium transition-colors"
@@ -2869,7 +2869,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
               <div className="flex-1 w-full rounded-xl overflow-hidden border border-slate-800/90 bg-slate-900 shadow-inner min-h-[300px]">
                 <iframe
-                  src={selectedFileForPreview.webViewLink || `/api/storage/preview/${encodeURIComponent(selectedFileForPreview.id || selectedFileForPreview.evidenceId)}`}
+                  src={selectedFileForPreview.webViewLink || `/api/storage/preview/${encodeURIComponent(selectedFileForPreview.id || selectedFileForPreview.evidenceId)}?fileName=${encodeURIComponent(selectedFileForPreview.fileName || selectedFileForPreview.name || 'document.pdf')}`}
                   className="w-full h-full rounded border-0 bg-slate-950 text-slate-200"
                   title={`Preview of ${selectedFileForPreview.fileName}`}
                 />

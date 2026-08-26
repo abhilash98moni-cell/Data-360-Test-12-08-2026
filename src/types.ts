@@ -109,6 +109,7 @@ export interface EvidenceRecord {
   version: number;
   hash?: string;
   uploadedBy: string;
+  source?: string;
   uploadedDate: string;
   status: 'PENDING_REVIEW' | 'ACCEPTED' | 'REJECTED' | 'CLARIFICATION_REQUIRED' | 'Pending Review' | 'Accepted' | 'Rejected' | 'Clarification Required';
   reviewerComment?: string;
@@ -121,6 +122,8 @@ export interface EvidenceRecord {
   aiRiskScore?: number;
   aiExtractedData?: Record<string, any>;
   aiAnalysisTimestamp?: string;
+  documentUsage?: string | string[];
+  auditPeriod?: string;
 }
 
 export interface SystemAuditLog {
@@ -245,6 +248,7 @@ export interface IIRFile {
   fileSizeMB: number;
   fileType: string;
   uploadedBy: string;
+  source?: string;
   uploadDate: string;
   version: number;
   hash: string;
@@ -291,6 +295,7 @@ export interface ReferenceMaterialVersion {
   fileType: string;
   uploadDate: string;
   uploadedBy: string;
+  source?: string;
   description?: string;
   fileUrl?: string;
 }
@@ -308,6 +313,7 @@ export interface AuditorReferenceMaterial {
   fileType: string;
   description: string;
   uploadedBy: string;
+  source?: string;
   uploadDate: string;
   fileVersion: number;
   status: 'Active' | 'Archived' | 'Draft';
@@ -439,6 +445,7 @@ export interface DistributorOverview {
   grossMargin: string;
   inventory: string;
   accountsReceivable: string;
+  documentData?: Record<string, string>;
 }
 
 export interface ReportMetadata {
@@ -460,4 +467,5 @@ export interface ReportMetadata {
   executiveSummary?: string;
   findings: ReportFinding[];
   overview: DistributorOverview;
+  documentData?: Record<string, string>;
 }

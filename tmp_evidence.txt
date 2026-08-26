@@ -1,0 +1,133 @@
+      res.setHeader('Content-Type', downloaded.mimeType || 'text/plain');
+      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(downloaded.fileName)}"`);
+      res.send(downloaded.buffer);
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to preview file from Google Drive' });
+    }
+  });
+
+  // Delete file from Google Drive
+  app.delete('/api/storage/delete/:fileId', async (req, res) => {
+    try {
+      const { fileId } = req.params;
+      const success = await storageService.deleteFile(fileId);
+      res.json({ success, message: `File ${fileId} deleted from Google Drive storage` });
+    } catch (err: any) {
+      res.status(500).json({ error: 'Failed to delete file from Google Drive' });
+    }
+  });
+
+  // ====================================================================
+  // STAGE 4A: EVIDENCE REVIEW MODULE API ENDPOINTS (PRODUCTION HARDENED)
+  // ====================================================================
+
+  // GET /api/evidence - Fetch evidence records from Supabase DB with multi-tenancy
+  app.get('/api/evidence', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const {
+        client,
+        auditId,
+        distributor,
+        status,
+        search,
+        documentUsage,
+        auditPeriod
+      } = req.query as Record<string, string>;
+
+      const isDistributor = req.auth.role === 'Distributor';
+      // SERVER-SIDE TENANT ISOLATION: Force distributorName to user's organization if role is Distributor
+      const targetDistributor = isDistributor ? req.auth.organization : (distributor && distributor !== 'All Distributors' ? distributor : undefined);
+
+      const supabase = getSupabaseServerClient();
+      let query = supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_FILE');
+
+      const { data, error } = await query.order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error querying Supabase system_audit_logs for evidence:', error.message);
+        return res.status(500).json({ success: false, error: 'Database query failed when fetching evidence records.' });
+      }
+
+      let dbRecords = (data || []).map((row) => {
+        const r = row.details || {};
+        return {
+          id: row.id,
+          clientName: r.client_name || 'Apex Electronics Corp',
+          auditId: r.audit_id || 'eng-101',
+          auditCode: r.audit_code || 'AUD-2026-001',
+          distributorName: r.distributor_name,
+          requestRef: r.requirement_ref || r.request_item_id || '1.1',
+          requestTitle: r.requirement_title || 'Audit Requirement',
+          section: r.section || 'General Requirements',
+          fileName: r.file_name,
+          fileSizeMB: Number(r.file_size_mb || 1.0),
+          fileType: r.file_type || 'application/pdf',
+          googleDriveFileId: r.google_drive_file_id || r.storage_path,
+          googleDriveFolderId: r.google_drive_folder_id,
+          version: r.version || 1,
+          uploadedBy: r.uploaded_by,
+          uploadedDate: r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : new Date().toLocaleString(),
+          status: r.review_status || r.status || 'PENDING_REVIEW',
+          reviewerComment: r.reviewer_comment,
+          reviewedBy: r.reviewed_by,
+          reviewedDate: r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : undefined,
+          aiStatus: r.ai_status,
+          aiSummary: r.ai_summary,
+          aiFlags: r.ai_flags,
+          aiRiskScore: r.ai_risk_score,
+          aiExtractedData: r.ai_extracted_data,
+          aiAnalysisTimestamp: r.ai_analysis_timestamp,
+          documentUsage: r.document_usage || 'GENERAL_EVIDENCE',
+          auditPeriod: r.audit_period || 'FY 2025-26'
+        };
+      });
+
+      // SERVER-SIDE TENANT ISOLATION: Force distributorName to user's organization if role is Distributor
+      if (targetDistributor) {
+        dbRecords = dbRecords.filter(r => r.distributorName === targetDistributor);
+      }
+
+      if (client && client !== 'All Clients') {
+        dbRecords = dbRecords.filter(r => r.clientName === client);
+      }
+
+      if (auditId && auditId !== 'All Audits') {
+        dbRecords = dbRecords.filter(r => r.auditId === auditId);
+      }
+
+      if (status && status !== 'All') {
+        const allowedStatuses = status.toUpperCase().split(',').map(s => s.trim().replace(/\s+/g, '_'));
+        dbRecords = dbRecords.filter(r => {
+           const rStat = (r.status || '').toUpperCase().replace(/\s+/g, '_');
+           return allowedStatuses.includes(rStat);
+        });
+      }
+
+      if (documentUsage) {
+        dbRecords = dbRecords.filter(r => {
+          if (Array.isArray(r.documentUsage)) {
+             return r.documentUsage.includes(documentUsage);
+          }
+          return r.documentUsage === documentUsage || (r.documentUsage || '').includes(documentUsage);
+        });
+      }
+      
+      if (auditPeriod) {
+        dbRecords = dbRecords.filter(r => r.auditPeriod === auditPeriod);
+      }
+
+
+      // Local search filter if search term provided
+      if (search && search.trim().length > 0) {
+        const q = search.trim().toLowerCase();
+        dbRecords = dbRecords.filter(r => 
+          (r.fileName && r.fileName.toLowerCase().includes(q)) ||
+          (r.requestRef && r.requestRef.toLowerCase().includes(q)) ||
+          (r.requestTitle && r.requestTitle.toLowerCase().includes(q)) ||
+          (r.distributorName && r.distributorName.toLowerCase().includes(q)) ||
+          (r.id && r.id.toLowerCase().includes(q)) ||
+          (r.reviewerComment && r.reviewerComment.toLowerCase().includes(q))
+        );
+      }
+
+      return res.json({

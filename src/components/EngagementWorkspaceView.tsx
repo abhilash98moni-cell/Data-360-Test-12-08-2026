@@ -14,15 +14,19 @@ import {
 } from 'lucide-react';
 import { BusinessQuestionnaireView } from './questionnaire/BusinessQuestionnaireView';
 import { InitialInformationRequestView } from './InitialInformationRequestView';
+import { SamplingView } from './SamplingView';
 import { INITIAL_IIR_REQUESTS, INITIAL_IIR_AUDIT_TRAIL } from '../data/iirData';
 import { UserSession } from './AuthModal';
 
 export type EngagementSubTab = 'questionnaire' | 'iir' | 'sampling';
 
 interface EngagementWorkspaceViewProps {
+  currencyMode?: string;
   selectedClient: string;
   selectedDistributor: string;
   currentUser: UserSession | null;
+  onFindingCreated?: (finding: any) => void;
+  onNavigateToEvidence?: () => void;
   initialSubTab?: EngagementSubTab;
   isIIRFullScreen?: boolean;
   onToggleIIRFullScreen?: () => void;
@@ -33,12 +37,21 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
   selectedClient,
   selectedDistributor,
   currentUser,
+  onFindingCreated,
+  onNavigateToEvidence,
   initialSubTab = 'questionnaire',
   isIIRFullScreen = false,
   onToggleIIRFullScreen,
-  onDistributorChangeGlobal
+  onDistributorChangeGlobal,
+  currencyMode
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<EngagementSubTab>(initialSubTab);
+
+  React.useEffect(() => {
+    const handleSwitch = () => setActiveSubTab('sampling');
+    window.addEventListener('SWITCH_TO_SAMPLING_TAB', handleSwitch);
+    return () => window.removeEventListener('SWITCH_TO_SAMPLING_TAB', handleSwitch);
+  }, []);
 
   const isDistributor = currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor');
   const isAuditor = !isDistributor;
@@ -47,7 +60,7 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
     ? currentUser?.organization || selectedDistributor
     : selectedDistributor !== 'All Distributors'
     ? selectedDistributor
-    : 'Midwest Trading Co.';
+    : selectedDistributor;
 
   return (
     <div className="space-y-4">
@@ -120,6 +133,7 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
           selectedClient={selectedClient}
           selectedDistributor={distributorProp}
           currentUser={currentUser}
+          currencyMode={currencyMode}
           onNavigateToIRL={() => setActiveSubTab('iir')}
         />
       )}
@@ -142,35 +156,12 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
       )}
 
       {activeSubTab === 'sampling' && isAuditor && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 sm:p-12 text-center space-y-4 max-w-4xl mx-auto shadow-xl">
-          <div className="h-16 w-16 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mx-auto">
-            <BarChart3 className="h-8 w-8" />
-          </div>
-          <div className="space-y-1">
-            <h3 className="text-lg font-bold text-white">Engagement Sampling & Statistical Testing</h3>
-            <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto">
-              Sample selection and testing will be available here. Configure Monetary Unit Sampling (MUS) and stratified populations once questionnaire and IRL evidence are accepted.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-4 text-left max-w-2xl mx-auto">
-            <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl space-y-1">
-              <span className="text-[10px] text-slate-500 font-bold uppercase">Target Population</span>
-              <p className="text-xs font-semibold text-slate-200">142,000 Invoices</p>
-              <p className="text-[10px] text-slate-400">Ledger value: ₹18.84 Cr</p>
-            </div>
-            <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl space-y-1">
-              <span className="text-[10px] text-slate-500 font-bold uppercase">Confidence Interval</span>
-              <p className="text-xs font-semibold text-emerald-400">95% Confidence</p>
-              <p className="text-[10px] text-slate-400">MUS standard threshold</p>
-            </div>
-            <div className="p-3.5 bg-slate-950/80 border border-slate-800 rounded-xl space-y-1">
-              <span className="text-[10px] text-slate-500 font-bold uppercase">Workflow State</span>
-              <p className="text-xs font-semibold text-amber-300">Pending Fieldwork</p>
-              <p className="text-[10px] text-slate-400">Awaiting questionnaire sign-off</p>
-            </div>
-          </div>
-        </div>
+        <SamplingView onFindingCreated={onFindingCreated} onNavigateToEvidence={onNavigateToEvidence} 
+          selectedClient={selectedClient}
+          selectedDistributor={distributorProp}
+          currentUser={currentUser}
+          currencyMode={currencyMode}
+        />
       )}
     </div>
   );
