@@ -32,7 +32,7 @@ import {
   Minimize,
 } from "lucide-react";
 import { UserSession } from "./AuthModal";
-import { supabase } from "../lib/supabaseClient";
+
 import { ReportMetadata } from "../types";
 import { ReportPreview, generateReportHTML } from "./ReportPreview";
 
@@ -625,53 +625,46 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
 
   const fetchReports = async () => {
     try {
-      let query = supabase
-        .from("audit_reports")
-        .select("*")
-        .order("created_at", { ascending: false });
+      const params = new URLSearchParams({
+         distributor: selectedDistributor
+      });
+      const res = await fetch(`/api/reports?${params.toString()}`, {
+         headers: {
+            'x-user-email': currentUser?.email || '',
+            'x-user-role': currentUser?.role || '',
+            'x-user-organization': currentUser?.organization || ''
+         }
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
 
-      // Distributor portal filtering
-      if (currentUser?.role === "Distributor" || currentUser?.role?.includes("Distributor")) {
-        query = query.eq("status", "FINAL").eq("distributor_name", currentUser.organization || selectedDistributor);
-      }
-
-      const { data, error } = await query;
-
-      if (error) {
-        throw error;
-      } else if (data) {
-        const formattedReports = data.map((row: any) => ({
-          id: row.id || row.report_id,
+      if (data.reports) {
+        const formattedReports = data.reports.map((row: any) => ({
+          id: row.id,
+          reportId: row.report_id,
           clientId: row.client_id,
-          distributorId: row.distributor_name || row.distributor_id,
           auditId: row.audit_id,
-          reportType: row.report_type,          
+          reportType: row.report_type,
           templateId: row.template_id,
           templateVersion: row.template_version,
           reportVersion: row.report_version,
           status: row.status,
           createdBy: row.created_by,
+          createdByEmail: row.created_by_email,
           createdAt: row.created_at,
-          finalizedBy: row.finalized_by,
+          updatedAt: row.updated_at,
           finalizedAt: row.finalized_at,
-          docxFileId: row.docx_file_id,
-          pdfFileId: row.pdf_file_id,
-          findings: row.findings || [],
+          finalizedBy: row.finalized_by,
           overview: {
-            ...(row.overview || {}),
+            ...row.overview,
             documentData: row.report_content || row.overview?.documentData || {}
           }
         })) as ReportMetadata[];
         setReports(formattedReports);
       }
     } catch (err: any) {
-      if (err?.code === "PGRST205" || err?.code === "42P01" || err?.code === "42703") {
-        console.warn("Expected Database Setup Error: 'audit_reports' table missing. User needs to run SQL.");
-        setDbError("Database Persistence Error: The 'audit_reports' table or columns are missing. You must execute the SQL in src/db/supabase_schema.sql to enable persistence.");
-      } else {
-        console.error("Failed to fetch reports", err);
-        setDbError("Database error: " + (err.message || String(err)));
-      }
+      console.error("Failed to fetch reports", err);
+      setDbError("Database error: " + (err.message || String(err)));
     }
   };
 
@@ -818,12 +811,13 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
 
     let realDistributorId = null;
     try {
-      const { data: distData } = await supabase
-        .from('distributors')
-        .select('id')
-        .eq('entity_name', selectedDistributor)
-        .single();
-      if (distData) realDistributorId = distData.id;
+      const res = await fetch(`/api/distributors?name=${encodeURIComponent(selectedDistributor)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.distributors && data.distributors.length > 0) {
+            realDistributorId = data.distributors[0].id;
+        }
+      }
     } catch (e) {
       console.warn("Could not fetch real distributor ID", e);
     }
@@ -862,8 +856,8 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
     };
 
     try {
-      const { error } = await supabase.from("audit_reports").insert([
-        {
+      const payload = {
+
           id: newId,
           report_id: `rep-${Date.now()}`,
           client_id: newReport.clientId,
@@ -883,11 +877,19 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
           findings: newReport.findings,
           overview: newReport.overview,
           report_content: {}
-        },
-      ]);
-      if (error) {
-        throw error;
-      }
+        
+      };
+      const res = await fetch('/api/reports', {
+         method: 'POST',
+         headers: {
+            'Content-Type': 'application/json',
+            'x-user-email': currentUser?.email || ''
+         },
+         body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
       setReports([newReport, ...reports]);
       setIsCreating(false);
       setActiveReport(newReport);
@@ -910,7 +912,6 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
 
     const updatedOverview = {
       ...activeReport.overview,
-      // Still keep it here for backwards compatibility if needed, but we'll also save to report_content
       documentData: documentData,
       ...(asFinal && { finalizedAt: new Date().toISOString() }),
     };
@@ -919,9 +920,7 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
     const version = asFinal ? "1.0" : activeReport.reportVersion;
 
     try {
-      const { error } = await supabase
-        .from("audit_reports")
-        .update({
+      const payload = {
           overview: updatedOverview,
           report_content: documentData,
           status: status,
@@ -930,13 +929,22 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
           ...(asFinal && { 
             finalized_at: new Date().toISOString(),
             finalized_by: currentUser.id 
-          }),
-        })
-        .eq("id", activeReport.id);
+          })
+      };
 
-      if (error) {
-        throw error;
-      }
+      const res = await fetch(`/api/reports/${activeReport.id}`, {
+         method: 'PUT',
+         headers: {
+            'Content-Type': 'application/json',
+            'x-user-email': currentUser?.email || ''
+         },
+         body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      setSuccessMessage(asFinal ? "Report finalized!" : "Draft saved successfully.");
+      setTimeout(() => setSuccessMessage(""), 3000);
 
       const updatedReport = {
         ...activeReport,
@@ -945,19 +953,15 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
         reportVersion: version,
         ...(asFinal && { finalizedAt: new Date().toISOString() }),
       };
+
       setActiveReport(updatedReport);
-      setReports(
-        reports.map((r) => (r.id === activeReport.id ? updatedReport : r)),
+      setReports((prev) =>
+        prev.map((r) => (r.id === updatedReport.id ? updatedReport : r))
       );
       return updatedReport;
     } catch (err: any) {
-      if (err?.code === "PGRST205" || err?.code === "42P01" || err?.code === "42703") {
-        console.warn("Expected Database Setup Error: 'audit_reports' table missing. User needs to run SQL.");
-        setDbError("Database Persistence Error: The 'audit_reports' table or columns are missing. You must execute the SQL in src/db/supabase_schema.sql to enable persistence.");
-      } else {
-        console.error("Failed to save report", err);
-        setDbError("Failed to save report: " + (err.message || String(err)));
-      }
+      console.error("Failed to save report", err);
+      setDbError("Failed to save report: " + (err.message || String(err)));
       throw err;
     } finally {
       setIsSaving(false);
@@ -982,13 +986,15 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
     if (!deleteTargetId) return;
     setIsDeleting(true);
     try {
-      const { error } = await supabase
-        .from("audit_reports")
-        .delete()
-        .eq("id", deleteTargetId);
-      if (error) {
-        throw error;
-      }
+      const res = await fetch(`/api/reports/${deleteTargetId}`, {
+         method: 'DELETE',
+         headers: {
+            'x-user-email': currentUser?.email || ''
+         }
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
       setReports(reports.filter((r) => r.id !== deleteTargetId));
       if (activeReport?.id === deleteTargetId) {
         setActiveReport(null);

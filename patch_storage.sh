@@ -1,1 +1,0 @@
-sed -i "s/if (fileName && fileName.endsWith('.xlsx')) {/console.log('Fallback checking fileName:', fileName); if (fileName \&\& fileName.toLowerCase().endsWith('.xlsx')) {/g" src/services/storageService.ts

@@ -1,38 +1,76 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/components/SamplingView.tsx', 'utf8');
+let code = fs.readFileSync('src/components/ReportingView.tsx', 'utf8');
 
-const replacement = `
-    const template = TESTING_TEMPLATES[getTemplateName(selectedPopulation)] || TESTING_TEMPLATES['3rd Party Disbursements'];
-    
-    // Validation: Require all attributes to be answered
-    for (const attr of template) {
-      if (!attributeAnswers[attr.id]?.result) {
-        setValidationError(\`Please answer attribute \${attr.id} before saving.\`);
-        setIsSaving(false);
-        return;
-      }
-    }
+const regex = /const saveReport = async \(asFinal = false\) => \{[\s\S]*?\}\;\n\n  const handleFinalizeConfirm/m;
 
-    // Simulate DB save with detailed EXACT context payload
-    const savePayload = {
-      distributorId: selectedDistributor,
-      engagementId: selectedAuditFilter,
-      auditId: selectedAuditFilter,
-      populationId: selectedPopulation.id,
-      evidenceFileId: selectedPopulation.googleDriveFileId || selectedPopulation.id,
-      transactionId: selectedTransaction.id,
-      samplingPlanId: \`\${selectedPopulation.id}-plan\`,
-      testingTemplateId: getTemplateName(selectedPopulation),
-      auditorId: currentUser?.id || currentUser?.email,
-      answers: attributeAnswers,
-      timestamp: new Date().toISOString()
+const replacement = `const saveReport = async (asFinal = false) => {
+    if (!activeReport || !currentUser) return;
+    setIsSaving(!asFinal);
+
+    const updatedOverview = {
+      ...activeReport.overview,
+      documentData: documentData,
+      ...(asFinal && { finalizedAt: new Date().toISOString() }),
     };
-    console.log("Saving testing results:", savePayload);
-`;
 
-code = code.replace(
-  /const template = TESTING_TEMPLATES\[getTemplateName\(selectedPopulation\)\] \|\| TESTING_TEMPLATES\['3rd Party Disbursements'\];\s*\/\/ Validation: Require all attributes to be answered\s*for \(const attr of template\) \{\s*if \(\!attributeAnswers\[attr\.id\]\?\.result\) \{\s*setValidationError\(`Please answer attribute \$\{attr\.id\} before saving\.`\);\s*setIsSaving\(false\);\s*return;\s*\}\s*\}/,
-  replacement
-);
+    const status = asFinal ? "FINAL" : activeReport.status;
+    const version = asFinal ? "1.0" : activeReport.reportVersion;
 
-fs.writeFileSync('src/components/SamplingView.tsx', code);
+    try {
+      const payload = {
+          overview: updatedOverview,
+          report_content: documentData,
+          status: status,
+          report_version: version,
+          updated_at: new Date().toISOString(),
+          ...(asFinal && { 
+            finalized_at: new Date().toISOString(),
+            finalized_by: currentUser.id 
+          })
+      };
+
+      const res = await fetch(\`/api/reports/\${activeReport.id}\`, {
+         method: 'PUT',
+         headers: {
+            'Content-Type': 'application/json',
+            'x-user-email': currentUser?.email || ''
+         },
+         body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      setSuccessMessage(asFinal ? "Report finalized!" : "Draft saved successfully.");
+      setTimeout(() => setSuccessMessage(""), 3000);
+
+      const updatedReport = {
+        ...activeReport,
+        overview: updatedOverview,
+        status,
+        reportVersion: version,
+        ...(asFinal && { finalizedAt: new Date().toISOString() }),
+      };
+
+      setActiveReport(updatedReport);
+      setReports((prev) =>
+        prev.map((r) => (r.id === updatedReport.id ? updatedReport : r))
+      );
+      return updatedReport;
+    } catch (err: any) {
+      console.error("Failed to save report", err);
+      setDbError("Failed to save report: " + (err.message || String(err)));
+      throw err;
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleFinalizeConfirm`;
+
+if (regex.test(code)) {
+    code = code.replace(regex, replacement);
+    fs.writeFileSync('src/components/ReportingView.tsx', code);
+    console.log('Successfully updated saveReport');
+} else {
+    console.log('Regex not found');
+}

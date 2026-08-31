@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { downloadFileFromApi } from '../lib/downloadHelper';
 import { 
-  FolderArchive, 
+  FolderArchive,
+  Database, 
   Search, 
   Filter, 
   CheckCircle2, 
@@ -33,6 +34,7 @@ import {
   File
 } from 'lucide-react';
 import { EvidenceRecord, UserSession } from '../types';
+import { SamplingView } from './SamplingView';
 
 interface EvidenceManagementViewProps {
   currentUser: UserSession | null;
@@ -78,7 +80,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
     setSelectedAuditFilter(defaultAuditFilter);
   }, [defaultAuditFilter]);
   const [activeMainTab, setActiveMainTab] = useState<'list' | 'upload'>('list');
-  const [evidenceMode, setEvidenceMode] = useState<'All Evidence' | 'Sampling Eligible'>(defaultMode);
+  const [evidenceMode, setEvidenceMode] = useState<'All Evidence' | 'Sampling'>(defaultMode === 'Sampling Eligible' ? 'Sampling' : (defaultMode as 'All Evidence' | 'Sampling'));
   
   // Upload State
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -230,15 +232,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
     }
 
     // Evidence Mode Filter
-    if (evidenceMode === 'Sampling Eligible') {
-      const normRecStatus = (rec.status || '').toUpperCase().replace(/\s+/g, '_');
-      if (normRecStatus !== 'ACCEPTED' && normRecStatus !== 'AVAILABLE' && normRecStatus !== 'PENDING_REVIEW' && normRecStatus !== 'PENDING') return false;
-      const t = (rec.fileType || '').toLowerCase();
-      const n = (rec.fileName || '').toLowerCase();
-      const isSpreadsheet = t.includes('sheet') || t.includes('excel') || t.includes('csv') || n.endsWith('.csv') || n.endsWith('.xlsx') || n.endsWith('.xls');
-      const hasKeywords = n.includes('register') || n.includes('ledger') || n.includes('list') || n.includes('tracker') || n.includes('population');
-      if (!isSpreadsheet && !hasKeywords) return false;
-    }
+    
 
     // Status Filter
     if (activeStatusFilter !== 'All') {
@@ -716,21 +710,30 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
       <div style={{ display: activeMainTab === 'list' ? 'block' : 'none' }}>
         {/* Evidence Mode Tabs */}
         <div className="flex bg-slate-900 border border-slate-800 rounded-xl p-1 mb-6 max-w-[600px] mx-auto sm:mx-0">
-          {['All Evidence', 'Sampling Eligible'].map(mode => (
-            <button
-              key={mode}
-              onClick={() => setEvidenceMode(mode as any)}
-              className={`flex-1 py-2 text-sm font-semibold rounded-lg transition-colors ${
-                evidenceMode === mode 
-                  ? 'bg-slate-700 text-white shadow-sm' 
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
-            >
-              {mode}
-            </button>
-          ))}
+          <button
+            onClick={() => setEvidenceMode('All Evidence')}
+            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${evidenceMode === 'All Evidence' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
+          >
+            <FolderArchive className="w-4 h-4" /> All Evidence
+          </button>
+          <button
+            onClick={() => setEvidenceMode('Sampling')}
+            className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all flex items-center justify-center gap-2 ${evidenceMode === 'Sampling' ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
+          >
+            <Database className="w-4 h-4" /> Sampling
+          </button>
         </div>
 
+      {evidenceMode === 'Sampling' && (
+        <SamplingView
+          currentUser={currentUser}
+          selectedClient={selectedClient}
+          selectedDistributor={selectedDistributor}
+          selectedAuditFilter={selectedAuditFilter}
+          isEvidenceManagementMode={true}
+        />
+      )}
+      <div style={{ display: evidenceMode === 'All Evidence' ? 'block' : 'none' }}>
       {/* Metrics & Analytics Dashboard Bar */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
@@ -1468,8 +1471,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
           </div>
         </div>
       )}
-
-    
+      </div>
       {/* Toast Notification */}
       {toastMessage && (
         <div className="fixed bottom-4 right-4 z-[200] animate-in slide-in-from-bottom-5 fade-in bg-slate-900 border border-slate-700 shadow-2xl rounded-lg p-4 flex items-center gap-3">

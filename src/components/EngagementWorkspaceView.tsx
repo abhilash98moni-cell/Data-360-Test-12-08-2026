@@ -24,6 +24,7 @@ interface EngagementWorkspaceViewProps {
   currencyMode?: string;
   selectedClient: string;
   selectedDistributor: string;
+  selectedAuditFilter?: string;
   currentUser: UserSession | null;
   onFindingCreated?: (finding: any) => void;
   onNavigateToEvidence?: () => void;
@@ -36,6 +37,7 @@ interface EngagementWorkspaceViewProps {
 export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = ({
   selectedClient,
   selectedDistributor,
+  selectedAuditFilter,
   currentUser,
   onFindingCreated,
   onNavigateToEvidence,
@@ -46,12 +48,6 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
   currencyMode
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<EngagementSubTab>(initialSubTab);
-
-  React.useEffect(() => {
-    const handleSwitch = () => setActiveSubTab('sampling');
-    window.addEventListener('SWITCH_TO_SAMPLING_TAB', handleSwitch);
-    return () => window.removeEventListener('SWITCH_TO_SAMPLING_TAB', handleSwitch);
-  }, []);
 
   const isDistributor = currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor');
   const isAuditor = !isDistributor;
@@ -109,20 +105,17 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
               <span className="truncate">IRL</span>
             </button>
 
-            {/* Sampling tab: Strictly for Auditors */}
-            {isAuditor && (
-              <button
-                onClick={() => setActiveSubTab('sampling')}
-                className={`w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer text-center ${
-                  activeSubTab === 'sampling'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 border border-indigo-500/40'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
-                }`}
-              >
-                <BarChart3 className="h-4 w-4 shrink-0" />
-                <span className="truncate">Sampling</span>
-              </button>
-            )}
+            <button
+              onClick={() => setActiveSubTab('sampling')}
+              className={`w-full flex items-center justify-center gap-2 px-3 sm:px-4 py-2 rounded-lg text-xs font-semibold transition-all whitespace-nowrap cursor-pointer text-center ${
+                activeSubTab === 'sampling'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30 border border-indigo-500/40'
+                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 border border-transparent'
+              }`}
+            >
+              <BarChart3 className="h-4 w-4 shrink-0" />
+              <span className="truncate">Sampling</span>
+            </button>
           </div>
         </div>
       )}
@@ -138,6 +131,16 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
         />
       )}
 
+      {activeSubTab === 'sampling' && (
+        <SamplingView
+          selectedClient={selectedClient}
+          selectedDistributor={distributorProp}
+          selectedAuditFilter={selectedAuditFilter}
+          currentUser={currentUser}
+          currencyMode={currencyMode}
+          isEvidenceManagementMode={true}
+        />
+      )}
       {activeSubTab === 'iir' && (
         <InitialInformationRequestView
           initialRequests={INITIAL_IIR_REQUESTS}
@@ -152,15 +155,6 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
           currentUser={currentUser}
           isFullScreen={isIIRFullScreen}
           onToggleFullScreen={onToggleIIRFullScreen}
-        />
-      )}
-
-      {activeSubTab === 'sampling' && isAuditor && (
-        <SamplingView onFindingCreated={onFindingCreated} onNavigateToEvidence={onNavigateToEvidence} 
-          selectedClient={selectedClient}
-          selectedDistributor={distributorProp}
-          currentUser={currentUser}
-          currencyMode={currencyMode}
         />
       )}
     </div>

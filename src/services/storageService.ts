@@ -789,7 +789,8 @@ startxref
     }
     
     // 4. Fallback for Excel files to avoid download errors in demo mode
-    console.log('Fallback checking fileName:', fileName); if (fileName && fileName.toLowerCase().endsWith('.xlsx')) {
+    console.log('Fallback checking fileName:', fileName); 
+    if (fileName && (fileName.toLowerCase().endsWith('.xlsx') || fileName.toLowerCase().endsWith('.xls') || fileName.toLowerCase().endsWith('.csv'))) {
       const workbook = XLSX.utils.book_new();
       const mockData = [
         { ID: 'TX-1001', Date: '2026-01-15', Entity: 'Test Vendor A', Description: 'Consulting Services', Amount: 5000 },
@@ -799,11 +800,15 @@ startxref
       const worksheet = XLSX.utils.json_to_sheet(mockData);
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Transactions');
       
-      const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+      const isCsv = fileName.toLowerCase().endsWith('.csv');
+      const outBuffer = isCsv 
+          ? Buffer.from(XLSX.write(workbook, { type: 'string', bookType: 'csv' }))
+          : XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+          
       return {
-         buffer: excelBuffer,
+         buffer: outBuffer,
          fileName,
-         mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+         mimeType: isCsv ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
       };
     }
 

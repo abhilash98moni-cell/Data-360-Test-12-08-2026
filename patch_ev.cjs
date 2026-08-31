@@ -1,6 +1,9 @@
 const fs = require('fs');
-let content = fs.readFileSync('src/components/EvidenceManagementView.tsx', 'utf-8');
-content = content.replace(/href=\{`\/api\/storage\/preview\/\$\{selectedRecord\.googleDriveFileId \|\| selectedRecord\.id\}`\}/g, "href={`/api/storage/preview/${selectedRecord.googleDriveFileId || selectedRecord.id}?fileName=${encodeURIComponent(selectedRecord.fileName || 'document.pdf')}`}");
-content = content.replace(/src=\{`\/api\/storage\/preview\/\$\{selectedRecord\.googleDriveFileId \|\| selectedRecord\.id\}`\}/g, "src={`/api/storage/preview/${selectedRecord.googleDriveFileId || selectedRecord.id}?fileName=${encodeURIComponent(selectedRecord.fileName || 'document.pdf')}`}");
-content = content.replace(/href=\{`\/api\/storage\/download\/\$\{selectedRecord\.googleDriveFileId \|\| selectedRecord\.id\}`\}/g, "href={`/api/storage/download/${selectedRecord.googleDriveFileId || selectedRecord.id}?fileName=${encodeURIComponent(selectedRecord.fileName || 'document.pdf')}`}");
-fs.writeFileSync('src/components/EvidenceManagementView.tsx', content);
+let code = fs.readFileSync('src/components/EvidenceManagementView.tsx', 'utf-8');
+
+code = code.replace(
+    /        <SamplingView\n          currentUser=\{currentUser\}\n          selectedClient=\{selectedClient\}\n          selectedDistributor=\{selectedDistributor\}\n          selectedAuditFilter=\{selectedAuditFilter\}\n        \/>/,
+    "        <SamplingView\n          currentUser={currentUser}\n          selectedClient={selectedClient}\n          selectedDistributor={selectedDistributor}\n          selectedAuditFilter={selectedAuditFilter}\n          isEvidenceManagementMode={true}\n        />"
+);
+
+fs.writeFileSync('src/components/EvidenceManagementView.tsx', code);

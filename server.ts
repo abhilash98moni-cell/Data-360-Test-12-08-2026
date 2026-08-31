@@ -96,6 +96,22 @@ async function startServer() {
   });
 
   // ====================================================================
+app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    let query = supabase.from('distributors').select('*');
+    if (req.query.name) {
+      query = query.eq('entity_name', req.query.name);
+    }
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ success: true, distributors: data });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
   // INITIAL INFORMATION REQUEST LIST (IRL) SUPABASE PERSISTENCE API
   // ====================================================================
 
@@ -1136,7 +1152,340 @@ async function startServer() {
 
   // ====================================================================
   
+  
+  // ====================================================================
+  // REQUIRED DATA QUESTIONNAIRE ENDPOINTS
+  // ====================================================================
+
+  // GET /api/sampling/required-data/questions
+  app.get('/api/sampling/required-data/questions', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { auditId } = req.query;
+      const supabase = getSupabaseServerClient();
+      const { data, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_QUESTION_DEF');
+      if (error) throw error;
+      
+      const questions = data
+        .map(d => {
+           let parsed = d.details;
+           if (typeof parsed === 'string') {
+               try { parsed = JSON.parse(parsed); } catch(e) {}
+           }
+           return { dbId: d.id, ...parsed };
+        })
+        .filter(q => q.engagement_id === auditId && q.active !== false);
+        
+      res.json({ success: true, questions });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/sampling/required-data/questions
+  app.post('/api/sampling/required-data/questions', express.json(), authenticateRequest, async (req: any, res: any) => {
+    try {
+      const payload = req.body;
+      const supabase = getSupabaseServerClient();
+      
+      const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
+        event_type: 'REQUIRED_DATA_QUESTION_DEF',
+        target_user_email: req.user?.email || 'unknown',
+        ip_address: req.ip || '127.0.0.1',
+        details: JSON.stringify({
+          question_id: payload.question_id || 'RDQ' + Date.now(),
+          engagement_id: payload.engagement_id,
+          testing_classification: payload.testing_classification,
+          question_text: payload.question_text,
+          answer_type: payload.answer_type,
+          required: payload.required || false,
+          help_text: payload.help_text || '',
+          scope: payload.scope || 'transaction',
+          sample_id: payload.sample_id || null,
+          allow_comment: payload.allow_comment || false,
+          allow_file_upload: payload.allow_file_upload || false,
+          created_by: req.user?.email || 'unknown',
+          created_at: new Date().toISOString(),
+          active: true,
+          options: payload.options || [] // For dropdown/checkbox
+        })
+      }).select().single();
+
+      if (error) throw error;
+
+      res.json({ success: true, dbId: insertedData.id });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // PUT /api/sampling/required-data/questions/:id
+  app.put('/api/sampling/required-data/questions/:id', express.json(), authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      const payload = req.body;
+      const supabase = getSupabaseServerClient();
+      
+      const { data: row, error: fetchErr } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      if (fetchErr) throw fetchErr;
+      
+      if (row) {
+         let parsedDetails = row.details;
+         if (typeof parsedDetails === 'string') {
+            try { parsedDetails = JSON.parse(parsedDetails); } catch(e) {}
+         }
+         const newDetails = { ...parsedDetails, ...payload };
+         const { error: updateErr } = await supabase.from('system_audit_logs').update({ details: JSON.stringify(newDetails) }).eq('id', id);
+         if (updateErr) throw updateErr;
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // DELETE /api/sampling/required-data/questions/:id
+  app.delete('/api/sampling/required-data/questions/:id', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { id } = req.params; // dbId
+      const supabase = getSupabaseServerClient();
+      const { data: row, error: fetchErr } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      if (fetchErr) throw fetchErr;
+      if (row) {
+         let parsedDetails = row.details;
+         if (typeof parsedDetails === 'string') {
+            try { parsedDetails = JSON.parse(parsedDetails); } catch(e) {}
+         }
+         const newDetails = { ...parsedDetails, active: false };
+         const { error: updateErr } = await supabase.from('system_audit_logs').update({ details: JSON.stringify(newDetails) }).eq('id', id);
+         if (updateErr) throw updateErr;
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // GET /api/sampling/required-data/responses
+  app.get('/api/sampling/required-data/responses', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { sampleId } = req.query;
+      const supabase = getSupabaseServerClient();
+      
+      let query = supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
+      
+      const { data, error } = await query;
+      if (error) throw error;
+      
+      const responses = data
+        .map(d => {
+           let parsed = d.details;
+           if (typeof parsed === 'string') {
+               try { parsed = JSON.parse(parsed); } catch(e) {}
+           }
+           return { dbId: d.id, ...parsed };
+        })
+        .filter(r => sampleId ? r.sample_id === sampleId : true);
+        
+      res.json({ success: true, responses });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/sampling/required-data/responses
+  app.post('/api/sampling/required-data/responses', express.json(), authenticateRequest, async (req: any, res: any) => {
+    try {
+      const payload = req.body;
+      const supabase = getSupabaseServerClient();
+      
+      // Update existing if exists for this sample_id
+      const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
+      
+      let existingRecord = existing?.find(d => {
+        let parsed = d.details;
+        if (typeof parsed === 'string') {
+           try { parsed = JSON.parse(parsed); } catch(e) {}
+        }
+        return parsed.sample_id === payload.sample_id;
+      });
+
+      if (existingRecord) {
+         let parsedDetails = existingRecord.details;
+         if (typeof parsedDetails === 'string') {
+            try { parsedDetails = JSON.parse(parsedDetails); } catch(e) {}
+         }
+         const newDetails = { ...parsedDetails, responses: payload.responses, status: payload.status, updated_at: new Date().toISOString() };
+         const { error: updateErr } = await supabase.from('system_audit_logs').update({ details: JSON.stringify(newDetails) }).eq('id', existingRecord.id);
+         if (updateErr) throw updateErr;
+         res.json({ success: true, dbId: existingRecord.id });
+      } else {
+         const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
+          event_type: 'REQUIRED_DATA_RESP',
+          target_user_email: req.user?.email || 'unknown',
+          ip_address: req.ip || '127.0.0.1',
+          details: JSON.stringify({
+            engagement_id: payload.engagement_id,
+            sample_id: payload.sample_id,
+            responses: payload.responses,
+            status: payload.status || 'Draft',
+            created_by: req.user?.email || 'unknown',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          })
+        }).select().single();
+
+        if (error) throw error;
+        res.json({ success: true, dbId: insertedData.id });
+      }
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+
   // Save Sampling Test Result Endpoint
+  // GET /api/sampling/questions
+  
+app.get('/api/test/cols', async (req, res) => {
+  const supabase = getSupabaseServerClient();
+  const { data, error } = await supabase.from('system_audit_logs').select('*').limit(1);
+  if (error) {
+     res.json({ error });
+  } else {
+     res.json({ keys: data && data.length > 0 ? Object.keys(data[0]) : 'no data' });
+  }
+});
+
+app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { distributorId, auditId } = req.query;
+      const supabase = getSupabaseServerClient();
+      const { data, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'CREATED_CUSTOM_QUESTION');
+      if (error) throw error;
+      
+      const questions = data
+        .map(d => {
+           let parsed = d.details;
+           if (typeof parsed === 'string') {
+               try { parsed = JSON.parse(parsed); } catch(e) {}
+           }
+           return { dbId: d.id, ...parsed };
+        })
+        .filter(q => q.engagement_id === auditId && q.active !== false);
+        
+      res.json({ success: true, questions });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/sampling/questions
+  app.post('/api/sampling/questions', express.json(), authenticateRequest, async (req: any, res: any) => {
+    try {
+      const payload = req.body;
+      const supabase = getSupabaseServerClient();
+      
+      // Calculate the next attribute code if not provided
+      let finalAttributeCode = payload.attribute_code;
+      if (!finalAttributeCode) {
+        const { data: existingQuestionsData } = await supabase
+          .from('system_audit_logs')
+          .select('details')
+          .eq('event_type', 'CREATED_CUSTOM_QUESTION');
+          
+        let existingCustomQuestions = (existingQuestionsData || [])
+          .map(row => {
+             let parsed = row.details;
+             if (typeof parsed === 'string') {
+                 try { parsed = JSON.parse(parsed); } catch(e) {}
+             }
+             return parsed;
+          })
+          .filter(q => q.testing_classification === payload.testing_classification && q.engagement_id === payload.engagement_id);
+          
+        let highestCharCode = 64 + 12; // Base templates go up to L (which is 12th letter) for some, we should ideally know the max. We will rely on the client passing the current max.
+        // Actually, let's use the one passed from the client, since the client computed it correctly. Wait, if client computed it based on active, it might reuse.
+        // Let's compute highest based on existingCustomQuestions in DB (which includes deleted ones!)
+        for (const q of existingCustomQuestions) {
+          if (q.attribute_code && q.attribute_code.length === 1) {
+             const code = q.attribute_code.charCodeAt(0);
+             if (code > highestCharCode) highestCharCode = code;
+          }
+        }
+        
+        // Ensure it's at least greater than the client's suggestion to avoid conflicts
+        if (payload.attribute_code && payload.attribute_code.length === 1) {
+           const clientCode = payload.attribute_code.charCodeAt(0);
+           if (highestCharCode < clientCode - 1) {
+              highestCharCode = clientCode - 1;
+           }
+        }
+        
+        finalAttributeCode = String.fromCharCode(highestCharCode + 1);
+      }
+      
+      const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
+        event_type: 'CREATED_CUSTOM_QUESTION',
+        performed_by: req.user?.email || 'unknown',
+        target_user_email: req.headers['x-user-organization'] || 'Internal',
+        ip_address: req.ip || '127.0.0.1',
+        details: JSON.stringify({
+          question_id: payload.question_id || 'CQ' + Date.now(),
+          engagement_id: payload.engagement_id,
+          testing_classification: payload.testing_classification,
+          sample_id: payload.sample_id || null, // NULL for 'classification' scope, specific ID for 'sample' scope
+          scope: payload.scope || 'classification', // 'classification' or 'sample'
+          attribute_code: finalAttributeCode, // E.g., 'M'
+          question_text: payload.question_text,
+          question_type: payload.question_type,
+          required: payload.required || false,
+          options: payload.options || [],
+          conditional_rules: payload.conditional_rules || {},
+          display_order: payload.display_order || 0,
+          created_by: req.user?.email || 'unknown',
+          created_at: new Date().toISOString(),
+          active: true
+        })
+      }).select().single();
+      if (error) throw error;
+      res.json({ success: true, attribute_code: finalAttributeCode, dbId: insertedData?.id });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // DELETE /api/sampling/questions/:id
+  app.delete('/api/sampling/questions/:id', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { id } = req.params; // dbId
+      const supabase = getSupabaseServerClient();
+      // Soft delete by updating active=false inside details
+      const { data: row, error: fetchErr } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      if (fetchErr) throw fetchErr;
+      if (row) {
+         let parsedDetails = row.details;
+         if (typeof parsedDetails === 'string') {
+            try { parsedDetails = JSON.parse(parsedDetails); } catch(e) {}
+         }
+         const newDetails = { ...parsedDetails, active: false };
+         const { error: updateErr } = await supabase.from('system_audit_logs').update({ details: JSON.stringify(newDetails) }).eq('id', id);
+         if (updateErr) throw updateErr;
+      }
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // GET /api/sampling/transactions
   app.get('/api/sampling/transactions', authenticateRequest, async (req: any, res: any) => {
     try {
@@ -1164,14 +1513,25 @@ async function startServer() {
       const { sampleId, distributorId, auditId } = payload;
       const supabase = getSupabaseServerClient();
       
-      // Check if it already exists
+            // Check if it already exists
       const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'GL_SAMPLE');
       const found = existing?.find(d => d.details.sampleId === sampleId && d.details.distributorId === distributorId && d.details.auditId === auditId);
       
       if (found) {
+        // Enforce role-based permissions
+        const userRole = req.headers['x-user-role'];
+        let updatedDetails = { ...found.details, ...payload };
+        
+        if (userRole === 'Distributor') {
+           // Prevent Distributor from modifying auditor-only testing fields
+           updatedDetails.testingClassification = found.details.testingClassification;
+           updatedDetails.testingStatus = found.details.testingStatus;
+           updatedDetails.testingReference = found.details.testingReference;
+        }
+
         // Update
         const { error } = await supabase.from('system_audit_logs').update({
-          details: { ...found.details, ...payload }
+          details: updatedDetails
         }).eq('id', found.id);
         if (error) throw error;
         res.json({ success: true, message: 'Updated successfully' });
@@ -1256,7 +1616,9 @@ async function startServer() {
         auditCode = 'AUD-2026-001',
         distributorName = 'Midwest Trading Co.',
         auditPeriod = 'FY 2025-26',
-        populationType = 'Transaction Testing Population'
+        populationType = 'Transaction Testing Population',
+        glMapping
+
       } = req.body;
 
       const uploadedBy = req.auth.name || 'Auditor User';
@@ -1303,6 +1665,7 @@ async function startServer() {
         document_usage: ['SAMPLING_POPULATION'],
         samplingEnabled: true,
         samplingStatus: 'ADDED',
+        glMapping: glMapping ? JSON.parse(glMapping) : null,
         source: 'Auditor Upload'
       };
 
@@ -3487,7 +3850,135 @@ async function startServer() {
 
 
   
-  // Reporting: Generate Document (DOCX / PDF)
+  // ====================================================================
+  // Reports API (CRUD)
+  // ====================================================================
+  app.get('/api/reports', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const supabase = getSupabaseServerClient();
+      let query = supabase.from('audit_reports').select('*').order('created_at', { ascending: false });
+      
+      const role = req.headers['x-user-role'] || '';
+      const org = req.headers['x-user-organization'] || '';
+      
+      if (role === 'Distributor' || role.includes('Distributor')) {
+        query = query.eq('status', 'FINAL').eq('distributor_name', org || req.query.distributor);
+      }
+      
+      const { data, error } = await query;
+      if (error) throw error;
+      res.json({ success: true, reports: data });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/reports', express.json(), authenticateRequest, async (req: any, res: any) => {
+    try {
+      const supabase = getSupabaseServerClient();
+      const report = req.body;
+      const { error } = await supabase.from('audit_reports').insert([report]);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.put('/api/reports/:id', express.json(), authenticateRequest, async (req: any, res: any) => {
+    try {
+      const supabase = getSupabaseServerClient();
+      const updates = req.body;
+      const { id } = req.params;
+      const { error } = await supabase.from('audit_reports').update(updates).eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.delete('/api/reports/:id', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const supabase = getSupabaseServerClient();
+      const { id } = req.params;
+      const { error } = await supabase.from('audit_reports').delete().eq('id', id);
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ====================================================================
+// Reports API (CRUD)
+// ====================================================================
+app.get('/api/reports', authenticateRequest, async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    let query = supabase.from('audit_reports').select('*').order('created_at', { ascending: false });
+    
+    const role = req.headers['x-user-role'] || '';
+    const org = req.headers['x-user-organization'] || '';
+    
+    if (role === 'Distributor' || role.includes('Distributor')) {
+      query = query.eq('status', 'FINAL').eq('distributor_name', org || req.query.distributor);
+    }
+    
+    const { data, error } = await query;
+    if (error) throw error;
+    res.json({ success: true, reports: data });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/reports', express.json(), authenticateRequest, async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    const report = req.body;
+    const { error } = await supabase.from('audit_reports').insert([report]);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/reports/:id', express.json(), authenticateRequest, async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    const updates = req.body;
+    const { id } = req.params;
+    const { error } = await supabase.from('audit_reports').update(updates).eq('id', id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/reports/:id', authenticateRequest, async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    const { id } = req.params;
+    const { error } = await supabase.from('audit_reports').delete().eq('id', id);
+    if (error) throw error;
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Reporting: Generate Document (DOCX / PDF)
   app.post('/api/reporting/generate', async (req, res) => {
     try {
       const { report, format } = req.body;

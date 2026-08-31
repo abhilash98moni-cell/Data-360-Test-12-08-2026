@@ -1,0 +1,216 @@
+              <p className="text-slate-400 mb-4">No questions defined for this transaction yet.</p>
+              {(!isDistributor && !isReviewMode) && (<button 
+                onClick={() => setShowAddQuestion(true)}
+                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors font-semibold text-sm inline-flex items-center gap-2"
+              >
+                <Plus className="h-4 w-4" /> Add First Question
+              </button>)}
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {questions.map((q, idx) => (
+                <div key={q.dbId} className="bg-slate-900 border border-slate-800 rounded-xl p-5 relative group">
+                  <div className="absolute top-4 right-4 flex opacity-0 group-hover:opacity-100 transition-opacity gap-2">
+                    {(!isDistributor && !isReviewMode) && (<button 
+                      onClick={() => {
+                        setEditingQuestionId(q.dbId);
+                        setQuestionForm({
+                          text: q.question_text,
+                          type: q.answer_type || 'Yes / No',
+                          required: q.required,
+                          helpText: q.help_text || '',
+                          scope: q.scope || 'transaction'
+                        });
+                        setShowAddQuestion(true);
+                      }}
+                      className="p-1.5 text-slate-400 hover:text-indigo-400 bg-slate-950 rounded border border-slate-700 hover:border-indigo-500/50 transition-colors"
+                      title="Edit Question"
+                    >
+                      <Edit2 className="h-3.5 w-3.5" /></button>)}
+                    {(!isDistributor && !isReviewMode) && (<button 
+                      onClick={() => handleDeleteQuestion(q.dbId)}
+                      className="p-1.5 text-slate-400 hover:text-rose-400 bg-slate-950 rounded border border-slate-700 hover:border-rose-500/50 transition-colors"
+                      title="Remove Question"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" /></button>)}
+                  </div>
+                  
+                  <div className="flex gap-3 pr-20">
+                    <span className="font-bold text-slate-400 shrink-0">{idx + 1}.</span>
+                    <div className="flex-1 space-y-4">
+                      <div>
+                        <p className="font-semibold text-slate-200">
+                          {q.question_text}
+                          {q.required && <span className="text-rose-500 ml-1" title="Required">*</span>}
+                        </p>
+                        {q.help_text && <p className="text-xs text-slate-500 mt-1">{q.help_text}</p>}
+                      </div>
+
+                      {/* Answer Control */}
+                      <div className="flex items-center gap-4">
+                        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider w-20 shrink-0">Answer:</span>
+                        
+                                                {(q.answer_type === 'Yes / No') && (
+                          <div className="flex gap-4">
+                            {['Yes', 'No'].map(opt => (
+                              <label key={opt} className="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" disabled={!isDistributor || isReviewMode} name={`q_${q.dbId}`} value={opt} checked={responses[q.dbId] === opt} onChange={(e) => setResponses({...responses, [q.dbId]: e.target.value})} className="text-indigo-500 bg-slate-950 border-slate-700" />
+                                <span className="text-sm text-slate-300">{opt}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+                        {(q.answer_type === 'Yes / No / N/A') && (
+                          <div className="flex gap-4">
+                            {['Yes', 'No', 'N/A'].map(opt => (
+                              <label key={opt} className="flex items-center gap-2 cursor-pointer">
+                                <input type="radio" disabled={!isDistributor || isReviewMode} name={`q_${q.dbId}`} value={opt} checked={responses[q.dbId] === opt} onChange={(e) => setResponses({...responses, [q.dbId]: e.target.value})} className="text-indigo-500 bg-slate-950 border-slate-700" />
+                                <span className="text-sm text-slate-300">{opt}</span>
+                              </label>
+                            ))}
+                          </div>
+                        )}
+
+                        {(q.answer_type === 'Text' || q.answer_type === 'Number' || q.answer_type === 'Date' || !q.answer_type) && (
+                          <input disabled={!isDistributor || isReviewMode}
+                            type={q.answer_type === 'Number' ? 'number' : q.answer_type === 'Date' ? 'date' : 'text'}
+                            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none flex-1 max-w-sm"
+                            value={responses[q.dbId] || ''}
+                            onChange={(e) => setResponses({...responses, [q.dbId]: e.target.value})}
+                            placeholder="Enter answer..."
+                          />
+                        )}
+
+                        {(q.answer_type === 'Dropdown') && (
+                          <select disabled={!isDistributor || isReviewMode}
+                            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none w-48"
+                            value={responses[q.dbId] || ''}
+                            onChange={(e) => setResponses({...responses, [q.dbId]: e.target.value})}
+                          >
+                            <option value="">Select...</option>
+                            {/* Assuming options exist in q.options */}
+                            {(q.options || ['Option 1', 'Option 2']).map((opt: string) => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                        )}
+
+                        {(q.answer_type === 'Checkbox') && (
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input 
+                              type="checkbox"
+                              className="w-4 h-4 bg-slate-950 border border-slate-700 rounded text-indigo-500 focus:ring-indigo-500 focus:ring-offset-slate-900"
+                              checked={responses[q.dbId] === 'true'}
+                              onChange={(e) => setResponses({...responses, [q.dbId]: e.target.checked ? 'true' : 'false'})}
+                            />
+                            <span className="text-sm text-slate-300">Checked</span>
+                          </label>
+                        )}
+                        
+                        {(q.answer_type === 'Comment') && (
+                          <textarea disabled={!isDistributor || isReviewMode}
+                            className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none flex-1 max-w-sm"
+                            value={responses[q.dbId] || ''}
+                            onChange={(e) => setResponses({...responses, [q.dbId]: e.target.value})}
+                            placeholder="Enter detailed comment..."
+                            rows={2}
+                          />
+                        )}
+                      </div>
+
+                      {/* Comment Control */}
+                      {((q.allow_comment || q.allow_comment === 'true' || q.allow_comment === true) || q.answer_type === 'Comment') && q.answer_type !== 'Comment' && (
+                        <div className="pt-2">
+                          <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Comment</div>
+                          <input 
+                            type="text"
+                            className="bg-slate-950/50 border border-slate-700/50 rounded-lg px-3 py-2 text-sm text-slate-300 focus:border-indigo-500 focus:outline-none flex-1"
+                            value={comments[q.dbId] || ''}
+                            onChange={(e) => setComments({...comments, [q.dbId]: e.target.value})}
+                            placeholder="Enter comment..."
+                          />
+                        </div>
+                      )}
+
+                      {/* Evidence Control */}
+                      {((q.allow_file_upload || q.allow_file_upload === 'true' || q.allow_file_upload === true) || q.answer_type === 'File Upload') && (
+                        <div className="pt-2">
+                        <div className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Supporting Document</div>
+                        {documents[q.dbId] ? (
+                                                    <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-950 border border-slate-700 rounded-lg text-slate-300 text-sm">
+                            <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                            <span className="font-medium truncate max-w-[200px]">{documents[q.dbId]}</span>
+                            {(!isDistributor || isReviewMode) ? null : (
+                              <button 
+                                onClick={() => {
+                                  const newDocs = {...documents};
+                                  delete newDocs[q.dbId];
+                                  setDocuments(newDocs);
+                                }}
+                                className="ml-2 hover:text-rose-400 transition-colors"
+                                title="Remove File"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                          <button className="text-xs font-semibold px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded transition-colors" onClick={() => alert('Viewing document...')}>View Document</button>
+                          <button className="text-xs font-semibold px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-white rounded transition-colors" onClick={() => alert('Downloading document...')}>Download</button>
+                          </div>
+                        ) : (!isDistributor || isReviewMode) ? (
+                            <div className="text-xs text-slate-500 italic">No document uploaded</div>
+                          ) : (
+                          <label className="flex items-center justify-center gap-2 px-3 py-1.5 bg-slate-950 border border-slate-700 border-dashed rounded-lg text-slate-400 hover:text-indigo-400 hover:border-indigo-500/50 cursor-pointer transition-colors text-xs font-semibold">
+                            <Upload className="h-3.5 w-3.5" />
+                            <span>Upload File</span>
+                            <input 
+                              type="file" 
+                              className="hidden" 
+                              onChange={async (e) => {
+                                if (e.target.files && e.target.files[0]) {
+                                  const file = e.target.files[0];
+                                  try {
+                                    const formData = new FormData();
+                                    formData.append('file', file);
+                                    formData.append('documentType', 'EVIDENCE');
+                                    formData.append('documentUsage', 'REQUIRED_DATA');
+                                    formData.append('requirementId', transaction.voucherNo || transaction.id);
+                                    const res = await fetch('/api/storage/upload', {
+                                      method: 'POST',
+                                      headers: { 'x-user-email': currentUser?.email || '' },
+                                      body: formData
+                                    });
+                                    const data = await res.json();
+                                    if (res.ok && data.success) {
+                                      setDocuments({...documents, [q.dbId]: data.evidenceRecord?.fileName || file.name});
+                                    } else {
+                                      alert("Upload failed");
+                                    }
+                                  } catch(err) {
+                                    alert("Error uploading");
+                                  }
+                                }
+                              }}
+                            />
+                          </label>
+                          )
+                        }
+                      </div>)}
+
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+        </div>
+
+        {/* Footer */}
+        {!isReviewMode && (
+    <div className="p-4 border-t border-slate-800 bg-slate-900 rounded-b-2xl shrink-0 flex justify-end gap-3">
+      <button 
+        onClick={() => onClose()}
+        className="px-5 py-2.5 bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm rounded-xl transition-colors"
+      >

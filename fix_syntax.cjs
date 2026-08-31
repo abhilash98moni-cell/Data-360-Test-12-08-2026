@@ -1,9 +1,21 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/components/SamplingView.tsx', 'utf8');
+let code = fs.readFileSync('src/components/RequiredDataQuestionnaire.tsx', 'utf8');
+
+// The problematic section is:
+// ) : (                                                    
+// {(!isDistributor || isReviewMode) ? (
+//   <div className="text-xs text-slate-500 italic">No document uploaded</div>
+// ) : (
 
 code = code.replace(
-  /<div className="flex gap-3">\n\s*<button/s,
-  "<div className=\"flex gap-3\">\n          {!saveSuccess ? (\n            <button"
+  /\) : \(\s*\{\(!isDistributor \|\| isReviewMode\) \? \(/,
+  `) : (!isDistributor || isReviewMode) ? (`
 );
 
-fs.writeFileSync('src/components/SamplingView.tsx', code);
+// We have an extra closing brace `)}` at the end
+code = code.replace(
+  /                          \)\}\n                        \)\}\n                      <\/div>/,
+  `                          )\n                        }\n                      </div>`
+);
+
+fs.writeFileSync('src/components/RequiredDataQuestionnaire.tsx', code);

@@ -1,17 +1,11 @@
 const fs = require('fs');
-let code = fs.readFileSync('server.ts', 'utf8');
+let code = fs.readFileSync('src/components/SamplingView.tsx', 'utf-8');
 
-const search = `                 auditPeriod: state.auditPeriod || 'FY 2025-26',
-                 // Inherited source classification based on uploader identity
-                 source: (file.uploadedBy && file.uploadedBy.toLowerCase().includes('auditor')) ? 'Auditor Upload' : 'Distributor Upload'
-               });`;
-
-const replace = `                 auditPeriod: state.auditPeriod || 'FY 2025-26',
-                 // Inherited source classification based on uploader identity
-                 source: (file.uploadedBy && file.uploadedBy.toLowerCase().includes('auditor')) ? 'Auditor Upload' : 'Distributor Upload',
-                 samplingEnabled: false,
-                 samplingStatus: undefined
-               });`;
-
-code = code.replace(search, replace);
-fs.writeFileSync('server.ts', code);
+const regex = /handleSaveCustomQuestion\(null,\s*newQ\);/;
+if (regex.test(code)) {
+    code = code.replace(regex, 'handleSaveCustomQuestion(undefined, newQ);');
+    fs.writeFileSync('src/components/SamplingView.tsx', code);
+    console.log('Fixed handleSaveCustomQuestion call');
+} else {
+    console.log('Could not find call to fix');
+}

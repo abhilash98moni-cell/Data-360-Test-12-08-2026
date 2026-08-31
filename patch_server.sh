@@ -1,1 +1,0 @@
-sed -i 's/const downloaded = await storageService.downloadFile(fileId);/const fallbackFileName = req.query.fileName as string;\n      const downloaded = await storageService.downloadFile(fileId, fallbackFileName);/g' server.ts
