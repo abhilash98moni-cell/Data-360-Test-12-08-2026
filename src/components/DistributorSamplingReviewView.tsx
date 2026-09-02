@@ -49,8 +49,6 @@ export const DistributorSamplingReviewView: React.FC<Props> = ({
           const usage = r.documentUsage || '';
           const status = r.status || '';
           const isAcceptable = ['ACCEPTED', 'AVAILABLE', 'PENDING_REVIEW', 'PENDING'].includes(status.toUpperCase().replace(/\s+/g, '_'));
-          const isTemplate = (r.fileName || '').toLowerCase().includes('template') || (r.fileName || '').toLowerCase().includes('questionnaire');
-          if (isTemplate) return false;
           const hasSamplingUsage = Array.isArray(usage) ? usage.includes('SAMPLING_POPULATION') : usage.includes('SAMPLING_POPULATION');
           return (r.samplingEnabled === true || String(r.samplingEnabled) === 'true') && hasSamplingUsage && isAcceptable;
         });

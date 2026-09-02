@@ -1581,8 +1581,8 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         ),
 
         accountDescription: resolveExplicit(mapping.accountDescription) || detectCol(
-          ['accountdescription', 'accountdesc', 'accountname', 'accounttitle', 'headofaccount', 'ledgername', 'ledger', 'glname', 'gldescription', 'accounthead', 'acctname', 'accdesc', 'chartofaccounts', 'accountheadname', 'headname', 'accountcategory', 'title', 'head', 'ledgerdesc', 'acctdesc', 'accname', 'acname'],
-          ['accountdescription', 'accountname', 'accounttitle', 'ledgername', 'headofaccount']
+          ['accountdescription', 'accountdesc', 'accountname', 'accounttitle', 'headofaccount', 'ledgername', 'ledger', 'glname', 'gldescription', 'accounthead', 'acctname', 'accdesc', 'chartofaccounts', 'accountheadname', 'headname', 'accountcategory', 'title', 'head', 'ledgerdesc', 'acctdesc', 'accname', 'acname', 'entity', 'vendor', 'customer', 'party'],
+          ['accountdescription', 'accountname', 'accounttitle', 'ledgername', 'headofaccount', 'entity']
         ),
 
         description: resolveExplicit(mapping.description) || detectCol(
@@ -1611,8 +1611,16 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         )
       };
 
-      // Check if there is a single amount column when debit and credit are both unmapped
-      const singleAmountCol = (!finalMapping.debit && !finalMapping.credit) ? detectCol(['amount', 'txnamount', 'netamount', 'transamount', 'value', 'transactionamount', 'totalamount', 'total']) : '';
+      // Guard against bad column mapping collisions (e.g., credit mapped to text description)
+      if (finalMapping.credit && (finalMapping.credit === finalMapping.description || finalMapping.credit === finalMapping.narration)) {
+        finalMapping.credit = '';
+      }
+      if (finalMapping.debit && (finalMapping.debit === finalMapping.description || finalMapping.debit === finalMapping.narration)) {
+        finalMapping.debit = '';
+      }
+
+      // Check if there is a single amount column
+      const singleAmountCol = detectCol(['amount', 'txnamount', 'netamount', 'transamount', 'value', 'transactionamount', 'totalamount', 'total']);
 
       const parsedRecords = jsonData.map((row: any, idx: number) => {
         const getRowVal = (colName: string): string => {
@@ -1652,7 +1660,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         let cr = getRowNumVal(finalMapping.credit);
         let bal = getRowNumVal(finalMapping.balance);
 
-        if (singleAmountCol && !finalMapping.debit && !finalMapping.credit) {
+        if (singleAmountCol && (dr === 0 && cr === 0)) {
           const singleAmt = getRowNumVal(singleAmountCol);
           if (singleAmt > 0) {
             dr = singleAmt;
@@ -1665,7 +1673,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
         // Fallback balance if not provided
         if (!finalMapping.balance && bal === 0) {
-          bal = dr - cr;
+          bal = dr !== 0 ? dr : (cr !== 0 ? -cr : 0);
         }
 
         const finalAccNum = accNumVal || '—';
@@ -1701,28 +1709,41 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   // GET /api/sampling/state - Retrieve active sampling workspace state
   app.get('/api/sampling/state', authenticateRequest, async (req: any, res: any) => {
     try {
-      const distributorId = req.query.distributorId || req.query.distributor || 'Midwest Trading Co.';
-      const auditId = req.query.auditId || req.query.audit || 'eng-101';
+      const distributorId = (req.query.distributorId || req.query.distributor || '').toString();
+      const auditId = (req.query.auditId || req.query.audit || '').toString();
+      const client = (req.query.client || req.query.clientName || '').toString();
       const supabase = getSupabaseServerClient();
-      
+      const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
       const { data, error } = await supabase
         .from('system_audit_logs')
         .select('*')
-        .eq('event_type', 'SAMPLING_STATE')
-        .order('created_at', { ascending: false });
+        .eq('event_type', 'SAMPLING_STATE');
 
       if (error) throw error;
 
-      let stateItem = (data || []).find(d => {
-        const details = d.details || {};
-        const matchDist = !distributorId || distributorId === 'All Distributors' || !details.distributorId || details.distributorId.trim().toLowerCase() === distributorId.trim().toLowerCase();
-        const matchAudit = !auditId || auditId === 'All Audits' || !details.auditId || details.auditId.trim().toLowerCase() === auditId.trim().toLowerCase();
-        return matchDist && matchAudit;
+      // Sort by latest update time
+      const sorted = [...(data || [])].sort((a, b) => {
+        const tA = new Date(a.details?.updatedAt || a.created_at).getTime();
+        const tB = new Date(b.details?.updatedAt || b.created_at).getTime();
+        return tB - tA;
       });
 
-      if (!stateItem && (data || []).length > 0) {
-        stateItem = data[0];
-      }
+      let stateItem = sorted.find(d => {
+        const details = d.details || {};
+        const matchDist = !distributorId || distributorId === 'All Distributors' || !details.distributorId || cleanStr(details.distributorId) === cleanStr(distributorId);
+        const matchAudit = !auditId || auditId === 'All Audits' || !details.auditId || cleanStr(details.auditId) === cleanStr(auditId);
+        const matchClient = !client || client === 'All Clients' || !details.clientName || cleanStr(details.clientName) === cleanStr(client);
+        return matchDist && matchAudit && matchClient;
+      }) || sorted.find(d => {
+        const details = d.details || {};
+        const matchDist = !distributorId || distributorId === 'All Distributors' || !details.distributorId || cleanStr(details.distributorId) === cleanStr(distributorId);
+        const matchAudit = !auditId || auditId === 'All Audits' || !details.auditId || cleanStr(details.auditId) === cleanStr(auditId);
+        return matchDist && matchAudit;
+      }) || sorted.find(d => {
+        const details = d.details || {};
+        return !distributorId || distributorId === 'All Distributors' || !details.distributorId || cleanStr(details.distributorId) === cleanStr(distributorId);
+      }) || sorted[0];
 
       res.json({ success: true, state: stateItem ? stateItem.details : null });
     } catch (err: any) {
@@ -1737,6 +1758,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       const payload = req.body || {};
       const { distributorId, auditId, clientName, activePopulationId, activePopulationName, activeTab } = payload;
       const supabase = getSupabaseServerClient();
+      const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
       const targetDist = distributorId || 'Midwest Trading Co.';
       const targetAudit = auditId || 'eng-101';
@@ -1747,11 +1769,11 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         .select('*')
         .eq('event_type', 'SAMPLING_STATE');
 
-      const found = (existing || []).find(d => {
+      const foundStates = (existing || []).filter(d => {
         const details = d.details || {};
         return (
-          (!details.distributorId || details.distributorId.trim().toLowerCase() === targetDist.trim().toLowerCase()) &&
-          (!details.auditId || details.auditId.trim().toLowerCase() === targetAudit.trim().toLowerCase())
+          (!details.distributorId || cleanStr(details.distributorId) === cleanStr(targetDist)) &&
+          (!details.auditId || cleanStr(details.auditId) === cleanStr(targetAudit))
         );
       });
 
@@ -1765,11 +1787,14 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         updatedAt: new Date().toISOString()
       };
 
-      if (found) {
+      if (foundStates.length > 0) {
         await supabase
           .from('system_audit_logs')
-          .update({ details: { ...found.details, ...stateDetails } })
-          .eq('id', found.id);
+          .update({ details: { ...foundStates[0].details, ...stateDetails } })
+          .eq('id', foundStates[0].id);
+        for (let i = 1; i < foundStates.length; i++) {
+          await supabase.from('system_audit_logs').delete().eq('id', foundStates[i].id);
+        }
       } else {
         await supabase.from('system_audit_logs').insert({
           event_type: 'SAMPLING_STATE',
@@ -1779,7 +1804,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         });
       }
 
-      res.json({ success: true, message: 'Sampling state updated successfully' });
+      res.json({ success: true, message: 'Sampling state updated successfully', state: stateDetails });
     } catch (err: any) {
       console.error('Error saving sampling state:', err);
       res.status(500).json({ success: false, error: err.message });
@@ -1793,6 +1818,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       const auditId = req.query.auditId || req.query.audit;
       const client = req.query.client;
       const supabase = getSupabaseServerClient();
+      const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
       const { data, error } = await supabase
         .from('system_audit_logs')
@@ -1831,12 +1857,11 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         })
         .filter(p => {
           const usage = p.documentUsage || [];
-          const hasSampling = p.samplingEnabled === true || usage.includes('SAMPLING_POPULATION') || p.requestRef === 'SAMPLING';
-          const matchDist = !distributorId || distributorId === 'All Distributors' || !p.distributorName || p.distributorName.trim().toLowerCase() === distributorId.trim().toLowerCase();
-          const matchAudit = !auditId || auditId === 'All Audits' || !p.auditId || p.auditId.trim().toLowerCase() === auditId.trim().toLowerCase();
-          const matchClient = !client || client === 'All Clients' || !p.clientName || p.clientName.trim().toLowerCase() === client.trim().toLowerCase();
-          const isTemplate = (p.fileName || '').toLowerCase().includes('template') || (p.fileName || '').toLowerCase().includes('questionnaire');
-          return hasSampling && matchDist && matchAudit && matchClient && !isTemplate;
+          const hasSampling = p.samplingEnabled === true || usage.includes('SAMPLING_POPULATION') || p.requestRef === 'SAMPLING' || p.section === 'Sampling';
+          const matchDist = !distributorId || distributorId === 'All Distributors' || !p.distributorName || cleanStr(p.distributorName) === cleanStr(distributorId);
+          const matchAudit = !auditId || auditId === 'All Audits' || !p.auditId || cleanStr(p.auditId) === cleanStr(auditId);
+          const matchClient = !client || client === 'All Clients' || !p.clientName || cleanStr(p.clientName) === cleanStr(client);
+          return hasSampling && matchDist && matchAudit && matchClient;
         });
 
       res.json({ success: true, populations });
@@ -1853,6 +1878,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       const distributorId = req.query.distributorId || req.query.distributor;
       const auditId = req.query.auditId || req.query.audit;
       const supabase = getSupabaseServerClient();
+      const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
       let targetRow: any = null;
       const { data, error } = await supabase
@@ -1871,17 +1897,45 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       }
 
       if (!targetRow && (data || []).length > 0) {
-        // Fallback to active sampling population or latest matching
-        targetRow = (data || []).find(row => {
-          const d = row.details || {};
-          const isMatch = (!distributorId || distributorId === 'All Distributors' || !d.distributor_name || d.distributor_name.trim().toLowerCase() === distributorId.trim().toLowerCase()) &&
-                          (!auditId || auditId === 'All Audits' || !d.audit_id || d.audit_id.trim().toLowerCase() === auditId.trim().toLowerCase());
-          const hasSampling = d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING';
-          return isMatch && hasSampling;
-        }) || (data || []).find(row => {
-          const d = row.details || {};
-          return d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING';
-        }) || (data || [])[0];
+        // First, check active population from SAMPLING_STATE
+        const { data: stateData } = await supabase
+          .from('system_audit_logs')
+          .select('*')
+          .eq('event_type', 'SAMPLING_STATE');
+
+        const sortedState = [...(stateData || [])].sort((a, b) => {
+          const tA = new Date(a.details?.updatedAt || a.created_at).getTime();
+          const tB = new Date(b.details?.updatedAt || b.created_at).getTime();
+          return tB - tA;
+        });
+
+        const activeState = sortedState.find(d => {
+          const det = d.details || {};
+          return (!distributorId || distributorId === 'All Distributors' || cleanStr(det.distributorId) === cleanStr(distributorId)) &&
+                 (!auditId || auditId === 'All Audits' || cleanStr(det.auditId) === cleanStr(auditId));
+        }) || sortedState[0];
+
+        const stateActiveId = activeState?.details?.activePopulationId;
+        if (stateActiveId) {
+          targetRow = (data || []).find(row => {
+            const d = row.details || {};
+            return row.id === stateActiveId || d.google_drive_file_id === stateActiveId || d.storage_path === stateActiveId || d.file_name === stateActiveId;
+          });
+        }
+
+        if (!targetRow) {
+          // Fallback to latest matching sampling population
+          targetRow = (data || []).find(row => {
+            const d = row.details || {};
+            const isMatch = (!distributorId || distributorId === 'All Distributors' || !d.distributor_name || cleanStr(d.distributor_name) === cleanStr(distributorId)) &&
+                            (!auditId || auditId === 'All Audits' || !d.audit_id || cleanStr(d.audit_id) === cleanStr(auditId));
+            const hasSampling = d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING' || d.section === 'Sampling';
+            return isMatch && hasSampling;
+          }) || (data || []).find(row => {
+            const d = row.details || {};
+            return d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING' || d.section === 'Sampling';
+          }) || (data || [])[0];
+        }
       }
 
       if (!targetRow) {
@@ -2281,21 +2335,26 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         updatedAt: new Date().toISOString()
       };
 
+      const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       const { data: existingState } = await supabase
         .from('system_audit_logs')
         .select('*')
         .eq('event_type', 'SAMPLING_STATE');
 
-      const foundState = (existingState || []).find(d => {
+      const foundStates = (existingState || []).filter(d => {
         const details = d.details || {};
-        return details.distributorId === targetDistributor && details.auditId === auditId;
+        return cleanStr(details.distributorId) === cleanStr(targetDistributor) &&
+               cleanStr(details.auditId) === cleanStr(auditId);
       });
 
-      if (foundState) {
+      if (foundStates.length > 0) {
         await supabase
           .from('system_audit_logs')
-          .update({ details: { ...foundState.details, ...stateDetails } })
-          .eq('id', foundState.id);
+          .update({ details: { ...foundStates[0].details, ...stateDetails } })
+          .eq('id', foundStates[0].id);
+        for (let i = 1; i < foundStates.length; i++) {
+          await supabase.from('system_audit_logs').delete().eq('id', foundStates[i].id);
+        }
       } else {
         await supabase.from('system_audit_logs').insert({
           event_type: 'SAMPLING_STATE',

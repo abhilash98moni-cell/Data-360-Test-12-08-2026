@@ -539,8 +539,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             const usage = r.documentUsage || '';
             const status = r.status || '';
             const isAcceptable = ['ACCEPTED', 'AVAILABLE', 'PENDING_REVIEW', 'PENDING'].includes(status.toUpperCase().replace(/\s+/g, '_'));
-            const isTemplate = (r.fileName || '').toLowerCase().includes('template') || (r.fileName || '').toLowerCase().includes('questionnaire');
-            if (isTemplate) return false;
             const hasSamplingUsage = Array.isArray(usage) ? usage.includes('SAMPLING_POPULATION') : usage.includes('SAMPLING_POPULATION');
             return (r.samplingEnabled === true || String(r.samplingEnabled) === 'true') && hasSamplingUsage && isAcceptable;
           });
@@ -549,10 +547,10 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
 
       setAvailablePopulations(populationsList);
 
-      // 2. Fetch saved sampling state (to restore active population after refresh)
+      // 2. Fetch saved sampling state from database
       let activePopId: string | null = null;
       try {
-        const stateRes = await fetch(`/api/sampling/state?distributorId=${encodeURIComponent(selectedDistributor)}&auditId=${encodeURIComponent(selectedAuditFilter || 'eng-101')}`, {
+        const stateRes = await fetch(`/api/sampling/state?distributorId=${encodeURIComponent(selectedDistributor)}&auditId=${encodeURIComponent(selectedAuditFilter || 'eng-101')}&client=${encodeURIComponent(selectedClient || 'Apex Electronics Corp')}`, {
           headers: { 'x-user-email': currentUser?.email || '' }
         });
         if (stateRes.ok) {
@@ -565,10 +563,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         console.warn("Could not load state from backend", e);
       }
 
-      if (!activePopId && typeof window !== 'undefined') {
-        activePopId = localStorage.getItem(`data360_active_gl_pop_${selectedDistributor}_${selectedAuditFilter || 'eng-101'}`) || localStorage.getItem('data360_active_gl_population');
-      }
-
       if (populationsList.length > 0) {
         let target: any = null;
         if (activePopId) {
@@ -578,7 +572,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
           target = populationsList[0];
         }
         setSelectedPopulation(target);
-        await loadPopulationRecords(target);
+        await loadPopulationRecords(target, false);
       } else {
         setSelectedPopulation(null);
         setPopulationRecords([]);
@@ -595,7 +589,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
 
   useEffect(() => {
     fetchSamplingWorkspace();
-  }, [selectedDistributor, selectedAuditFilter]);
+  }, [selectedDistributor, selectedAuditFilter, selectedClient]);
 
   const fetchAssignedSamples = async () => {
     try {
@@ -611,29 +605,26 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
     }
   };
 
-  const loadPopulationRecords = async (targetFile: any) => {
+  const loadPopulationRecords = async (targetFile: any, shouldPersistBackend: boolean = false) => {
     if (!targetFile) return;
     setSelectedPopulation(targetFile);
     
-    // Persist active population selection
     const targetFileId = targetFile.googleDriveFileId || targetFile.id;
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`data360_active_gl_pop_${selectedDistributor}_${selectedAuditFilter || 'eng-101'}`, targetFileId);
-      localStorage.setItem('data360_active_gl_population', targetFileId);
-    }
 
-    // Save active state to backend asynchronously
-    fetch('/api/sampling/state', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-user-email': currentUser?.email || '' },
-      body: JSON.stringify({
-        distributorId: selectedDistributor,
-        auditId: selectedAuditFilter || 'eng-101',
-        clientName: selectedClient || 'Apex Electronics Corp',
-        activePopulationId: targetFileId,
-        activePopulationName: targetFile.fileName
-      })
-    }).catch(e => console.warn('Could not persist sampling state', e));
+    if (shouldPersistBackend) {
+      // Save active state to backend asynchronously
+      fetch('/api/sampling/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-user-email': currentUser?.email || '' },
+        body: JSON.stringify({
+          distributorId: selectedDistributor,
+          auditId: selectedAuditFilter || 'eng-101',
+          clientName: selectedClient || 'Apex Electronics Corp',
+          activePopulationId: targetFileId,
+          activePopulationName: targetFile.fileName
+        })
+      }).catch(e => console.warn('Could not persist sampling state', e));
+    }
 
     setLoading(true);
     try {
@@ -812,7 +803,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   };
 
   const handleSelectPopulation = async (targetFile: any) => {
-    await loadPopulationRecords(targetFile);
+    await loadPopulationRecords(targetFile, true);
   };
 
   const handleClassificationToggle = (rec: any, opt: string) => {

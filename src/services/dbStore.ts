@@ -531,8 +531,7 @@ class ResilientDbStore {
       .filter(p => {
         const usage = p.documentUsage || [];
         const hasSampling = p.samplingEnabled === true || usage.includes('SAMPLING_POPULATION') || p.requestRef === 'SAMPLING' || p.section === 'Sampling';
-        const isTemplate = (p.fileName || '').toLowerCase().includes('template') || (p.fileName || '').toLowerCase().includes('questionnaire');
-        return hasSampling && !isTemplate;
+        return hasSampling;
       });
 
     // Match distributor & audit

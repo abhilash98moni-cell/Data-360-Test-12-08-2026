@@ -350,7 +350,7 @@ export default function App() {
           ) : activeTab === 'sampling_review' ? (
             <SamplingView
               selectedClient={selectedClient}
-              selectedDistributor={selectedDistributor}
+              selectedDistributor={currentUser?.role?.includes('Distributor') ? (currentUser.organization || selectedDistributor) : selectedDistributor}
               selectedAuditFilter={selectedEngId}
               currentUser={currentUser}
               currencyMode={currencyMode}
