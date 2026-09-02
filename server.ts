@@ -1693,6 +1693,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         client,
         auditId,
         distributor,
+        distributorId,
         status,
         search,
         documentUsage,
@@ -1701,7 +1702,8 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
       const isDistributor = req.auth.role === 'Distributor';
       // SERVER-SIDE TENANT ISOLATION: Force distributorName to user's organization if role is Distributor
-      const targetDistributor = isDistributor ? req.auth.organization : (distributor && distributor !== 'All Distributors' ? distributor : undefined);
+      const effectiveDistributor = distributor || distributorId;
+      const targetDistributor = isDistributor ? req.auth.organization : (effectiveDistributor && effectiveDistributor !== 'All Distributors' ? effectiveDistributor : undefined);
 
       const supabase = getSupabaseServerClient();
 
@@ -1744,7 +1746,8 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
           samplingEnabled: r.samplingEnabled,
           samplingStatus: r.samplingStatus,
           recordCount: r.recordCount,
-          totalValue: r.totalValue
+          totalValue: r.totalValue,
+          glMapping: r.glMapping
         };
       });
 

@@ -503,14 +503,15 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       setLoading(true);
       try {
         const params = new URLSearchParams({
+          distributor: selectedDistributor,
           distributorId: selectedDistributor,
           auditId: selectedAuditFilter || 'eng-101',
         });
         const res = await fetch(`/api/evidence?${params.toString()}`, {
           headers: {
-            'x-user-email': currentUser?.email || '',
-            'x-user-role': currentUser?.role || '',
-            'x-user-organization': currentUser?.organization || ''
+            'x-user-email': currentUser?.email || 'auditor@data360.io',
+            'x-user-role': currentUser?.role || 'Auditor',
+            'x-user-organization': currentUser?.organization || 'Apex Audit Practice (AA)'
           }
         });
         const data = await res.json();
@@ -525,8 +526,13 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             return (r.samplingEnabled === true || String(r.samplingEnabled) === 'true') && hasSamplingUsage && isAcceptable;
           });
           setAvailablePopulations(filtered);
-          if (filtered.length > 0 && !selectedPopulation) {
-            handleSelectPopulation(filtered[0]);
+          if (filtered.length > 0) {
+            setSelectedPopulation((current: any) => {
+              const matched = current ? filtered.find((f: any) => f.id === current.id || f.googleDriveFileId === current.googleDriveFileId || f.fileName === current.fileName) : null;
+              const target = matched || filtered[0];
+              handleSelectPopulation(target);
+              return target;
+            });
           }
         }
       } catch (err) {
@@ -778,6 +784,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       // reload populations
       const fetchPopulations = async () => {
         const params = new URLSearchParams({
+          distributor: selectedDistributor,
           distributorId: selectedDistributor,
           auditId: selectedAuditFilter || 'eng-101',
         });
@@ -804,16 +811,30 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             const hasSamplingUsage = Array.isArray(usage) ? usage.includes('SAMPLING_POPULATION') : usage.includes('SAMPLING_POPULATION');
             return (r.samplingEnabled === true || String(r.samplingEnabled) === 'true') && hasSamplingUsage && isAcceptable;
           });
+          
+          let targetFileToSelect = filtered.find((p: any) => p.googleDriveFileId === data.fileId || p.id === data.fileId || p.fileName === uploadFile.name);
+          if (!targetFileToSelect && data.fileId) {
+            targetFileToSelect = {
+              id: data.fileId,
+              googleDriveFileId: data.fileId,
+              fileName: uploadFile.name,
+              glMapping: glMapping,
+              documentUsage: ['SAMPLING_POPULATION'],
+              samplingEnabled: true,
+              status: 'AVAILABLE'
+            };
+            filtered.unshift(targetFileToSelect);
+          }
+          
           setAvailablePopulations(filtered);
           
-          // Select the newly uploaded file by fileId
-          if (data.fileId) {
-             const newFile = filtered.find((p: any) => p.googleDriveFileId === data.fileId || p.id === data.fileId);
-             if (newFile) {
-                await handleSelectPopulation(newFile);
-             } else {
-                if (filtered.length > 0) await handleSelectPopulation(filtered[0]);
-             }
+          if (targetFileToSelect) {
+            const fileWithMapping = { ...targetFileToSelect, glMapping: glMapping || targetFileToSelect.glMapping };
+            setSelectedPopulation(fileWithMapping);
+            await handleSelectPopulation(fileWithMapping);
+          } else if (filtered.length > 0) {
+            setSelectedPopulation(filtered[0]);
+            await handleSelectPopulation(filtered[0]);
           }
         }
       };
@@ -1634,14 +1655,14 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             ) : availablePopulations.length > 0 ? (
                <select 
                  className="bg-transparent border-none text-sm font-bold text-white focus:outline-none focus:ring-0 cursor-pointer p-0 appearance-none"
-                 value={selectedPopulation?.id || ''}
+                 value={selectedPopulation?.id || selectedPopulation?.googleDriveFileId || ''}
                  onChange={(e) => {
-                   const pop = availablePopulations.find(p => p.id === e.target.value);
+                   const pop = availablePopulations.find(p => p.id === e.target.value || p.googleDriveFileId === e.target.value);
                    if (pop) handleSelectPopulation(pop);
                  }}
                >
                  {availablePopulations.map(p => (
-                   <option key={p.id} value={p.id} className="bg-slate-900 text-white">{p.fileName}</option>
+                   <option key={p.id || p.googleDriveFileId} value={p.id || p.googleDriveFileId} className="bg-slate-900 text-white">{p.fileName}</option>
                  ))}
                </select>
             ) : (

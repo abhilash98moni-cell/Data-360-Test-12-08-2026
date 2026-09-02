@@ -1393,6 +1393,95 @@ app.post('/api/audits/create', (req, res) => {
 // ====================================================================
 // STEP 8 & 9: EVIDENCE & FILE STORAGE API
 // ====================================================================
+app.get('/api/evidence', async (req: any, res: any) => {
+  try {
+    const {
+      client,
+      auditId,
+      distributor,
+      distributorId,
+      status,
+      search,
+      documentUsage,
+      auditPeriod
+    } = req.query as Record<string, string>;
+
+    const isDistributor = (req.headers['x-user-role'] || '').toLowerCase().includes('distributor');
+    const effectiveDistributor = distributor || distributorId;
+    const targetDistributor = isDistributor ? (req.headers['x-user-organization'] || req.headers['x-user-org']) : (effectiveDistributor && effectiveDistributor !== 'All Distributors' ? effectiveDistributor : undefined);
+
+    const supabase = getSupabaseServerClient();
+    const { data, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_FILE').order('created_at', { ascending: false });
+
+    if (error) {
+      return res.status(500).json({ success: false, error: 'Database query failed' });
+    }
+
+    let dbRecords = (data || []).map((row) => {
+      const r = row.details || {};
+      return {
+        id: row.id,
+        clientName: r.client_name || 'Apex Electronics Corp',
+        auditId: r.audit_id || 'eng-101',
+        auditCode: r.audit_code || 'AUD-2026-001',
+        distributorName: r.distributor_name,
+        requestRef: r.requirement_ref || r.request_item_id || '1.1',
+        requestTitle: r.requirement_title || 'Audit Requirement',
+        section: r.section || 'General Requirements',
+        fileName: r.file_name,
+        fileSizeMB: Number(r.file_size_mb || 1.0),
+        fileType: r.file_type || 'application/pdf',
+        googleDriveFileId: r.google_drive_file_id || r.storage_path,          
+        googleDriveFolderId: r.google_drive_folder_id,
+        version: r.version || 1,
+        uploadedBy: r.uploaded_by,
+        uploadedDate: r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : new Date().toLocaleString(),
+        status: r.review_status || r.status || 'PENDING_REVIEW',
+        reviewerComment: r.reviewer_comment,
+        reviewedBy: r.reviewed_by,          
+        reviewedDate: r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : undefined,
+        aiStatus: r.ai_status,          
+        documentUsage: r.document_usage || 'GENERAL_EVIDENCE',
+        auditPeriod: r.audit_period || 'FY 2025-26',
+        source: r.source || 'Distributor Upload',
+        samplingEnabled: r.samplingEnabled,
+        samplingStatus: r.samplingStatus,
+        recordCount: r.recordCount,
+        totalValue: r.totalValue,
+        glMapping: r.glMapping
+      };
+    });
+
+    if (targetDistributor && targetDistributor !== 'All Distributors') {
+      dbRecords = dbRecords.filter(r => r.distributorName === targetDistributor);
+    }
+    if (client && client !== 'All Clients') {
+      dbRecords = dbRecords.filter(r => r.clientName === client);
+    }
+    if (auditId && auditId !== 'All Audits') {
+      dbRecords = dbRecords.filter(r => r.auditId === auditId);
+    }
+    if (status && status !== 'All') {
+      const allowedStatuses = status.toUpperCase().split(',').map(s => s.trim().replace(/\s+/g, '_'));
+      dbRecords = dbRecords.filter(r => allowedStatuses.includes((r.status || '').toUpperCase().replace(/\s+/g, '_')));
+    }
+    if (documentUsage) {
+      dbRecords = dbRecords.filter(r => Array.isArray(r.documentUsage) ? r.documentUsage.includes(documentUsage) : (r.documentUsage || '').includes(documentUsage));
+    }
+    if (auditPeriod) {
+      dbRecords = dbRecords.filter(r => r.auditPeriod === auditPeriod);
+    }
+
+    return res.json({
+      success: true,
+      count: dbRecords.length,
+      records: dbRecords
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.post('/api/evidence/upload', (req, res) => {
   const { auditId, requestRef, fileName, fileSizeMB, fileType, uploadedBy, distributorName } = req.body;
 
