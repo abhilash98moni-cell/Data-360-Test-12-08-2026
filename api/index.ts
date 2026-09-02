@@ -5,6 +5,7 @@ import path from 'path';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import multer from 'multer';
+import * as XLSX from 'xlsx';
 import { storageService } from '../src/services/storageService.js';
 import { getItemCompletionDetails } from '../src/utils/irlValidation.js';
 import {
@@ -678,6 +679,88 @@ app.post('/api/sampling/upload', upload.single('file'), async (req: any, res: an
       }
     }
 
+    // Parse uploaded buffer on server to guarantee instant persistence
+    const parseGLBufferToRecords = (buffer: Buffer, originalFileName: string, explicitMapping?: any) => {
+      try {
+        const workbook = XLSX.read(buffer, { type: 'buffer' });
+        const firstSheetName = workbook.SheetNames[0];
+        if (!firstSheetName) return { records: [], mapping: explicitMapping || {}, headers: [] };
+        const worksheet = workbook.Sheets[firstSheetName];
+        const jsonData: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: "", raw: false });
+        if (!jsonData || jsonData.length === 0) return { records: [], mapping: explicitMapping || {}, headers: [] };
+
+        const headers = Object.keys(jsonData[0] || {});
+        let mapping: any = explicitMapping;
+        if (typeof mapping === 'string') {
+          try { mapping = JSON.parse(mapping); } catch (e) { mapping = {}; }
+        }
+        mapping = mapping || {};
+
+        const findCol = (candidates: string[]) => {
+          for (const h of headers) {
+            const clean = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+            for (const c of candidates) {
+              if (clean === c || clean.includes(c)) return h;
+            }
+          }
+          return '';
+        };
+
+        const finalMapping = {
+          date: mapping.date || findCol(['date', 'transactiondate', 'invoicedate', 'postingdate', 'time']),
+          voucherNo: mapping.voucherNo || findCol(['voucherno', 'referenceno', 'transactionid', 'invoicenumber', 'invoiceno', 'documentid', 'refno', 'reference', 'id', 'slno']),
+          accountNumber: mapping.accountNumber || findCol(['accountnumber', 'accountno', 'glaccount', 'account']),
+          accountDescription: mapping.accountDescription || findCol(['accountdescription', 'accountname', 'glname']),
+          description: mapping.description || findCol(['description', 'particulars', 'memo', 'notes', 'purpose', 'details', 'item', 'product', 'vendor', 'customer', 'employee', 'payee']),
+          narration: mapping.narration || findCol(['narration', 'remarks', 'comment']),
+          debit: mapping.debit || findCol(['debit', 'dr']),
+          credit: mapping.credit || findCol(['credit', 'cr']),
+          balance: mapping.balance || findCol(['balance', 'bal'])
+        };
+
+        const parsedRecords = jsonData.map((row: any, idx: number) => {
+          const getVal = (colName: string) => (colName && row[colName] !== undefined ? String(row[colName]).trim() : '');
+          const numVal = (colName: string) => {
+            if (!colName || row[colName] === undefined) return 0;
+            const s = String(row[colName]).replace(/[$,\s]/g, '');
+            const n = parseFloat(s);
+            return isNaN(n) ? 0 : n;
+          };
+
+          const dateVal = getVal(finalMapping.date) || '—';
+          const voucherVal = getVal(finalMapping.voucherNo) || `TX-${1000 + idx + 1}`;
+          const descVal = getVal(finalMapping.description) || getVal(finalMapping.narration) || `Transaction #${idx + 1}`;
+          const dr = numVal(finalMapping.debit);
+          const cr = numVal(finalMapping.credit);
+          const bal = numVal(finalMapping.balance);
+
+          return {
+            id: voucherVal !== '—' && voucherVal ? voucherVal : `RECORD-${idx + 1}`,
+            originalRow: idx + 2,
+            date: dateVal,
+            voucherNo: voucherVal,
+            accountNumber: getVal(finalMapping.accountNumber) || '—',
+            accountDescription: getVal(finalMapping.accountDescription) || '—',
+            description: descVal,
+            narration: getVal(finalMapping.narration) || '—',
+            debit: dr,
+            credit: cr,
+            balance: bal,
+            testingClassification: [],
+            testingStatus: 'Pending Classification',
+            testingReference: ''
+          };
+        });
+
+        return { records: parsedRecords, mapping: finalMapping, headers };
+      } catch (err) {
+        console.error('Error parsing GL buffer to records:', err);
+        return { records: [], mapping: explicitMapping || {}, headers: [] };
+      }
+    };
+
+    const parsedData = parseGLBufferToRecords(req.file.buffer, req.file.originalname, parsedGlMapping);
+
     const newEvidenceRow = {
       client_name: clientName,
       audit_id: auditId,
@@ -703,7 +786,9 @@ app.post('/api/sampling/upload', upload.single('file'), async (req: any, res: an
       document_usage: ['SAMPLING_POPULATION'],
       samplingEnabled: true,
       samplingStatus: 'ADDED',
-      glMapping: parsedGlMapping,
+      glMapping: parsedData.mapping || parsedGlMapping,
+      records_count: parsedData.records.length,
+      parsed_records: parsedData.records,
       source: 'Auditor Upload'
     };
 
@@ -718,14 +803,258 @@ app.post('/api/sampling/upload', upload.single('file'), async (req: any, res: an
       return res.status(500).json({ success: false, error: insertEvidenceRes.error.message });
     }
 
+    // Also persist active population state in database
+    const stateDetails = {
+      distributorId: targetDistributor,
+      auditId,
+      clientName,
+      activePopulationId: metadata.googleDriveFileId,
+      activePopulationName: metadata.fileName,
+      activeTab: 'GL',
+      updatedAt: new Date().toISOString()
+    };
+
+    const { data: existingState } = await supabase
+      .from('system_audit_logs')
+      .select('*')
+      .eq('event_type', 'SAMPLING_STATE');
+
+    const foundState = (existingState || []).find(d => {
+      const details = d.details || {};
+      return details.distributorId === targetDistributor && details.auditId === auditId;
+    });
+
+    if (foundState) {
+      await supabase
+        .from('system_audit_logs')
+        .update({ details: { ...foundState.details, ...stateDetails } })
+        .eq('id', foundState.id);
+    } else {
+      await supabase.from('system_audit_logs').insert({
+        event_type: 'SAMPLING_STATE',
+        target_user_email: `${clientName}::${targetDistributor}`,
+        details: stateDetails,
+        created_at: new Date().toISOString()
+      });
+    }
+
     return res.status(200).json({
       success: true,
       message: 'Sampling population uploaded successfully',
-      fileId: metadata.googleDriveFileId
+      fileId: metadata.googleDriveFileId,
+      fileName: metadata.fileName,
+      records: parsedData.records,
+      glMapping: parsedData.mapping,
+      recordCount: parsedData.records.length
     });
   } catch (error: any) {
     console.error('Sampling upload error:', error);
     res.status(500).json({ success: false, error: error.message || 'Failed to upload sampling population' });
+  }
+});
+
+// Sampling workspace state endpoints
+app.get('/api/sampling/state', async (req: any, res: any) => {
+  try {
+    const distributorId = req.query.distributorId || req.query.distributor || 'Midwest Trading Co.';
+    const auditId = req.query.auditId || req.query.audit || 'eng-101';
+    const supabase = getSupabaseServerClient();
+    
+    const { data, error } = await supabase
+      .from('system_audit_logs')
+      .select('*')
+      .eq('event_type', 'SAMPLING_STATE')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const stateItem = (data || []).find(d => {
+      const details = d.details || {};
+      return (
+        (!distributorId || distributorId === 'All Distributors' || details.distributorId === distributorId) &&
+        (!auditId || auditId === 'All Audits' || details.auditId === auditId)
+      );
+    });
+
+    res.json({ success: true, state: stateItem ? stateItem.details : null });
+  } catch (err: any) {
+    console.error('Error fetching sampling state:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/sampling/state', express.json(), async (req: any, res: any) => {
+  try {
+    const payload = req.body || {};
+    const { distributorId, auditId, clientName, activePopulationId, activePopulationName, activeTab } = payload;
+    const supabase = getSupabaseServerClient();
+
+    const { data: existing } = await supabase
+      .from('system_audit_logs')
+      .select('*')
+      .eq('event_type', 'SAMPLING_STATE');
+
+    const found = (existing || []).find(d => {
+      const details = d.details || {};
+      return (
+        details.distributorId === distributorId &&
+        details.auditId === auditId
+      );
+    });
+
+    const stateDetails = {
+      distributorId: distributorId || 'Midwest Trading Co.',
+      auditId: auditId || 'eng-101',
+      clientName: clientName || 'Apex Electronics Corp',
+      activePopulationId,
+      activePopulationName,
+      activeTab: activeTab || 'GL',
+      updatedAt: new Date().toISOString()
+    };
+
+    if (found) {
+      await supabase
+        .from('system_audit_logs')
+        .update({ details: { ...found.details, ...stateDetails } })
+        .eq('id', found.id);
+    } else {
+      await supabase.from('system_audit_logs').insert({
+        event_type: 'SAMPLING_STATE',
+        target_user_email: `${clientName || 'Apex Electronics Corp'}::${distributorId || 'distributor'}`,
+        details: stateDetails,
+        created_at: new Date().toISOString()
+      });
+    }
+
+    res.json({ success: true, message: 'Sampling state updated successfully' });
+  } catch (err: any) {
+    console.error('Error saving sampling state:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/sampling/populations - Fetch all available GL sampling populations
+app.get('/api/sampling/populations', async (req: any, res: any) => {
+  try {
+    const distributorId = req.query.distributorId || req.query.distributor;
+    const auditId = req.query.auditId || req.query.audit;
+    const client = req.query.client;
+    const supabase = getSupabaseServerClient();
+
+    const { data, error } = await supabase
+      .from('system_audit_logs')
+      .select('*')
+      .eq('event_type', 'EVIDENCE_FILE')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    const populations = (data || [])
+      .map(row => {
+        const r = row.details || {};
+        return {
+          id: row.id,
+          clientName: r.client_name || 'Apex Electronics Corp',
+          auditId: r.audit_id || 'eng-101',
+          auditCode: r.audit_code || 'AUD-2026-001',
+          distributorName: r.distributor_name,
+          requestRef: r.requirement_ref || 'SAMPLING',
+          requestTitle: r.requirement_title || 'General Ledger Population',
+          section: r.section || 'Sampling',
+          fileName: r.file_name,
+          fileSizeMB: Number(r.file_size_mb || 1.0),
+          fileType: r.file_type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          googleDriveFileId: r.google_drive_file_id || r.storage_path,
+          uploadedBy: r.uploaded_by || 'Auditor User',
+          uploadedDate: r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : new Date().toLocaleString(),
+          status: r.review_status || r.status || 'AVAILABLE',
+          samplingEnabled: r.samplingEnabled ?? true,
+          samplingStatus: r.samplingStatus || 'ADDED',
+          documentUsage: Array.isArray(r.document_usage) ? r.document_usage : ['SAMPLING_POPULATION'],
+          glMapping: r.glMapping,
+          recordCount: r.records_count || (Array.isArray(r.parsed_records) ? r.parsed_records.length : 0),
+          hasParsedRecords: Array.isArray(r.parsed_records) && r.parsed_records.length > 0
+        };
+      })
+      .filter(p => {
+        const usage = p.documentUsage || [];
+        const hasSampling = p.samplingEnabled === true || usage.includes('SAMPLING_POPULATION') || p.requestRef === 'SAMPLING';
+        const matchDist = !distributorId || distributorId === 'All Distributors' || p.distributorName === distributorId;
+        const matchAudit = !auditId || auditId === 'All Audits' || p.auditId === auditId;
+        const matchClient = !client || client === 'All Clients' || p.clientName === client;
+        const isTemplate = (p.fileName || '').toLowerCase().includes('template') || (p.fileName || '').toLowerCase().includes('questionnaire');
+        return hasSampling && matchDist && matchAudit && matchClient && !isTemplate;
+      });
+
+    res.json({ success: true, populations });
+  } catch (err: any) {
+    console.error('Error fetching sampling populations:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/sampling/population-records
+app.get('/api/sampling/population-records', async (req: any, res: any) => {
+  try {
+    const fileId = req.query.fileId || req.query.populationId;
+    const distributorId = req.query.distributorId || req.query.distributor;
+    const auditId = req.query.auditId || req.query.audit;
+    const supabase = getSupabaseServerClient();
+
+    let targetRow: any = null;
+    const { data, error } = await supabase
+      .from('system_audit_logs')
+      .select('*')
+      .eq('event_type', 'EVIDENCE_FILE')
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    if (fileId) {
+      targetRow = (data || []).find(row => {
+        const d = row.details || {};
+        return row.id === fileId || d.google_drive_file_id === fileId || d.storage_path === fileId || d.file_name === fileId;
+      });
+    }
+
+    if (!targetRow && (data || []).length > 0) {
+      targetRow = (data || []).find(row => {
+        const d = row.details || {};
+        const isMatch = (!distributorId || distributorId === 'All Distributors' || d.distributor_name === distributorId) &&
+                        (!auditId || auditId === 'All Audits' || d.audit_id === auditId);
+        const hasSampling = d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING';
+        return isMatch && hasSampling;
+      }) || (data || [])[0];
+    }
+
+    if (!targetRow) {
+      return res.json({ success: true, records: [], glMapping: {}, fileId: null, fileName: null });
+    }
+
+    const details = targetRow.details || {};
+    
+    if (Array.isArray(details.parsed_records) && details.parsed_records.length > 0) {
+      return res.json({
+        success: true,
+        fileId: details.google_drive_file_id || targetRow.id,
+        fileName: details.file_name,
+        glMapping: details.glMapping || {},
+        records: details.parsed_records,
+        recordCount: details.parsed_records.length
+      });
+    }
+
+    res.json({
+      success: true,
+      fileId: details.google_drive_file_id || targetRow.id,
+      fileName: details.file_name,
+      glMapping: details.glMapping || {},
+      records: [],
+      recordCount: 0
+    });
+  } catch (err: any) {
+    console.error('Error fetching population records:', err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -769,33 +1098,49 @@ app.get('/api/sampling/transactions', async (req: any, res: any) => {
         return matchDist && matchAudit;
       });
       
-    res.json({ success: true, transactions });
+    res.json({ success: true, transactions, samples: transactions });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-app.post('/api/sampling/transactions', express.json(), async (req: any, res: any) => {
+const handleSaveSamplingTransactionsApi = async (req: any, res: any) => {
   try {
     const payload = req.body;
     const supabase = getSupabaseServerClient();
     const userRole = req.headers['x-user-role'];
     
     const items: any[] = Array.isArray(payload.transactions) ? payload.transactions : (payload.sampleId ? [payload] : []);
-    if (items.length === 0) {
-      return res.status(400).json({ success: false, error: 'No transaction items provided' });
-    }
+    const activePopulationId = payload.activePopulationId;
+    const distributorId = payload.distributorId || (items[0]?.distributorId) || 'Midwest Trading Co.';
+    const auditId = payload.auditId || (items[0]?.auditId) || 'eng-101';
+    const clientName = payload.clientName || 'Apex Electronics Corp';
 
     const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'GL_SAMPLE');
     const existingList = existing || [];
 
     for (const item of items) {
-      const { sampleId, distributorId, auditId } = item;
+      const sampleId = item.sampleId || item.id;
+      const distId = item.distributorId || distributorId;
+      const audId = item.auditId || auditId;
       if (!sampleId) continue;
-      const found = existingList.find(d => d.details?.sampleId === sampleId && d.details?.distributorId === distributorId && d.details?.auditId === auditId);
+
+      const found = existingList.find(d => 
+        d.details?.sampleId === sampleId && 
+        d.details?.distributorId === distId && 
+        d.details?.auditId === audId
+      );
       
+      const cleanItem = {
+        ...item,
+        sampleId,
+        distributorId: distId,
+        auditId: audId,
+        updatedAt: new Date().toISOString()
+      };
+
       if (found) {
-        let updatedDetails = { ...found.details, ...item };
+        let updatedDetails = { ...found.details, ...cleanItem };
         if (userRole === 'Distributor') {
           updatedDetails.testingClassification = found.details.testingClassification;
           updatedDetails.testingStatus = found.details.testingStatus;
@@ -807,8 +1152,42 @@ app.post('/api/sampling/transactions', express.json(), async (req: any, res: any
       } else {
         await supabase.from('system_audit_logs').insert({
           event_type: 'GL_SAMPLE',
-          target_user_email: `${distributorId || 'distributor'}`,
-          details: item,
+          target_user_email: `${distId || 'distributor'}`,
+          details: cleanItem,
+          created_at: new Date().toISOString()
+        });
+      }
+    }
+
+    if (activePopulationId) {
+      const { data: existingState } = await supabase
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'SAMPLING_STATE');
+
+      const foundState = (existingState || []).find(d => {
+        const details = d.details || {};
+        return details.distributorId === distributorId && details.auditId === auditId;
+      });
+
+      const stateDetails = {
+        distributorId,
+        auditId,
+        clientName,
+        activePopulationId,
+        updatedAt: new Date().toISOString()
+      };
+
+      if (foundState) {
+        await supabase
+          .from('system_audit_logs')
+          .update({ details: { ...foundState.details, ...stateDetails } })
+          .eq('id', foundState.id);
+      } else {
+        await supabase.from('system_audit_logs').insert({
+          event_type: 'SAMPLING_STATE',
+          target_user_email: `${clientName}::${distributorId}`,
+          details: stateDetails,
           created_at: new Date().toISOString()
         });
       }
@@ -819,7 +1198,10 @@ app.post('/api/sampling/transactions', express.json(), async (req: any, res: any
     console.error(err);
     res.status(500).json({ success: false, error: err.message });
   }
-});
+};
+
+app.post('/api/sampling/transactions', express.json(), handleSaveSamplingTransactionsApi);
+app.post('/api/sampling/save', express.json(), handleSaveSamplingTransactionsApi);
 
 // ====================================================================
 // STEP 1 & 4: AUTHENTICATION & ADMIN APPROVAL WORKFLOW API

@@ -501,11 +501,32 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
      );
   };
 
-  // Fetch Available Populations
-  useEffect(() => {
-    const fetchPopulations = async () => {
-      setLoading(true);
+  // Fetch Available Populations and Restore Active Sampling State
+  const fetchSamplingWorkspace = async () => {
+    setLoading(true);
+    try {
+      // 1. Fetch available populations from /api/sampling/populations
+      let populationsList: any[] = [];
       try {
+        const popRes = await fetch(`/api/sampling/populations?distributorId=${encodeURIComponent(selectedDistributor)}&auditId=${encodeURIComponent(selectedAuditFilter || 'eng-101')}&client=${encodeURIComponent(selectedClient || 'Apex Electronics Corp')}`, {
+          headers: {
+            'x-user-email': currentUser?.email || 'auditor@data360.io',
+            'x-user-role': currentUser?.role || 'Auditor',
+            'x-user-organization': currentUser?.organization || 'Apex Audit Practice (AA)'
+          }
+        });
+        if (popRes.ok) {
+          const popData = await popRes.json();
+          if (popData.success && Array.isArray(popData.populations)) {
+            populationsList = popData.populations;
+          }
+        }
+      } catch (err) {
+        console.warn("Populations endpoint fallback", err);
+      }
+
+      // Fallback to /api/evidence if needed
+      if (populationsList.length === 0) {
         const params = new URLSearchParams({
           distributor: selectedDistributor,
           distributorId: selectedDistributor,
@@ -520,7 +541,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         });
         const data = await res.json();
         if (data.success && Array.isArray(data.records)) {
-          const filtered = data.records.filter((r: any) => {
+          populationsList = data.records.filter((r: any) => {
             const usage = r.documentUsage || '';
             const status = r.status || '';
             const isAcceptable = ['ACCEPTED', 'AVAILABLE', 'PENDING_REVIEW', 'PENDING'].includes(status.toUpperCase().replace(/\s+/g, '_'));
@@ -529,23 +550,57 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             const hasSamplingUsage = Array.isArray(usage) ? usage.includes('SAMPLING_POPULATION') : usage.includes('SAMPLING_POPULATION');
             return (r.samplingEnabled === true || String(r.samplingEnabled) === 'true') && hasSamplingUsage && isAcceptable;
           });
-          setAvailablePopulations(filtered);
-          if (filtered.length > 0) {
-            setSelectedPopulation((current: any) => {
-              const matched = current ? filtered.find((f: any) => f.id === current.id || f.googleDriveFileId === current.googleDriveFileId || f.fileName === current.fileName) : null;
-              const target = matched || filtered[0];
-              handleSelectPopulation(target);
-              return target;
-            });
+        }
+      }
+
+      setAvailablePopulations(populationsList);
+
+      // 2. Fetch saved sampling state (to restore active population after refresh)
+      let activePopId: string | null = null;
+      try {
+        const stateRes = await fetch(`/api/sampling/state?distributorId=${encodeURIComponent(selectedDistributor)}&auditId=${encodeURIComponent(selectedAuditFilter || 'eng-101')}`, {
+          headers: { 'x-user-email': currentUser?.email || '' }
+        });
+        if (stateRes.ok) {
+          const stateData = await stateRes.json();
+          if (stateData.success && stateData.state?.activePopulationId) {
+            activePopId = stateData.state.activePopulationId;
           }
         }
-      } catch (err) {
-        console.error("Failed to fetch populations", err);
-      } finally {
-        setLoading(false);
+      } catch (e) {
+        console.warn("Could not load state from backend", e);
       }
-    };
-    fetchPopulations();
+
+      if (!activePopId && typeof window !== 'undefined') {
+        activePopId = localStorage.getItem(`data360_active_gl_pop_${selectedDistributor}_${selectedAuditFilter || 'eng-101'}`) || localStorage.getItem('data360_active_gl_population');
+      }
+
+      if (populationsList.length > 0) {
+        let target: any = null;
+        if (activePopId) {
+          target = populationsList.find((p: any) => p.googleDriveFileId === activePopId || p.id === activePopId || p.fileName === activePopId);
+        }
+        if (!target) {
+          target = populationsList[0];
+        }
+        setSelectedPopulation(target);
+        await loadPopulationRecords(target);
+      } else {
+        setSelectedPopulation(null);
+        setPopulationRecords([]);
+      }
+
+      // 3. Fetch assigned sample transactions and review states
+      await fetchAssignedSamples();
+    } catch (err) {
+      console.error("Failed to fetch sampling workspace", err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchSamplingWorkspace();
   }, [selectedDistributor, selectedAuditFilter]);
 
   const fetchAssignedSamples = async () => {
@@ -562,19 +617,51 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
     }
   };
 
-  useEffect(() => {
-    if (selectedDistributor) {
-      fetchAssignedSamples();
-    }
-  }, [selectedDistributor, selectedAuditFilter]);
-
-  const handleSelectPopulation = async (targetFile: any) => {
-    
+  const loadPopulationRecords = async (targetFile: any) => {
+    if (!targetFile) return;
     setSelectedPopulation(targetFile);
+    
+    // Persist active population selection
+    const targetFileId = targetFile.googleDriveFileId || targetFile.id;
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`data360_active_gl_pop_${selectedDistributor}_${selectedAuditFilter || 'eng-101'}`, targetFileId);
+      localStorage.setItem('data360_active_gl_population', targetFileId);
+    }
+
+    // Save active state to backend asynchronously
+    fetch('/api/sampling/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-user-email': currentUser?.email || '' },
+      body: JSON.stringify({
+        distributorId: selectedDistributor,
+        auditId: selectedAuditFilter || 'eng-101',
+        clientName: selectedClient || 'Apex Electronics Corp',
+        activePopulationId: targetFileId,
+        activePopulationName: targetFile.fileName
+      })
+    }).catch(e => console.warn('Could not persist sampling state', e));
+
     setLoading(true);
     try {
-      const fileIdToFetch = targetFile.googleDriveFileId || targetFile.id;
-      const res = await fetch(`/api/storage/download/${fileIdToFetch}?fileName=${encodeURIComponent(targetFile.fileName)}`);
+      // 1. Try instant retrieval of pre-parsed records from backend
+      try {
+        const recordsRes = await fetch(`/api/sampling/population-records?fileId=${encodeURIComponent(targetFileId)}&distributorId=${encodeURIComponent(selectedDistributor)}&auditId=${encodeURIComponent(selectedAuditFilter || 'eng-101')}`, {
+          headers: { 'x-user-email': currentUser?.email || '' }
+        });
+        if (recordsRes.ok) {
+          const recordsData = await recordsRes.json();
+          if (recordsData.success && Array.isArray(recordsData.records) && recordsData.records.length > 0) {
+            setPopulationRecords(recordsData.records);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (e) {
+        console.warn('API population records fetch failed, falling back to direct parse', e);
+      }
+
+      // 2. Fallback to direct download & client parse
+      const res = await fetch(`/api/storage/download/${targetFileId}?fileName=${encodeURIComponent(targetFile.fileName)}`);
       if (!res.ok) throw new Error(`Failed to download file ${targetFile.fileName}`);
       
       const buffer = await res.arrayBuffer();
@@ -595,55 +682,55 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         } else {
            mapping = targetFile.glMapping || targetFile.mappedData || {};
         }
+
+        const keys = Object.keys(jsonData[0] || {});
+        const findVal = (row: any, matchKeys: string[], explicitKey?: string) => {
+          if (explicitKey && row[explicitKey] !== undefined) return row[explicitKey] !== "" ? row[explicitKey] : '—';
+          const key = keys.find(k => matchKeys.some(match => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes(match.toLowerCase().replace(/[^a-z0-9]/g, ''))));
+          return key && row[key] !== "" ? row[key] : '—';
+        };
+
+        const parseAmount = (val: any) => {
+          if (val === '—' || val === '' || val === null || val === undefined) return 0;
+          if (typeof val === 'string') {
+            const parsed = parseFloat(val.replace(/[$,\s]/g, ''));
+            return isNaN(parsed) ? 0 : parsed;
+          }
+          const num = Number(val);
+          return isNaN(num) ? 0 : num;
+        };
+
         const parsedRecords = jsonData.map((row: any, index: number) => {
-           const keys = Object.keys(row);
-           if (keys.length === 0) return null;
-           const findVal = (matchKeys: string[], explicitKey?: string) => {
-               if (explicitKey && row[explicitKey] !== undefined) return row[explicitKey] !== "" ? row[explicitKey] : '—';
-               const key = keys.find(k => matchKeys.some(match => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes(match.toLowerCase().replace(/[^a-z0-9]/g, ''))));
-               return key && row[key] !== "" ? row[key] : '—';
-           };
-           
-           let dateVal = findVal(['date', 'transactiondate', 'invoicedate', 'postingdate', 'time'], mapping.date);
-           let voucherNoVal = findVal(['voucherno', 'referenceno', 'transactionid', 'invoicenumber', 'invoiceno', 'documentid', 'refno', 'reference', 'id', 'slno'], mapping.voucherNo);
-           let accountNumVal = findVal(['accountnumber', 'accountno', 'glaccount', 'account'], mapping.accountNumber);
-           let accountDescVal = findVal(['accountdescription', 'accountname', 'glname'], mapping.accountDescription);
-           let descVal = findVal(['description', 'particulars', 'memo', 'notes', 'purpose', 'details', 'item', 'product', 'vendor', 'customer', 'employee', 'payee'], mapping.description);
-           let narrationVal = findVal(['narration', 'remarks', 'comment'], mapping.narration);
-           let debitVal = findVal(['debit', 'dr'], mapping.debit);
-           let creditVal = findVal(['credit', 'cr'], mapping.credit);
-           let balanceVal = findVal(['balance', 'bal'], mapping.balance);
-           
-           const parseAmount = (val: any) => {
-               if (val === '—' || val === '' || val === null || val === undefined) return null;
-               if (typeof val === 'string') {
-                   const parsed = parseFloat(val.replace(/[^0-9.-]+/g, ""));
-                   return isNaN(parsed) ? null : parsed;
-               }
-               const num = Number(val);
-               return isNaN(num) ? null : num;
-           };
-           const debit = parseAmount(debitVal);
-           const credit = parseAmount(creditVal);
-           const balance = parseAmount(balanceVal);
-           
-           let idVal = voucherNoVal !== '—' && voucherNoVal !== undefined ? String(voucherNoVal) : `RECORD-${index + 1}`;
-           if (idVal === '—') idVal = `RECORD-${index + 1}`;
-           
-           return {
-             id: idVal,
-             date: dateVal !== '—' ? String(dateVal) : '—',
-             voucherNo: voucherNoVal !== '—' ? String(voucherNoVal) : '—',
-             accountNumber: accountNumVal !== '—' ? String(accountNumVal) : '—',
-             accountDescription: accountDescVal !== '—' ? String(accountDescVal) : '—',
-             description: descVal !== '—' ? String(descVal) : '—',
-             narration: narrationVal !== '—' ? String(narrationVal) : '—',
-             debit: debit,
-             credit: credit,
-             balance: balance,
-             originalRow: row
-           };
-        }).filter(Boolean);
+          const dateVal = findVal(row, ['date', 'transactiondate', 'invoicedate', 'postingdate', 'time'], mapping.date);
+          const voucherNoVal = findVal(row, ['voucherno', 'referenceno', 'transactionid', 'invoicenumber', 'invoiceno', 'documentid', 'refno', 'reference', 'id', 'slno'], mapping.voucherNo);
+          const accountNumVal = findVal(row, ['accountnumber', 'accountno', 'glaccount', 'account'], mapping.accountNumber);
+          const accountDescVal = findVal(row, ['accountdescription', 'accountname', 'glname'], mapping.accountDescription);
+          const descVal = findVal(row, ['description', 'particulars', 'memo', 'notes', 'purpose', 'details', 'item', 'product', 'vendor', 'customer', 'employee', 'payee'], mapping.description);
+          const narrationVal = findVal(row, ['narration', 'remarks', 'comment'], mapping.narration);
+          const debit = parseAmount(findVal(row, ['debit', 'dr'], mapping.debit));
+          const credit = parseAmount(findVal(row, ['credit', 'cr'], mapping.credit));
+          const balance = parseAmount(findVal(row, ['balance', 'bal'], mapping.balance));
+          
+          let idVal = voucherNoVal !== '—' && voucherNoVal !== undefined ? String(voucherNoVal) : `RECORD-${index + 1}`;
+          if (idVal === '—') idVal = `RECORD-${index + 1}`;
+          
+          return {
+            id: idVal,
+            originalRow: index + 2,
+            date: dateVal !== '—' ? String(dateVal) : '—',
+            voucherNo: voucherNoVal !== '—' ? String(voucherNoVal) : '—',
+            accountNumber: accountNumVal !== '—' ? String(accountNumVal) : '—',
+            accountDescription: accountDescVal !== '—' ? String(accountDescVal) : '—',
+            description: descVal !== '—' ? String(descVal) : (narrationVal !== '—' ? String(narrationVal) : `Transaction #${index + 1}`),
+            narration: narrationVal !== '—' ? String(narrationVal) : '—',
+            debit: debit,
+            credit: credit,
+            balance: balance,
+            testingClassification: [],
+            testingStatus: 'Pending Classification',
+            testingReference: ''
+          };
+        });
         setPopulationRecords(parsedRecords);
       }
     } catch (err: any) {
@@ -652,10 +739,11 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
     } finally {
       setLoading(false);
     }
-
   };
 
-
+  const handleSelectPopulation = async (targetFile: any) => {
+    await loadPopulationRecords(targetFile);
+  };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
@@ -709,13 +797,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       setGlMapping(initialMapping);
       setUploadSuccessMessage({ filename: file.name, records: jsonData.length });
       
-      // Validate mapping to see if we can confidently identify it
-      const hasDate = !!initialMapping.date;
-      const hasId = !!initialMapping.voucherNo;
-      const hasDesc = !!initialMapping.description || !!initialMapping.narration;
-      const hasAmount = !!initialMapping.debit || !!initialMapping.credit;
-      
-      // if all required fields are found and there is no ambiguity, we still show mapping for user to confirm
       setUploadState('mapping');
       
     } catch (err: any) {
@@ -779,71 +860,39 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         throw new Error(data.error || 'Failed to upload');
       }
       
+      const importedRecordCount = data.recordCount || (Array.isArray(data.records) ? data.records.length : (uploadFile.size ? Math.max(1, Math.round(uploadFile.size / 150)) : 100));
+
       setUploadSuccessMessage({
         filename: uploadFile.name,
-        records: uploadFile.size ? Math.max(1, Math.round(uploadFile.size / 150)) : 100
+        records: importedRecordCount
       });
       setUploadState('success');
       
-      // reload populations
-      const fetchPopulations = async () => {
-        const params = new URLSearchParams({
-          distributor: selectedDistributor,
-          distributorId: selectedDistributor,
-          auditId: selectedAuditFilter || 'eng-101',
-        });
-        const popRes = await fetch(`/api/evidence?${params.toString()}`, {
-          headers: {
-            'x-user-email': currentUser?.email || 'auditor@data360.io',
-            'x-user-role': currentUser?.role || 'Auditor',
-            'x-user-organization': currentUser?.organization || 'Apex Audit Practice (AA)'
-          }
-        });
-        
-        let popData: any = { success: false, records: [] };
-        const popContentType = popRes.headers.get('content-type') || '';
-        if (popContentType.includes('application/json')) {
-          popData = await popRes.json();
-        }
-        if (popData.success && Array.isArray(popData.records)) {
-          const filtered = popData.records.filter((r: any) => {
-            const usage = r.documentUsage || '';
-            const status = r.status || '';
-            const isAcceptable = ['ACCEPTED', 'AVAILABLE', 'PENDING_REVIEW', 'PENDING'].includes(status.toUpperCase().replace(/\s+/g, '_'));
-            const isTemplate = (r.fileName || '').toLowerCase().includes('template') || (r.fileName || '').toLowerCase().includes('questionnaire');
-            if (isTemplate) return false;
-            const hasSamplingUsage = Array.isArray(usage) ? usage.includes('SAMPLING_POPULATION') : usage.includes('SAMPLING_POPULATION');
-            return (r.samplingEnabled === true || String(r.samplingEnabled) === 'true') && hasSamplingUsage && isAcceptable;
-          });
-          
-          let targetFileToSelect = filtered.find((p: any) => p.googleDriveFileId === data.fileId || p.id === data.fileId || p.fileName === uploadFile.name);
-          if (!targetFileToSelect && data.fileId) {
-            targetFileToSelect = {
-              id: data.fileId,
-              googleDriveFileId: data.fileId,
-              fileName: uploadFile.name,
-              glMapping: glMapping,
-              documentUsage: ['SAMPLING_POPULATION'],
-              samplingEnabled: true,
-              status: 'AVAILABLE'
-            };
-            filtered.unshift(targetFileToSelect);
-          }
-          
-          setAvailablePopulations(filtered);
-          
-          if (targetFileToSelect) {
-            const fileWithMapping = { ...targetFileToSelect, glMapping: glMapping || targetFileToSelect.glMapping };
-            setSelectedPopulation(fileWithMapping);
-            await handleSelectPopulation(fileWithMapping);
-          } else if (filtered.length > 0) {
-            setSelectedPopulation(filtered[0]);
-            await handleSelectPopulation(filtered[0]);
-          }
-        }
+      const newPopItem = {
+        id: data.fileId,
+        googleDriveFileId: data.fileId,
+        fileName: uploadFile.name,
+        glMapping: data.glMapping || glMapping,
+        documentUsage: ['SAMPLING_POPULATION'],
+        samplingEnabled: true,
+        status: 'AVAILABLE',
+        distributorName: selectedDistributor,
+        auditId: selectedAuditFilter || 'eng-101'
       };
-      
-      await fetchPopulations();
+
+      setAvailablePopulations(prev => [newPopItem, ...prev.filter(p => p.googleDriveFileId !== data.fileId && p.fileName !== uploadFile.name)]);
+      setSelectedPopulation(newPopItem);
+
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`data360_active_gl_pop_${selectedDistributor}_${selectedAuditFilter || 'eng-101'}`, data.fileId);
+        localStorage.setItem('data360_active_gl_population', data.fileId);
+      }
+
+      if (Array.isArray(data.records) && data.records.length > 0) {
+        setPopulationRecords(data.records);
+      } else {
+        await loadPopulationRecords(newPopItem);
+      }
       
     } catch (err: any) {
       console.error(err);
@@ -931,12 +980,15 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         narration: record.narration,
         debit: record.debit,
         credit: record.credit,
-        balance: record.balance
+        balance: record.balance,
+        attributeResults: existingSample?.attributeResults || {},
+        evidenceFields: existingSample?.evidenceFields || {},
+        exceptions: existingSample?.exceptions || ''
       };
     });
 
     try {
-      const res = await fetch('/api/sampling/transactions', {
+      const res = await fetch('/api/sampling/save', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -944,7 +996,13 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
         },
-        body: JSON.stringify({ transactions: transactionsToSave })
+        body: JSON.stringify({ 
+          transactions: transactionsToSave,
+          distributorId: selectedDistributor,
+          auditId: selectedAuditFilter || 'eng-101',
+          clientName: selectedClient || 'Apex Electronics Corp',
+          activePopulationId: selectedPopulation?.googleDriveFileId || selectedPopulation?.id
+        })
       });
       const data = await res.json();
       if (res.ok && data.success) {
