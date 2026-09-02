@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import { BusinessQuestionnaireView } from './questionnaire/BusinessQuestionnaireView';
 import { InitialInformationRequestView } from './InitialInformationRequestView';
-import { SamplingView } from './SamplingView';
+import { SamplingUploadView } from './SamplingUploadView';
 import { INITIAL_IIR_REQUESTS, INITIAL_IIR_AUDIT_TRAIL } from '../data/iirData';
 import { UserSession } from './AuthModal';
 
@@ -28,6 +28,7 @@ interface EngagementWorkspaceViewProps {
   currentUser: UserSession | null;
   onFindingCreated?: (finding: any) => void;
   onNavigateToEvidence?: () => void;
+  onNavigateToSamplingReview?: () => void;
   initialSubTab?: EngagementSubTab;
   isIIRFullScreen?: boolean;
   onToggleIIRFullScreen?: () => void;
@@ -41,6 +42,7 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
   currentUser,
   onFindingCreated,
   onNavigateToEvidence,
+  onNavigateToSamplingReview,
   initialSubTab = 'questionnaire',
   isIIRFullScreen = false,
   onToggleIIRFullScreen,
@@ -132,13 +134,13 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
       )}
 
       {activeSubTab === 'sampling' && (
-        <SamplingView
+        <SamplingUploadView
           selectedClient={selectedClient}
           selectedDistributor={distributorProp}
           selectedAuditFilter={selectedAuditFilter}
           currentUser={currentUser}
           currencyMode={currencyMode}
-          isEvidenceManagementMode={false}
+          onNavigateToSamplingReview={onNavigateToSamplingReview}
         />
       )}
       {activeSubTab === 'iir' && (

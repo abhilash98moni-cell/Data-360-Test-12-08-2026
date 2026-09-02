@@ -7,6 +7,7 @@ import { GoogleGenAI } from '@google/genai';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
 import { storageService } from '../src/services/storageService.js';
+import { dbStore } from '../src/services/dbStore.js';
 import { getItemCompletionDetails } from '../src/utils/irlValidation.js';
 import {
   getSupabaseServerClient,
@@ -792,55 +793,32 @@ app.post('/api/sampling/upload', upload.single('file'), async (req: any, res: an
       source: 'Auditor Upload'
     };
 
-    const insertEvidenceRes = await supabase.from('system_audit_logs').insert({
+    const insertEvidenceRes = await dbStore.insertAuditLog({
+      id: metadata.googleDriveFileId,
       event_type: 'EVIDENCE_FILE',
       target_user_email: `${clientName}::${targetDistributor}`,
+      user_name: String(uploadedBy),
+      user_email: req.headers['x-user-email'] || 'auditor@data360.com',
+      user_role: req.headers['x-user-role'] || 'Auditor',
+      organization: clientName,
+      action: 'Uploaded General Ledger Population',
       details: newEvidenceRow,
       created_at: new Date().toISOString()
-    }).select().single();
-
-    if (insertEvidenceRes.error) {
-      return res.status(500).json({ success: false, error: insertEvidenceRes.error.message });
-    }
+    });
 
     // Also persist active population state in database
-    const stateDetails = {
+    await dbStore.setSamplingState({
       distributorId: targetDistributor,
       auditId,
       clientName,
       activePopulationId: metadata.googleDriveFileId,
       activePopulationName: metadata.fileName,
-      activeTab: 'GL',
-      updatedAt: new Date().toISOString()
-    };
-
-    const { data: existingState } = await supabase
-      .from('system_audit_logs')
-      .select('*')
-      .eq('event_type', 'SAMPLING_STATE');
-
-    const foundState = (existingState || []).find(d => {
-      const details = d.details || {};
-      return details.distributorId === targetDistributor && details.auditId === auditId;
+      activeTab: 'GL'
     });
-
-    if (foundState) {
-      await supabase
-        .from('system_audit_logs')
-        .update({ details: { ...foundState.details, ...stateDetails } })
-        .eq('id', foundState.id);
-    } else {
-      await supabase.from('system_audit_logs').insert({
-        event_type: 'SAMPLING_STATE',
-        target_user_email: `${clientName}::${targetDistributor}`,
-        details: stateDetails,
-        created_at: new Date().toISOString()
-      });
-    }
 
     return res.status(200).json({
       success: true,
-      message: 'Sampling population uploaded successfully',
+      message: 'Sampling population uploaded and persisted successfully',
       fileId: metadata.googleDriveFileId,
       fileName: metadata.fileName,
       records: parsedData.records,
@@ -858,35 +836,8 @@ app.get('/api/sampling/state', async (req: any, res: any) => {
   try {
     const distributorId = req.query.distributorId || req.query.distributor;
     const auditId = req.query.auditId || req.query.audit;
-    const supabase = getSupabaseServerClient();
     
-    const { data, error } = await supabase
-      .from('system_audit_logs')
-      .select('*')
-      .eq('event_type', 'SAMPLING_STATE')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    let stateItem = (data || []).find(d => {
-      let details = d.details || {};
-      if (typeof details === 'string') {
-        try { details = JSON.parse(details); } catch(e) {}
-      }
-      const matchDist = !distributorId || distributorId === 'All Distributors' || details.distributorId === distributorId;
-      const matchAudit = !auditId || auditId === 'All Audits' || details.auditId === auditId;
-      return matchDist && matchAudit;
-    });
-
-    if (!stateItem && (data || []).length > 0) {
-      stateItem = data[0];
-    }
-
-    let stateDetails = stateItem ? stateItem.details : null;
-    if (typeof stateDetails === 'string') {
-      try { stateDetails = JSON.parse(stateDetails); } catch(e) {}
-    }
-
+    const stateDetails = await dbStore.getSamplingState(distributorId, auditId);
     res.json({ success: true, state: stateDetails });
   } catch (err: any) {
     console.error('Error fetching sampling state:', err);
@@ -898,51 +849,15 @@ app.post('/api/sampling/state', express.json(), async (req: any, res: any) => {
   try {
     const payload = req.body || {};
     const { distributorId, auditId, clientName, activePopulationId, activePopulationName, activeTab } = payload;
-    const supabase = getSupabaseServerClient();
-
-    const { data: existing } = await supabase
-      .from('system_audit_logs')
-      .select('*')
-      .eq('event_type', 'SAMPLING_STATE');
-
-    const found = (existing || []).find(d => {
-      let details = d.details || {};
-      if (typeof details === 'string') {
-        try { details = JSON.parse(details); } catch(e) {}
-      }
-      return (
-        details.distributorId === distributorId &&
-        details.auditId === auditId
-      );
-    });
-
-    const stateDetails = {
+    
+    await dbStore.setSamplingState({
       distributorId: distributorId || 'Midwest Trading Co.',
       auditId: auditId || 'eng-101',
       clientName: clientName || 'Apex Electronics Corp',
       activePopulationId,
       activePopulationName,
-      activeTab: activeTab || 'GL',
-      updatedAt: new Date().toISOString()
-    };
-
-    if (found) {
-      let currentDet = found.details;
-      if (typeof currentDet === 'string') {
-        try { currentDet = JSON.parse(currentDet); } catch(e) {}
-      }
-      await supabase
-        .from('system_audit_logs')
-        .update({ details: { ...currentDet, ...stateDetails } })
-        .eq('id', found.id);
-    } else {
-      await supabase.from('system_audit_logs').insert({
-        event_type: 'SAMPLING_STATE',
-        target_user_email: `${clientName || 'Apex Electronics Corp'}::${distributorId || 'distributor'}`,
-        details: stateDetails,
-        created_at: new Date().toISOString()
-      });
-    }
+      activeTab: activeTab || 'GL'
+    });
 
     res.json({ success: true, message: 'Sampling state updated successfully' });
   } catch (err: any) {
@@ -957,66 +872,8 @@ app.get('/api/sampling/populations', async (req: any, res: any) => {
     const distributorId = req.query.distributorId || req.query.distributor;
     const auditId = req.query.auditId || req.query.audit;
     const client = req.query.client;
-    const supabase = getSupabaseServerClient();
 
-    const { data, error } = await supabase
-      .from('system_audit_logs')
-      .select('*')
-      .eq('event_type', 'EVIDENCE_FILE')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    const allPopulations = (data || [])
-      .map(row => {
-        let r = row.details || {};
-        if (typeof r === 'string') {
-          try { r = JSON.parse(r); } catch(e) {}
-        }
-        return {
-          id: row.id,
-          clientName: r.client_name || r.clientName || 'Apex Electronics Corp',
-          auditId: r.audit_id || r.auditId || 'eng-101',
-          auditCode: r.audit_code || r.auditCode || 'AUD-2026-001',
-          distributorName: r.distributor_name || r.distributorName || 'Midwest Trading Co.',
-          requestRef: r.requirement_ref || r.requestRef || 'SAMPLING',
-          requestTitle: r.requirement_title || r.requestTitle || 'General Ledger Population',
-          section: r.section || 'Sampling',
-          fileName: r.file_name || r.fileName,
-          fileSizeMB: Number(r.file_size_mb || r.fileSizeMB || 1.0),
-          fileType: r.file_type || r.fileType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          googleDriveFileId: r.google_drive_file_id || r.googleDriveFileId || r.storage_path || row.id,
-          uploadedBy: r.uploaded_by || r.uploadedBy || 'Auditor User',
-          uploadedDate: r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : (r.uploadedDate || new Date().toLocaleString()),
-          status: r.review_status || r.status || 'AVAILABLE',
-          samplingEnabled: r.samplingEnabled ?? true,
-          samplingStatus: r.samplingStatus || 'ADDED',
-          documentUsage: Array.isArray(r.document_usage) ? r.document_usage : (Array.isArray(r.documentUsage) ? r.documentUsage : ['SAMPLING_POPULATION']),
-          glMapping: r.glMapping || r.gl_mapping,
-          recordCount: r.records_count || r.recordCount || (Array.isArray(r.parsed_records) ? r.parsed_records.length : 0),
-          hasParsedRecords: Array.isArray(r.parsed_records) && r.parsed_records.length > 0
-        };
-      })
-      .filter(p => {
-        const usage = p.documentUsage || [];
-        const hasSampling = p.samplingEnabled === true || usage.includes('SAMPLING_POPULATION') || p.requestRef === 'SAMPLING' || p.section === 'Sampling';
-        const isTemplate = (p.fileName || '').toLowerCase().includes('template') || (p.fileName || '').toLowerCase().includes('questionnaire');
-        return hasSampling && !isTemplate;
-      });
-
-    // Primary filter with distributor and audit
-    let populations = allPopulations.filter(p => {
-      const matchDist = !distributorId || distributorId === 'All Distributors' || p.distributorName === distributorId;
-      const matchAudit = !auditId || auditId === 'All Audits' || p.auditId === auditId;
-      const matchClient = !client || client === 'All Clients' || p.clientName === client;
-      return matchDist && matchAudit && matchClient;
-    });
-
-    // Fallback: If no exact match, return all valid sampling populations so user never loses their GL file
-    if (populations.length === 0 && allPopulations.length > 0) {
-      populations = allPopulations;
-    }
-
+    const populations = await dbStore.getSamplingPopulations(distributorId, auditId, client);
     res.json({ success: true, populations });
   } catch (err: any) {
     console.error('Error fetching sampling populations:', err);
@@ -1030,68 +887,9 @@ app.get('/api/sampling/population-records', async (req: any, res: any) => {
     const fileId = req.query.fileId || req.query.populationId;
     const distributorId = req.query.distributorId || req.query.distributor;
     const auditId = req.query.auditId || req.query.audit;
-    const supabase = getSupabaseServerClient();
 
-    let targetRow: any = null;
-    const { data, error } = await supabase
-      .from('system_audit_logs')
-      .select('*')
-      .eq('event_type', 'EVIDENCE_FILE')
-      .order('created_at', { ascending: false });
-
-    if (error) throw error;
-
-    if (fileId) {
-      targetRow = (data || []).find(row => {
-        let d = row.details || {};
-        if (typeof d === 'string') {
-          try { d = JSON.parse(d); } catch(e) {}
-        }
-        return row.id === fileId || d.google_drive_file_id === fileId || d.storage_path === fileId || d.file_name === fileId;
-      });
-    }
-
-    if (!targetRow && (data || []).length > 0) {
-      targetRow = (data || []).find(row => {
-        let d = row.details || {};
-        if (typeof d === 'string') {
-          try { d = JSON.parse(d); } catch(e) {}
-        }
-        const isMatch = (!distributorId || distributorId === 'All Distributors' || d.distributor_name === distributorId || d.distributorName === distributorId) &&
-                        (!auditId || auditId === 'All Audits' || d.audit_id === auditId || d.auditId === auditId);
-        const hasSampling = d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING';
-        return isMatch && hasSampling;
-      }) || (data || [])[0];
-    }
-
-    if (!targetRow) {
-      return res.json({ success: true, records: [], glMapping: {}, fileId: null, fileName: null });
-    }
-
-    let details = targetRow.details || {};
-    if (typeof details === 'string') {
-      try { details = JSON.parse(details); } catch(e) {}
-    }
-    
-    if (Array.isArray(details.parsed_records) && details.parsed_records.length > 0) {
-      return res.json({
-        success: true,
-        fileId: details.google_drive_file_id || targetRow.id,
-        fileName: details.file_name,
-        glMapping: details.glMapping || details.gl_mapping || {},
-        records: details.parsed_records,
-        recordCount: details.parsed_records.length
-      });
-    }
-
-    res.json({
-      success: true,
-      fileId: details.google_drive_file_id || targetRow.id,
-      fileName: details.file_name,
-      glMapping: details.glMapping || details.gl_mapping || {},
-      records: [],
-      recordCount: 0
-    });
+    const result = await dbStore.getPopulationRecords(fileId, distributorId, auditId);
+    res.json({ success: true, ...result });
   } catch (err: any) {
     console.error('Error fetching population records:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -1102,11 +900,9 @@ app.get('/api/sampling/population-records', async (req: any, res: any) => {
 app.get('/api/sampling/questions', async (req: any, res: any) => {
   try {
     const { auditId } = req.query;
-    const supabase = getSupabaseServerClient();
-    const { data, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'CREATED_CUSTOM_QUESTION');
-    if (error) throw error;
+    const logs = await dbStore.getAuditLogs('CREATED_CUSTOM_QUESTION');
     
-    const questions = (data || [])
+    const questions = logs
       .map(d => {
          let parsed = d.details;
          if (typeof parsed === 'string') {
@@ -1114,7 +910,7 @@ app.get('/api/sampling/questions', async (req: any, res: any) => {
          }
          return { dbId: d.id, ...parsed };
       })
-      .filter(q => q.engagement_id === auditId && q.active !== false);
+      .filter(q => (!auditId || q.engagement_id === auditId) && q.active !== false);
       
     res.json({ success: true, questions });
   } catch (err: any) {
@@ -1126,11 +922,9 @@ app.get('/api/sampling/transactions', async (req: any, res: any) => {
   try {
     const distributorId = req.query.distributorId || req.query.distributor;
     const auditId = req.query.auditId || req.query.audit;
-    const supabase = getSupabaseServerClient();
-    const { data, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'GL_SAMPLE');
-    if (error) throw error;
     
-    const transactions = (data || [])
+    const logs = await dbStore.getAuditLogs('GL_SAMPLE');
+    const transactions = logs
       .map(d => {
         let details = d.details;
         if (typeof details === 'string') {
@@ -1153,157 +947,23 @@ app.get('/api/sampling/transactions', async (req: any, res: any) => {
 const handleSaveSamplingTransactionsApi = async (req: any, res: any) => {
   try {
     const payload = req.body || {};
-    const supabase = getSupabaseServerClient();
-    const userRole = req.headers['x-user-role'];
-    
     const items: any[] = Array.isArray(payload.transactions) ? payload.transactions : (payload.sampleId ? [payload] : []);
     const activePopulationId = payload.activePopulationId;
     const distributorId = payload.distributorId || (items[0]?.distributorId) || 'Midwest Trading Co.';
     const auditId = payload.auditId || (items[0]?.auditId) || 'eng-101';
     const clientName = payload.clientName || 'Apex Electronics Corp';
 
-    const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'GL_SAMPLE');
-    const existingList = existing || [];
+    const count = await dbStore.saveSamplingTransactions(
+      items,
+      activePopulationId,
+      distributorId,
+      auditId,
+      clientName
+    );
 
-    for (const item of items) {
-      const sampleId = item.sampleId || item.id;
-      const distId = item.distributorId || distributorId;
-      const audId = item.auditId || auditId;
-      if (!sampleId) continue;
-
-      const found = existingList.find(d => {
-        let det = d.details;
-        if (typeof det === 'string') {
-          try { det = JSON.parse(det); } catch(e) {}
-        }
-        return (
-          (det?.sampleId === sampleId || det?.id === sampleId || (det?.voucherNo && item.voucherNo && det.voucherNo !== '—' && det.voucherNo === item.voucherNo)) &&
-          (!distId || distId === 'All Distributors' || det?.distributorId === distId) &&
-          (!audId || audId === 'All Audits' || det?.auditId === audId)
-        );
-      });
-      
-      const cleanItem = {
-        ...item,
-        sampleId,
-        distributorId: distId,
-        auditId: audId,
-        updatedAt: new Date().toISOString()
-      };
-
-      if (found) {
-        let currentDetails = found.details;
-        if (typeof currentDetails === 'string') {
-          try { currentDetails = JSON.parse(currentDetails); } catch(e) {}
-        }
-        let updatedDetails = { ...currentDetails, ...cleanItem };
-        if (userRole === 'Distributor') {
-          updatedDetails.testingClassification = currentDetails.testingClassification;
-          updatedDetails.testingStatus = currentDetails.testingStatus;
-          updatedDetails.testingReference = currentDetails.testingReference;
-        }
-        await supabase.from('system_audit_logs').update({
-          details: updatedDetails
-        }).eq('id', found.id);
-      } else {
-        await supabase.from('system_audit_logs').insert({
-          event_type: 'GL_SAMPLE',
-          target_user_email: `${distId || 'distributor'}`,
-          details: cleanItem,
-          created_at: new Date().toISOString()
-        });
-      }
-    }
-
-    // Sync with EVIDENCE_FILE's parsed_records so population-records endpoint returns updated state immediately
-    const { data: evidenceRows } = await supabase
-      .from('system_audit_logs')
-      .select('*')
-      .eq('event_type', 'EVIDENCE_FILE');
-
-    if (evidenceRows && evidenceRows.length > 0) {
-      for (const evRow of evidenceRows) {
-        let evDetails = evRow.details;
-        if (typeof evDetails === 'string') {
-          try { evDetails = JSON.parse(evDetails); } catch(e) {}
-        }
-        if (!evDetails) continue;
-
-        const isTargetFile = (activePopulationId && (evRow.id === activePopulationId || evDetails.google_drive_file_id === activePopulationId || evDetails.storage_path === activePopulationId)) ||
-          (evDetails.distributor_name === distributorId && evDetails.audit_id === auditId);
-
-        if (isTargetFile && Array.isArray(evDetails.parsed_records)) {
-          let updated = false;
-          const updatedRecords = evDetails.parsed_records.map((rec: any) => {
-            const matchItem = items.find(it => (it.sampleId === rec.id || it.id === rec.id || (it.voucherNo && rec.voucherNo && it.voucherNo !== '—' && it.voucherNo === rec.voucherNo)));
-            if (matchItem) {
-              updated = true;
-              return {
-                ...rec,
-                testingClassification: matchItem.testingClassification,
-                testingStatus: matchItem.testingStatus,
-                testingReference: matchItem.testingReference,
-                attributeResults: matchItem.attributeResults,
-                evidenceFields: matchItem.evidenceFields,
-                exceptions: matchItem.exceptions
-              };
-            }
-            return rec;
-          });
-
-          if (updated) {
-            await supabase.from('system_audit_logs').update({
-              details: { ...evDetails, parsed_records: updatedRecords }
-            }).eq('id', evRow.id);
-          }
-        }
-      }
-    }
-
-    if (activePopulationId) {
-      const { data: existingState } = await supabase
-        .from('system_audit_logs')
-        .select('*')
-        .eq('event_type', 'SAMPLING_STATE');
-
-      const foundState = (existingState || []).find(d => {
-        let details = d.details || {};
-        if (typeof details === 'string') {
-          try { details = JSON.parse(details); } catch(e) {}
-        }
-        return details.distributorId === distributorId && details.auditId === auditId;
-      });
-
-      const stateDetails = {
-        distributorId,
-        auditId,
-        clientName,
-        activePopulationId,
-        updatedAt: new Date().toISOString()
-      };
-
-      if (foundState) {
-        let currentDetails = foundState.details;
-        if (typeof currentDetails === 'string') {
-          try { currentDetails = JSON.parse(currentDetails); } catch(e) {}
-        }
-        await supabase
-          .from('system_audit_logs')
-          .update({ details: { ...currentDetails, ...stateDetails } })
-          .eq('id', foundState.id);
-      } else {
-        await supabase.from('system_audit_logs').insert({
-          event_type: 'SAMPLING_STATE',
-          target_user_email: `${clientName}::${distributorId}`,
-          details: stateDetails,
-          created_at: new Date().toISOString()
-        });
-      }
-    }
-
-    res.json({ success: true, message: 'Saved successfully', count: items.length });
+    res.json({ success: true, message: 'Saved successfully to database', count });
   } catch (err: any) {
-    console.error(err);
+    console.error('Error in saving sampling transactions:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 };

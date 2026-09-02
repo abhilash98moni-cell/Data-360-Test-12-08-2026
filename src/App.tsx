@@ -326,7 +326,10 @@ export default function App() {
               currentUser={currentUser}
             />
           ) : activeTab === 'engagement_workspace' || activeTab === 'iir' ? (
-            <EngagementWorkspaceView onFindingCreated={handleCreateFinding} onNavigateToEvidence={() => { setActiveTab('evidence'); setEvidenceMode('Sampling Eligible'); }} 
+            <EngagementWorkspaceView 
+              onFindingCreated={handleCreateFinding} 
+              onNavigateToEvidence={() => { setActiveTab('evidence'); setEvidenceMode('Sampling Eligible'); }}
+              onNavigateToSamplingReview={() => setActiveTab('sampling_review')}
               selectedClient={selectedClient}
               selectedDistributor={currentUser?.role?.includes('Distributor') ? (currentUser.organization || selectedDistributor) : selectedDistributor}
               selectedAuditFilter={selectedEngId}
