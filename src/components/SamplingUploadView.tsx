@@ -255,27 +255,77 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
         setFileHeaders(headers);
         setPreviewRows(json.slice(0, 5));
 
-        // Auto-detect columns intelligently
-        const findHeader = (candidates: string[]) => {
+        // Auto-detect columns intelligently with exact-match precedence
+        const findHeader = (exactCandidates: string[], partialCandidates: string[] = []) => {
+          // 1. Exact match (case & whitespace stripped)
           for (const h of headers) {
-            const lower = h.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
-            for (const c of candidates) {
-              if (lower === c || lower.includes(c)) return h;
+            const clean = h.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+            for (const c of exactCandidates) {
+              if (clean === c) return h;
+            }
+          }
+          // 2. Exact word match
+          for (const h of headers) {
+            const words = h.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+            for (const c of exactCandidates) {
+              if (words.includes(c)) return h;
+            }
+          }
+          // 3. Safe partial candidates only
+          for (const h of headers) {
+            const clean = h.toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+            for (const c of partialCandidates) {
+              if (clean.includes(c)) return h;
             }
           }
           return '';
         };
 
         const detectedMapping: GLMapping = {
-          date: findHeader(['date', 'txndate', 'postingdate', 'docdate', 'transdate', 'entrydate']) || headers[0] || '',
-          voucherNo: findHeader(['voucher', 'voucherno', 'ref', 'reference', 'refno', 'documentno', 'docno', 'txnid', 'id']) || '',
-          accountNumber: findHeader(['accountno', 'accountnum', 'accountnumber', 'accno', 'acct', 'glaccount', 'glcode']) || '',
-          accountDescription: findHeader(['accountdesc', 'accountdescription', 'accountname', 'accounttitle', 'headofaccount', 'ledgername', 'ledger']) || '',
-          description: findHeader(['description', 'narration', 'particulars', 'detail', 'memo', 'itemdescription']) || '',
-          narration: findHeader(['narration', 'memo', 'remarks', 'note', 'details']) || '',
-          debit: findHeader(['debit', 'dr', 'debitamount', 'dramount']) || '',
-          credit: findHeader(['credit', 'cr', 'creditamount', 'cramount']) || '',
-          balance: findHeader(['balance', 'closingbalance', 'netamount', 'net', 'runningbalance']) || ''
+          date: findHeader(
+            ['date', 'txndate', 'transactiondate', 'invoicedate', 'postingdate', 'docdate', 'transdate', 'entrydate', 'voucherdate', 'valuedate', 'billdate', 'datetime'],
+            ['txndate', 'transactiondate', 'invoicedate', 'postingdate', 'entrydate']
+          ) || (headers.find(h => h.toLowerCase().includes('date')) || headers[0] || ''),
+
+          voucherNo: findHeader(
+            ['voucherno', 'vouchernum', 'voucher', 'referenceno', 'referencenum', 'refno', 'refnum', 'reference', 'txnid', 'transactionid', 'documentno', 'docno', 'invoiceno', 'invoicenumber', 'docid', 'slno', 'serialno', 'id', 'transid', 'billno', 'ref'],
+            ['referenceno', 'transactionid', 'documentno', 'invoiceno']
+          ) || '',
+
+          accountNumber: findHeader(
+            ['accountnumber', 'accountno', 'accountnum', 'accno', 'accnum', 'acctno', 'acctnum', 'glaccount', 'glcode', 'accountcode', 'acccode', 'glacct', 'acct', 'acc', 'account'],
+            ['accountnumber', 'accountno', 'glaccount', 'accountcode']
+          ) || '',
+
+          accountDescription: findHeader(
+            ['accountdescription', 'accountdesc', 'accountname', 'accounttitle', 'headofaccount', 'ledgername', 'ledger', 'glname', 'gldescription', 'accounthead', 'acctname', 'accdesc'],
+            ['accountdescription', 'accountname', 'accounttitle', 'ledgername', 'headofaccount']
+          ) || '',
+
+          description: findHeader(
+            ['description', 'transactiondescription', 'txndescription', 'txndesc', 'itemdescription', 'particulars', 'narration', 'memo', 'details', 'detail', 'remarks', 'purpose', 'notes', 'lineitem', 'item', 'payee', 'vendor', 'customer'],
+            ['particulars', 'transactiondescription', 'itemdescription']
+          ) || '',
+
+          narration: findHeader(
+            ['narration', 'remarks', 'comment', 'comments', 'notes', 'memo', 'longdescription'],
+            ['narration', 'remarks']
+          ) || '',
+
+          debit: findHeader(
+            ['debit', 'debitamount', 'debits', 'debitamt', 'dramount', 'dramt', 'dr', 'debitinr', 'debitusd', 'drinr', 'drusd'],
+            ['debitamount', 'debitamt', 'dramount']
+          ) || '',
+
+          credit: findHeader(
+            ['credit', 'creditamount', 'credits', 'creditamt', 'cramount', 'cramt', 'cr', 'creditinr', 'creditusd', 'crinr', 'crusd'],
+            ['creditamount', 'creditamt', 'cramount']
+          ) || '',
+
+          balance: findHeader(
+            ['balance', 'closingbalance', 'runningbalance', 'netamount', 'netbalance', 'bal', 'closingbal', 'balanceamount', 'cumbalance'],
+            ['closingbalance', 'runningbalance', 'netbalance', 'balanceamount']
+          ) || ''
         };
 
         setColumnMapping(detectedMapping);

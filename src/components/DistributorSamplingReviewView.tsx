@@ -97,68 +97,105 @@ export const DistributorSamplingReviewView: React.FC<Props> = ({
     
     try {
       const fileIdToFetch = targetFile.googleDriveFileId || targetFile.id;
+      
+      // 1. Try population-records API first which contains the persistent pre-parsed records
+      try {
+        const popRes = await fetch(`/api/sampling/population-records?fileId=${encodeURIComponent(fileIdToFetch)}&distributorId=${encodeURIComponent(selectedDistributor || '')}&auditId=${encodeURIComponent(selectedAuditFilter || '')}`);
+        if (popRes.ok) {
+          const popData = await popRes.json();
+          if (popData.success && Array.isArray(popData.records) && popData.records.length > 0) {
+            setPopulationRecords(popData.records);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (popErr) {
+        console.warn('Note: population-records endpoint fallback to direct file download:', popErr);
+      }
+
+      // 2. Fallback to direct file download & parse
       const res = await fetch(`/api/storage/download/${fileIdToFetch}?fileName=${encodeURIComponent(targetFile.fileName)}`);
       if (!res.ok) throw new Error(`Failed to download file ${targetFile.fileName}`);
       
       const buffer = await res.arrayBuffer();
       const XLSX = await import('xlsx');
       const workbook = XLSX.read(buffer, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const worksheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "—" });
-        
-        const mappedData = targetFile.mappedData || targetFile.glMapping || {};
-        let mapping: any = {};
-        if (typeof mappedData === 'string') {
-          try {
-            mapping = JSON.parse(mappedData);
-          } catch(e) {
-            console.error('Failed to parse mappedData:', mappedData, e);
-          }
-        } else {
-          mapping = mappedData || {};
+      const firstSheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[firstSheetName];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "—" });
+      
+      const mappedData = targetFile.mappedData || targetFile.glMapping || {};
+      let mapping: any = {};
+      if (typeof mappedData === 'string') {
+        try {
+          mapping = JSON.parse(mappedData);
+        } catch(e) {
+          console.error('Failed to parse mappedData:', mappedData, e);
         }
+      } else {
+        mapping = mappedData || {};
+      }
 
-        const parsedRecords = jsonData.map((row: any, index: number) => {
-           const dateVal = row[mapping.date || 'date'] || row['Date'] || row['Transaction Date'];
-           const voucherNoVal = row[mapping.voucherNo || 'voucherNo'] || row['Voucher No'] || row['Reference No'];
-           const accountNumVal = row[mapping.accountNumber || 'accountNumber'] || row['Account Number'] || row['Account No'];
-           const accountDescVal = row[mapping.accountDescription || 'accountDescription'] || row['Account Description'] || row['Account Name'];
-           const descVal = row[mapping.description || 'description'] || row['Description'] || row['Particulars'];
-           const narrationVal = row[mapping.narration || 'narration'] || row['Narration'] || row['Remarks'];
-           const debitVal = String(row[mapping.debit || 'debit'] || row['Debit'] || '0');
-           const creditVal = String(row[mapping.credit || 'credit'] || row['Credit'] || '0');
-           const balanceVal = String(row[mapping.balance || 'balance'] || row['Balance'] || '0');
+      const cleanAmount = (val: any): number => {
+        if (val === null || val === undefined || val === '' || val === '—' || val === '-') return 0;
+        if (typeof val === 'number') return isNaN(val) ? 0 : val;
+        let s = String(val).trim();
+        if (!s || s === '—' || s === '-') return 0;
+        let isNegative = false;
+        if (s.startsWith('(') && s.endsWith(')')) {
+          isNegative = true;
+          s = s.slice(1, -1).trim();
+        } else if (s.startsWith('-')) {
+          isNegative = true;
+          s = s.slice(1).trim();
+        } else if (s.endsWith('-')) {
+          isNegative = true;
+          s = s.slice(0, -1).trim();
+        }
+        s = s.replace(/[^0-9.]/g, '');
+        const parsed = parseFloat(s);
+        if (isNaN(parsed)) return 0;
+        return isNegative ? -parsed : parsed;
+      };
 
-           const parseAmount = (val: string) => {
-               if (val === '—') return null;
-               if (typeof val === 'string' && val.includes(',')) {
-                   const parsed = parseFloat(val.replace(/[^0-9.-]+/g, ""));
-                   return isNaN(parsed) ? null : parsed;
-               }
-               const num = Number(val);
-               return isNaN(num) ? null : num;
-           };
+      const parsedRecords = jsonData.map((row: any, index: number) => {
+         const dateVal = row[mapping.date || 'date'] || row['Date'] || row['Transaction Date'];
+         const voucherNoVal = row[mapping.voucherNo || 'voucherNo'] || row['Voucher No'] || row['Reference No'];
+         const accountNumVal = row[mapping.accountNumber || 'accountNumber'] || row['Account Number'] || row['Account No'];
+         const accountDescVal = row[mapping.accountDescription || 'accountDescription'] || row['Account Description'] || row['Account Name'];
+         const descVal = row[mapping.description || 'description'] || row['Description'] || row['Particulars'];
+         const narrationVal = row[mapping.narration || 'narration'] || row['Narration'] || row['Remarks'];
+         const debitVal = row[mapping.debit || 'debit'] || row['Debit'] || 0;
+         const creditVal = row[mapping.credit || 'credit'] || row['Credit'] || 0;
+         const balanceVal = row[mapping.balance || 'balance'] || row['Balance'] || 0;
 
-           let idVal = voucherNoVal !== '—' && voucherNoVal !== undefined ? String(voucherNoVal) : `RECORD-${index + 1}`;
-           if (idVal === '—') idVal = `RECORD-${index + 1}`;
-           
-           return {
-             id: idVal,
-             date: dateVal !== '—' ? String(dateVal) : '—',
-             voucherNo: voucherNoVal !== '—' ? String(voucherNoVal) : '—',
-             accountNumber: accountNumVal !== '—' ? String(accountNumVal) : '—',
-             accountDescription: accountDescVal !== '—' ? String(accountDescVal) : '—',
-             description: descVal !== '—' ? String(descVal) : '—',
-             narration: narrationVal !== '—' ? String(narrationVal) : '—',
-             debit: parseAmount(debitVal),
-             credit: parseAmount(creditVal),
-             balance: parseAmount(balanceVal),
-             originalRow: row
-           };
-        }).filter(Boolean);
-        
-        setPopulationRecords(parsedRecords);
+         let idVal = voucherNoVal !== '—' && voucherNoVal !== undefined ? String(voucherNoVal) : `RECORD-${index + 1}`;
+         if (idVal === '—') idVal = `RECORD-${index + 1}`;
+         
+         const dr = cleanAmount(debitVal);
+         const cr = cleanAmount(creditVal);
+         let bal = cleanAmount(balanceVal);
+         if (bal === 0 && (dr !== 0 || cr !== 0)) {
+           bal = dr - cr;
+         }
+
+         return {
+           ...row,
+           id: idVal,
+           date: dateVal !== '—' && dateVal ? String(dateVal) : '—',
+           voucherNo: voucherNoVal !== '—' && voucherNoVal ? String(voucherNoVal) : '—',
+           accountNumber: accountNumVal !== '—' && accountNumVal ? String(accountNumVal) : '—',
+           accountDescription: accountDescVal !== '—' && accountDescVal ? String(accountDescVal) : '—',
+           description: descVal !== '—' && descVal ? String(descVal) : '—',
+           narration: narrationVal !== '—' && narrationVal ? String(narrationVal) : '—',
+           debit: dr,
+           credit: cr,
+           balance: bal,
+           originalRow: row
+         };
+      }).filter(Boolean);
+      
+      setPopulationRecords(parsedRecords);
     } catch (err: any) {
       console.error("Error loading population:", err);
       setPopulationRecords([]);

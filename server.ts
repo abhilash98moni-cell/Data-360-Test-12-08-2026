@@ -1483,6 +1483,38 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     }
   });
 
+  function cleanAndParseGLAmount(val: any): number {
+    if (val === null || val === undefined || val === '' || val === '—' || val === '-') return 0;
+    if (typeof val === 'number') {
+      return isNaN(val) ? 0 : val;
+    }
+    let s = String(val).trim();
+    if (!s || s === '—' || s === '-') return 0;
+
+    // Detect accounting parentheses: (1,234.50)
+    let isNegative = false;
+    if (s.startsWith('(') && s.endsWith(')')) {
+      isNegative = true;
+      s = s.slice(1, -1).trim();
+    } else if (s.startsWith('-')) {
+      isNegative = true;
+      s = s.slice(1).trim();
+    } else if (s.endsWith('-')) {
+      isNegative = true;
+      s = s.slice(0, -1).trim();
+    } else if (s.toLowerCase().endsWith('cr')) {
+      s = s.slice(0, -2).trim();
+    } else if (s.toLowerCase().endsWith('dr')) {
+      s = s.slice(0, -2).trim();
+    }
+
+    // Remove currency codes, symbols, commas, spaces
+    s = s.replace(/[^0-9.]/g, '');
+    const parsed = parseFloat(s);
+    if (isNaN(parsed)) return 0;
+    return isNegative ? -parsed : parsed;
+  }
+
   function parseGLBufferToRecords(buffer: Buffer, originalFileName: string, explicitMapping?: any) {
     try {
       const workbook = XLSX.read(buffer, { type: 'buffer' });
@@ -1499,53 +1531,157 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       }
       mapping = mapping || {};
 
-      const findCol = (candidates: string[]) => {
+      // Match explicit mapping key case-insensitively if specified
+      const resolveExplicit = (keyName?: string) => {
+        if (!keyName) return '';
+        const found = headers.find(h => h.trim().toLowerCase() === keyName.trim().toLowerCase());
+        return found || (headers.includes(keyName) ? keyName : '');
+      };
+
+      // Exact-first intelligent column detector
+      const detectCol = (exactCandidates: string[], partialCandidates: string[] = []) => {
+        // 1. Exact match (case & whitespace stripped)
         for (const h of headers) {
           const clean = h.toLowerCase().replace(/[^a-z0-9]/g, '');
-          for (const c of candidates) {
-            if (clean === c || clean.includes(c)) return h;
+          for (const cand of exactCandidates) {
+            if (clean === cand) return h;
+          }
+        }
+        // 2. Exact word match (split on non-alphanumeric)
+        for (const h of headers) {
+          const words = h.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+          for (const cand of exactCandidates) {
+            if (words.includes(cand)) return h;
+          }
+        }
+        // 3. Safe partial match (only against specific non-colliding partials)
+        for (const h of headers) {
+          const clean = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+          for (const cand of partialCandidates) {
+            if (clean.includes(cand)) return h;
           }
         }
         return '';
       };
 
       const finalMapping = {
-        date: mapping.date || findCol(['date', 'transactiondate', 'invoicedate', 'postingdate', 'time']),
-        voucherNo: mapping.voucherNo || findCol(['voucherno', 'referenceno', 'transactionid', 'invoicenumber', 'invoiceno', 'documentid', 'refno', 'reference', 'id', 'slno']),
-        accountNumber: mapping.accountNumber || findCol(['accountnumber', 'accountno', 'glaccount', 'account']),
-        accountDescription: mapping.accountDescription || findCol(['accountdescription', 'accountname', 'glname']),
-        description: mapping.description || findCol(['description', 'particulars', 'memo', 'notes', 'purpose', 'details', 'item', 'product', 'vendor', 'customer', 'employee', 'payee']),
-        narration: mapping.narration || findCol(['narration', 'remarks', 'comment']),
-        debit: mapping.debit || findCol(['debit', 'dr']),
-        credit: mapping.credit || findCol(['credit', 'cr']),
-        balance: mapping.balance || findCol(['balance', 'bal'])
+        date: resolveExplicit(mapping.date) || detectCol(
+          ['date', 'txndate', 'transactiondate', 'invoicedate', 'postingdate', 'docdate', 'transdate', 'entrydate', 'voucherdate', 'valuedate', 'billdate', 'datetime', 'transdt', 'entrydt'],
+          ['txndate', 'transactiondate', 'invoicedate', 'postingdate', 'entrydate']
+        ) || (headers.find(h => h.toLowerCase().includes('date')) || headers[0] || ''),
+
+        voucherNo: resolveExplicit(mapping.voucherNo) || detectCol(
+          ['voucherno', 'vouchernum', 'voucher', 'referenceno', 'referencenum', 'refno', 'refnum', 'reference', 'txnid', 'transactionid', 'documentno', 'docno', 'invoiceno', 'invoicenumber', 'docid', 'slno', 'serialno', 'id', 'transid', 'billno', 'ref', 'entryno', 'journalno', 'jvno', 'checkno', 'chequeno', 'receiptno', 'docnumber', 'documentnumber', 'vouchernumber', 'txno', 'seqno'],
+          ['referenceno', 'transactionid', 'documentno', 'invoiceno']
+        ),
+
+        accountNumber: resolveExplicit(mapping.accountNumber) || detectCol(
+          ['accountnumber', 'accountno', 'accountnum', 'accno', 'accnum', 'acctno', 'acctnum', 'glaccount', 'glcode', 'accountcode', 'acccode', 'glacct', 'acct', 'acc', 'account', 'glno', 'glid', 'accountid', 'acctid', 'ledgercode', 'code', 'acno', 'acnum', 'gl', 'chartofaccounts', 'coacode'],
+          ['accountnumber', 'accountno', 'glaccount', 'accountcode']
+        ),
+
+        accountDescription: resolveExplicit(mapping.accountDescription) || detectCol(
+          ['accountdescription', 'accountdesc', 'accountname', 'accounttitle', 'headofaccount', 'ledgername', 'ledger', 'glname', 'gldescription', 'accounthead', 'acctname', 'accdesc', 'chartofaccounts', 'accountheadname', 'headname', 'accountcategory', 'title', 'head', 'ledgerdesc', 'acctdesc', 'accname', 'acname'],
+          ['accountdescription', 'accountname', 'accounttitle', 'ledgername', 'headofaccount']
+        ),
+
+        description: resolveExplicit(mapping.description) || detectCol(
+          ['description', 'transactiondescription', 'txndescription', 'txndesc', 'itemdescription', 'particulars', 'narration', 'memo', 'details', 'detail', 'remarks', 'purpose', 'notes', 'lineitem', 'item', 'payee', 'vendor', 'customer', 'supplier', 'partyname', 'party', 'narrative', 'comment'],
+          ['particulars', 'transactiondescription', 'itemdescription']
+        ),
+
+        narration: resolveExplicit(mapping.narration) || detectCol(
+          ['narration', 'remarks', 'comment', 'comments', 'notes', 'memo', 'longdescription', 'additionaldetails', 'note', 'narrative', 'explanation'],
+          ['narration', 'remarks']
+        ),
+
+        debit: resolveExplicit(mapping.debit) || detectCol(
+          ['debit', 'debitamount', 'debits', 'debitamt', 'dramount', 'dramt', 'dr', 'debitinr', 'debitusd', 'drinr', 'drusd', 'debitlocal', 'drlocal'],
+          ['debitamount', 'debitamt', 'dramount']
+        ),
+
+        credit: resolveExplicit(mapping.credit) || detectCol(
+          ['credit', 'creditamount', 'credits', 'creditamt', 'cramount', 'cramt', 'cr', 'creditinr', 'creditusd', 'crinr', 'crusd', 'creditlocal', 'crlocal'],
+          ['creditamount', 'creditamt', 'cramount']
+        ),
+
+        balance: resolveExplicit(mapping.balance) || detectCol(
+          ['balance', 'closingbalance', 'runningbalance', 'netamount', 'netbalance', 'bal', 'closingbal', 'balanceamount', 'cumbalance'],
+          ['closingbalance', 'runningbalance', 'netbalance', 'balanceamount']
+        )
       };
 
+      // Check if there is a single amount column when debit and credit are both unmapped
+      const singleAmountCol = (!finalMapping.debit && !finalMapping.credit) ? detectCol(['amount', 'txnamount', 'netamount', 'transamount', 'value', 'transactionamount', 'totalamount', 'total']) : '';
+
       const parsedRecords = jsonData.map((row: any, idx: number) => {
-        const getVal = (colName: string) => (colName && row[colName] !== undefined ? String(row[colName]).trim() : '');
-        const numVal = (colName: string) => {
-          if (!colName || row[colName] === undefined) return 0;
-          const s = String(row[colName]).replace(/[$,\s]/g, '');
-          const n = parseFloat(s);
-          return isNaN(n) ? 0 : n;
+        const getRowVal = (colName: string): string => {
+          if (!colName) return '';
+          if (row[colName] !== undefined && row[colName] !== null) {
+            const s = String(row[colName]).trim();
+            if (s !== '' && s !== 'null' && s !== 'undefined') return s;
+          }
+          const cleanTarget = colName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const matchingKey = Object.keys(row).find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanTarget);
+          if (matchingKey && row[matchingKey] !== undefined && row[matchingKey] !== null) {
+            const s = String(row[matchingKey]).trim();
+            if (s !== '' && s !== 'null' && s !== 'undefined') return s;
+          }
+          return '';
         };
 
-        const dateVal = getVal(finalMapping.date) || '—';
-        const voucherVal = getVal(finalMapping.voucherNo) || `TX-${1000 + idx + 1}`;
-        const descVal = getVal(finalMapping.description) || getVal(finalMapping.narration) || `Transaction #${idx + 1}`;
-        const dr = numVal(finalMapping.debit);
-        const cr = numVal(finalMapping.credit);
-        const bal = numVal(finalMapping.balance);
+        const getRowNumVal = (colName: string): number => {
+          if (!colName) return 0;
+          let rawVal = row[colName];
+          if (rawVal === undefined || rawVal === null || rawVal === '') {
+            const cleanTarget = colName.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const matchingKey = Object.keys(row).find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanTarget);
+            if (matchingKey) rawVal = row[matchingKey];
+          }
+          return cleanAndParseGLAmount(rawVal);
+        };
+
+        const dateVal = getRowVal(finalMapping.date) || '—';
+        const voucherVal = getRowVal(finalMapping.voucherNo) || `TX-${1000 + idx + 1}`;
+        const accNumVal = getRowVal(finalMapping.accountNumber);
+        const accDescVal = getRowVal(finalMapping.accountDescription);
+        const descVal = getRowVal(finalMapping.description) || getRowVal(finalMapping.narration) || `Transaction #${idx + 1}`;
+        const narrationVal = getRowVal(finalMapping.narration);
+        
+        let dr = getRowNumVal(finalMapping.debit);
+        let cr = getRowNumVal(finalMapping.credit);
+        let bal = getRowNumVal(finalMapping.balance);
+
+        if (singleAmountCol && !finalMapping.debit && !finalMapping.credit) {
+          const singleAmt = getRowNumVal(singleAmountCol);
+          if (singleAmt > 0) {
+            dr = singleAmt;
+            cr = 0;
+          } else if (singleAmt < 0) {
+            dr = 0;
+            cr = Math.abs(singleAmt);
+          }
+        }
+
+        // Fallback balance if not provided
+        if (!finalMapping.balance && bal === 0) {
+          bal = dr - cr;
+        }
+
+        const finalAccNum = accNumVal || '—';
+        const finalAccDesc = accDescVal || (accNumVal ? `Account ${accNumVal}` : '—');
 
         return {
+          ...row,
           id: voucherVal !== '—' && voucherVal ? voucherVal : `RECORD-${idx + 1}`,
+          sampleId: voucherVal !== '—' && voucherVal ? voucherVal : `RECORD-${idx + 1}`,
           originalRow: idx + 2,
           date: dateVal,
           voucherNo: voucherVal,
-          accountNumber: getVal(finalMapping.accountNumber) || '—',
-          accountDescription: getVal(finalMapping.accountDescription) || '—',
+          accountNumber: finalAccNum,
+          accountDescription: finalAccDesc,
           description: descVal,
-          narration: getVal(finalMapping.narration) || '—',
+          narration: narrationVal || '—',
           debit: dr,
           credit: cr,
           balance: bal,
@@ -1577,13 +1713,16 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
       if (error) throw error;
 
-      const stateItem = (data || []).find(d => {
+      let stateItem = (data || []).find(d => {
         const details = d.details || {};
-        return (
-          (!distributorId || distributorId === 'All Distributors' || details.distributorId === distributorId) &&
-          (!auditId || auditId === 'All Audits' || details.auditId === auditId)
-        );
+        const matchDist = !distributorId || distributorId === 'All Distributors' || !details.distributorId || details.distributorId.trim().toLowerCase() === distributorId.trim().toLowerCase();
+        const matchAudit = !auditId || auditId === 'All Audits' || !details.auditId || details.auditId.trim().toLowerCase() === auditId.trim().toLowerCase();
+        return matchDist && matchAudit;
       });
+
+      if (!stateItem && (data || []).length > 0) {
+        stateItem = data[0];
+      }
 
       res.json({ success: true, state: stateItem ? stateItem.details : null });
     } catch (err: any) {
@@ -1599,6 +1738,10 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       const { distributorId, auditId, clientName, activePopulationId, activePopulationName, activeTab } = payload;
       const supabase = getSupabaseServerClient();
 
+      const targetDist = distributorId || 'Midwest Trading Co.';
+      const targetAudit = auditId || 'eng-101';
+      const targetClient = clientName || 'Apex Electronics Corp';
+
       const { data: existing } = await supabase
         .from('system_audit_logs')
         .select('*')
@@ -1607,15 +1750,15 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       const found = (existing || []).find(d => {
         const details = d.details || {};
         return (
-          details.distributorId === distributorId &&
-          details.auditId === auditId
+          (!details.distributorId || details.distributorId.trim().toLowerCase() === targetDist.trim().toLowerCase()) &&
+          (!details.auditId || details.auditId.trim().toLowerCase() === targetAudit.trim().toLowerCase())
         );
       });
 
       const stateDetails = {
-        distributorId: distributorId || 'Midwest Trading Co.',
-        auditId: auditId || 'eng-101',
-        clientName: clientName || 'Apex Electronics Corp',
+        distributorId: targetDist,
+        auditId: targetAudit,
+        clientName: targetClient,
         activePopulationId,
         activePopulationName,
         activeTab: activeTab || 'GL',
@@ -1630,7 +1773,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       } else {
         await supabase.from('system_audit_logs').insert({
           event_type: 'SAMPLING_STATE',
-          target_user_email: `${clientName || 'Apex Electronics Corp'}::${distributorId || 'distributor'}`,
+          target_user_email: `${targetClient}::${targetDist}`,
           details: stateDetails,
           created_at: new Date().toISOString()
         });
@@ -1689,9 +1832,9 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         .filter(p => {
           const usage = p.documentUsage || [];
           const hasSampling = p.samplingEnabled === true || usage.includes('SAMPLING_POPULATION') || p.requestRef === 'SAMPLING';
-          const matchDist = !distributorId || distributorId === 'All Distributors' || p.distributorName === distributorId;
-          const matchAudit = !auditId || auditId === 'All Audits' || p.auditId === auditId;
-          const matchClient = !client || client === 'All Clients' || p.clientName === client;
+          const matchDist = !distributorId || distributorId === 'All Distributors' || !p.distributorName || p.distributorName.trim().toLowerCase() === distributorId.trim().toLowerCase();
+          const matchAudit = !auditId || auditId === 'All Audits' || !p.auditId || p.auditId.trim().toLowerCase() === auditId.trim().toLowerCase();
+          const matchClient = !client || client === 'All Clients' || !p.clientName || p.clientName.trim().toLowerCase() === client.trim().toLowerCase();
           const isTemplate = (p.fileName || '').toLowerCase().includes('template') || (p.fileName || '').toLowerCase().includes('questionnaire');
           return hasSampling && matchDist && matchAudit && matchClient && !isTemplate;
         });
@@ -1720,7 +1863,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
       if (error) throw error;
 
-      if (fileId) {
+      if (fileId && fileId !== 'undefined' && fileId !== 'null' && fileId !== '') {
         targetRow = (data || []).find(row => {
           const d = row.details || {};
           return row.id === fileId || d.google_drive_file_id === fileId || d.storage_path === fileId || d.file_name === fileId;
@@ -1728,13 +1871,16 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       }
 
       if (!targetRow && (data || []).length > 0) {
-        // Fallback to active sampling population or latest
+        // Fallback to active sampling population or latest matching
         targetRow = (data || []).find(row => {
           const d = row.details || {};
-          const isMatch = (!distributorId || distributorId === 'All Distributors' || d.distributor_name === distributorId) &&
-                          (!auditId || auditId === 'All Audits' || d.audit_id === auditId);
+          const isMatch = (!distributorId || distributorId === 'All Distributors' || !d.distributor_name || d.distributor_name.trim().toLowerCase() === distributorId.trim().toLowerCase()) &&
+                          (!auditId || auditId === 'All Audits' || !d.audit_id || d.audit_id.trim().toLowerCase() === auditId.trim().toLowerCase());
           const hasSampling = d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING';
           return isMatch && hasSampling;
+        }) || (data || []).find(row => {
+          const d = row.details || {};
+          return d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING';
         }) || (data || [])[0];
       }
 
@@ -1847,17 +1993,29 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         const audId = item.auditId || auditId;
         if (!sampleId) continue;
 
-        const found = existingList.find(d => 
-          d.details?.sampleId === sampleId && 
-          d.details?.distributorId === distId && 
-          d.details?.auditId === audId
-        );
+        const found = existingList.find(d => {
+          const det = d.details || {};
+          return (
+            (det.sampleId === sampleId || det.id === sampleId || (det.voucherNo && item.voucherNo && det.voucherNo !== '—' && det.voucherNo === item.voucherNo)) &&
+            (!distId || distId === 'All Distributors' || det.distributorId === distId) &&
+            (!audId || audId === 'All Audits' || det.auditId === audId)
+          );
+        });
         
         const cleanItem = {
           ...item,
           sampleId,
           distributorId: distId,
           auditId: audId,
+          date: (item.date && item.date !== '—') ? item.date : (found?.details?.date || item.date || '—'),
+          voucherNo: (item.voucherNo && item.voucherNo !== '—') ? item.voucherNo : (found?.details?.voucherNo || item.voucherNo || '—'),
+          accountNumber: (item.accountNumber && item.accountNumber !== '—') ? item.accountNumber : (found?.details?.accountNumber || item.accountNumber || '—'),
+          accountDescription: (item.accountDescription && item.accountDescription !== '—') ? item.accountDescription : (found?.details?.accountDescription || item.accountDescription || '—'),
+          description: (item.description && item.description !== '—') ? item.description : (found?.details?.description || item.description || '—'),
+          narration: (item.narration && item.narration !== '—') ? item.narration : (found?.details?.narration || item.narration || '—'),
+          debit: typeof item.debit === 'number' && !isNaN(item.debit) ? item.debit : (Number(found?.details?.debit) || 0),
+          credit: typeof item.credit === 'number' && !isNaN(item.credit) ? item.credit : (Number(found?.details?.credit) || 0),
+          balance: typeof item.balance === 'number' && !isNaN(item.balance) ? item.balance : (Number(found?.details?.balance) || 0),
           updatedAt: new Date().toISOString()
         };
 
@@ -1879,6 +2037,55 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
             created_at: new Date().toISOString()
           });
         }
+      }
+
+      // Synchronize changes to EVIDENCE_FILE parsed_records so that getPopulationRecords stays 100% in sync
+      try {
+        const { data: evidenceLogs } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_FILE');
+        for (const evRow of (evidenceLogs || [])) {
+          const evDetails = evRow.details || {};
+          const isTarget = (
+            (activePopulationId && (evRow.id === activePopulationId || evDetails.google_drive_file_id === activePopulationId || evDetails.storage_path === activePopulationId)) ||
+            (evDetails.distributor_name === distributorId && evDetails.audit_id === auditId) ||
+            !activePopulationId
+          );
+
+          if (isTarget && Array.isArray(evDetails.parsed_records) && evDetails.parsed_records.length > 0) {
+            let hasChanges = false;
+            const updatedRecords = evDetails.parsed_records.map((rec: any) => {
+              const matchItem = items.find(it => (
+                (it.sampleId && (it.sampleId === rec.id || it.sampleId === rec.sampleId)) ||
+                (it.id && (it.id === rec.id || it.id === rec.sampleId)) ||
+                (it.voucherNo && rec.voucherNo && it.voucherNo !== '—' && it.voucherNo === rec.voucherNo)
+              ));
+
+              if (matchItem) {
+                hasChanges = true;
+                return {
+                  ...rec,
+                  testingClassification: matchItem.testingClassification !== undefined ? matchItem.testingClassification : rec.testingClassification,
+                  testingStatus: matchItem.testingStatus !== undefined ? matchItem.testingStatus : rec.testingStatus,
+                  testingReference: matchItem.testingReference !== undefined ? matchItem.testingReference : rec.testingReference,
+                  attributeResults: matchItem.attributeResults !== undefined ? matchItem.attributeResults : rec.attributeResults,
+                  evidenceFields: matchItem.evidenceFields !== undefined ? matchItem.evidenceFields : rec.evidenceFields,
+                  exceptions: matchItem.exceptions !== undefined ? matchItem.exceptions : rec.exceptions
+                };
+              }
+              return rec;
+            });
+
+            if (hasChanges) {
+              await supabase.from('system_audit_logs').update({
+                details: {
+                  ...evDetails,
+                  parsed_records: updatedRecords
+                }
+              }).eq('id', evRow.id);
+            }
+          }
+        }
+      } catch (evSyncErr) {
+        console.warn('Note: evidence parsed_records sync:', evSyncErr);
       }
 
       // If activePopulationId provided, persist to SAMPLING_STATE as well

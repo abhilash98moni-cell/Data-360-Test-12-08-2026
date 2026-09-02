@@ -354,6 +354,7 @@ export default function App() {
               selectedAuditFilter={selectedEngId}
               currentUser={currentUser}
               currencyMode={currencyMode}
+              onNavigateToUpload={() => setActiveTab('engagement_workspace')}
             />
 
           ) : activeTab === 'reporting' ? (

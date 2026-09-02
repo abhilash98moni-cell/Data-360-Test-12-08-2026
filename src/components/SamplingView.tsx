@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { RequiredDataQuestionnaire } from './RequiredDataQuestionnaire';
 import { Plus,  
   ArrowLeft, Search, Filter, CheckCircle2, AlertTriangle, 
-  FileText, Info, Save, X, Edit, ExternalLink, Database, Upload, FileSpreadsheet
+  FileText, Info, Save, X, Edit, ExternalLink, Database
  } from 'lucide-react';
 import { UserSession } from '../types';
 
@@ -14,6 +14,7 @@ interface SamplingViewProps {
   selectedAuditFilter?: string;
   currentUser: UserSession | null;
   onFindingCreated?: (finding: any) => void;
+  onNavigateToUpload?: () => void;
 }
 
 const formatCurrency = (val: number | null, mode: string = 'INR') => {
@@ -100,20 +101,13 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   selectedDistributor,
   selectedAuditFilter,
   currentUser,
-  currencyMode = 'INR'
+  currencyMode = 'INR',
+  onNavigateToUpload
 }) => {
   const isDistributor = currentUser?.role === 'Distributor';
   const [openClassificationId, setOpenClassificationId] = useState<string | null>(null);
   const [openQuestionnaireFor, setOpenQuestionnaireFor] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState<'GL' | '3PD' | 'EMP' | 'SALES'>('GL');
-  const [uploadModalOpen, setUploadModalOpen] = useState(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadState, setUploadState] = useState<'idle' | 'reading' | 'mapping' | 'uploading' | 'success' | 'error'>('idle');
-  const [uploadError, setUploadError] = useState('');
-  const [glHeaders, setGlHeaders] = useState<string[]>([]);
-  const [glMapping, setGlMapping] = useState<Record<string, string>>({});
-  const [uploadSuccessMessage, setUploadSuccessMessage] = useState({ filename: '', records: 0 });
-
   
   const [availablePopulations, setAvailablePopulations] = useState<any[]>([]);
   const [selectedPopulation, setSelectedPopulation] = useState<any | null>(null);
@@ -684,45 +678,121 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         }
 
         const keys = Object.keys(jsonData[0] || {});
-        const findVal = (row: any, matchKeys: string[], explicitKey?: string) => {
-          if (explicitKey && row[explicitKey] !== undefined) return row[explicitKey] !== "" ? row[explicitKey] : '—';
-          const key = keys.find(k => matchKeys.some(match => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes(match.toLowerCase().replace(/[^a-z0-9]/g, ''))));
-          return key && row[key] !== "" ? row[key] : '—';
+        
+        const parseGLAmount = (val: any): number => {
+          if (val === null || val === undefined || val === '' || val === '—' || val === '-') return 0;
+          if (typeof val === 'number') return isNaN(val) ? 0 : val;
+          let s = String(val).trim();
+          if (!s || s === '—' || s === '-') return 0;
+          let isNegative = false;
+          if (s.startsWith('(') && s.endsWith(')')) {
+            isNegative = true;
+            s = s.slice(1, -1).trim();
+          } else if (s.startsWith('-')) {
+            isNegative = true;
+            s = s.slice(1).trim();
+          } else if (s.endsWith('-')) {
+            isNegative = true;
+            s = s.slice(0, -1).trim();
+          } else if (s.toLowerCase().endsWith('cr')) {
+            s = s.slice(0, -2).trim();
+          } else if (s.toLowerCase().endsWith('dr')) {
+            s = s.slice(0, -2).trim();
+          }
+          s = s.replace(/[^0-9.]/g, '');
+          const num = parseFloat(s);
+          if (isNaN(num)) return 0;
+          return isNegative ? -num : num;
         };
 
-        const parseAmount = (val: any) => {
-          if (val === '—' || val === '' || val === null || val === undefined) return 0;
-          if (typeof val === 'string') {
-            const parsed = parseFloat(val.replace(/[$,\s]/g, ''));
-            return isNaN(parsed) ? 0 : parsed;
+        const detectCol = (exactCandidates: string[], partialCandidates: string[] = []) => {
+          for (const h of keys) {
+            const clean = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+            for (const cand of exactCandidates) {
+              if (clean === cand) return h;
+            }
           }
-          const num = Number(val);
-          return isNaN(num) ? 0 : num;
+          for (const h of keys) {
+            const words = h.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+            for (const cand of exactCandidates) {
+              if (words.includes(cand)) return h;
+            }
+          }
+          for (const h of keys) {
+            const clean = h.toLowerCase().replace(/[^a-z0-9]/g, '');
+            for (const cand of partialCandidates) {
+              if (clean.includes(cand)) return h;
+            }
+          }
+          return '';
+        };
+
+        const findVal = (row: any, colName: string) => {
+          if (!colName) return '';
+          if (row[colName] !== undefined && row[colName] !== null) {
+            const s = String(row[colName]).trim();
+            if (s !== '' && s !== 'null' && s !== 'undefined') return s;
+          }
+          const cleanTarget = colName.toLowerCase().replace(/[^a-z0-9]/g, '');
+          const matchKey = keys.find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanTarget);
+          if (matchKey && row[matchKey] !== undefined && row[matchKey] !== null) {
+            const s = String(row[matchKey]).trim();
+            if (s !== '' && s !== 'null' && s !== 'undefined') return s;
+          }
+          return '';
+        };
+
+        const findNumVal = (row: any, colName: string) => {
+          if (!colName) return 0;
+          let raw = row[colName];
+          if (raw === undefined || raw === null || raw === '') {
+            const cleanTarget = colName.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const matchKey = keys.find(k => k.toLowerCase().replace(/[^a-z0-9]/g, '') === cleanTarget);
+            if (matchKey) raw = row[matchKey];
+          }
+          return parseGLAmount(raw);
+        };
+
+        const finalMap = {
+          date: mapping.date || detectCol(['date', 'txndate', 'transactiondate', 'invoicedate', 'postingdate', 'docdate', 'entrydate']) || keys[0] || '',
+          voucherNo: mapping.voucherNo || detectCol(['voucherno', 'vouchernum', 'voucher', 'referenceno', 'refno', 'ref', 'documentno', 'docno', 'invoiceno', 'invoicenumber', 'id', 'txnid']),
+          accountNumber: mapping.accountNumber || detectCol(['accountnumber', 'accountno', 'accountnum', 'accno', 'accnum', 'acctno', 'acctnum', 'glaccount', 'glcode', 'accountcode', 'account']),
+          accountDescription: mapping.accountDescription || detectCol(['accountdescription', 'accountdesc', 'accountname', 'accounttitle', 'headofaccount', 'ledgername', 'ledger', 'glname']),
+          description: mapping.description || detectCol(['description', 'transactiondescription', 'particulars', 'narration', 'memo', 'details', 'remarks', 'purpose', 'lineitem']),
+          narration: mapping.narration || detectCol(['narration', 'remarks', 'comment', 'comments', 'notes']),
+          debit: mapping.debit || detectCol(['debit', 'debitamount', 'debits', 'debitamt', 'dramount', 'dramt', 'dr']),
+          credit: mapping.credit || detectCol(['credit', 'creditamount', 'credits', 'creditamt', 'cramount', 'cramt', 'cr']),
+          balance: mapping.balance || detectCol(['balance', 'closingbalance', 'runningbalance', 'netamount', 'netbalance', 'bal', 'closingbal', 'balanceamount'])
         };
 
         const parsedRecords = jsonData.map((row: any, index: number) => {
-          const dateVal = findVal(row, ['date', 'transactiondate', 'invoicedate', 'postingdate', 'time'], mapping.date);
-          const voucherNoVal = findVal(row, ['voucherno', 'referenceno', 'transactionid', 'invoicenumber', 'invoiceno', 'documentid', 'refno', 'reference', 'id', 'slno'], mapping.voucherNo);
-          const accountNumVal = findVal(row, ['accountnumber', 'accountno', 'glaccount', 'account'], mapping.accountNumber);
-          const accountDescVal = findVal(row, ['accountdescription', 'accountname', 'glname'], mapping.accountDescription);
-          const descVal = findVal(row, ['description', 'particulars', 'memo', 'notes', 'purpose', 'details', 'item', 'product', 'vendor', 'customer', 'employee', 'payee'], mapping.description);
-          const narrationVal = findVal(row, ['narration', 'remarks', 'comment'], mapping.narration);
-          const debit = parseAmount(findVal(row, ['debit', 'dr'], mapping.debit));
-          const credit = parseAmount(findVal(row, ['credit', 'cr'], mapping.credit));
-          const balance = parseAmount(findVal(row, ['balance', 'bal'], mapping.balance));
+          const dateVal = findVal(row, finalMap.date) || '—';
+          const voucherNoVal = findVal(row, finalMap.voucherNo) || `TX-${1000 + index + 1}`;
+          const accountNumVal = findVal(row, finalMap.accountNumber);
+          const accountDescVal = findVal(row, finalMap.accountDescription);
+          const descVal = findVal(row, finalMap.description) || findVal(row, finalMap.narration) || `Transaction #${index + 1}`;
+          const narrationVal = findVal(row, finalMap.narration);
+          const debit = findNumVal(row, finalMap.debit);
+          const credit = findNumVal(row, finalMap.credit);
+          let balance = findNumVal(row, finalMap.balance);
           
-          let idVal = voucherNoVal !== '—' && voucherNoVal !== undefined ? String(voucherNoVal) : `RECORD-${index + 1}`;
-          if (idVal === '—') idVal = `RECORD-${index + 1}`;
+          if (!finalMap.balance && balance === 0) {
+            balance = debit - credit;
+          }
+
+          const finalAccNum = accountNumVal || '—';
+          const finalAccDesc = accountDescVal || (accountNumVal ? `Account ${accountNumVal}` : '—');
           
           return {
-            id: idVal,
+            id: voucherNoVal !== '—' && voucherNoVal ? String(voucherNoVal) : `RECORD-${index + 1}`,
+            sampleId: voucherNoVal !== '—' && voucherNoVal ? String(voucherNoVal) : `RECORD-${index + 1}`,
             originalRow: index + 2,
-            date: dateVal !== '—' ? String(dateVal) : '—',
-            voucherNo: voucherNoVal !== '—' ? String(voucherNoVal) : '—',
-            accountNumber: accountNumVal !== '—' ? String(accountNumVal) : '—',
-            accountDescription: accountDescVal !== '—' ? String(accountDescVal) : '—',
-            description: descVal !== '—' ? String(descVal) : (narrationVal !== '—' ? String(narrationVal) : `Transaction #${index + 1}`),
-            narration: narrationVal !== '—' ? String(narrationVal) : '—',
+            date: dateVal,
+            voucherNo: voucherNoVal,
+            accountNumber: finalAccNum,
+            accountDescription: finalAccDesc,
+            description: descVal,
+            narration: narrationVal || '—',
             debit: debit,
             credit: credit,
             balance: balance,
@@ -743,162 +813,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
 
   const handleSelectPopulation = async (targetFile: any) => {
     await loadPopulationRecords(targetFile);
-  };
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files || e.target.files.length === 0) return;
-    const file = e.target.files[0];
-    
-    // duplicate check
-    const isDuplicate = availablePopulations.some(p => p.fileName === file.name);
-    if (isDuplicate) {
-        const confirm = window.confirm('This file appears to have already been uploaded. Upload anyway?');
-        if (!confirm) {
-            e.target.value = '';
-            return;
-        }
-    }
-    
-    setUploadFile(file);
-    setUploadModalOpen(true);
-    setUploadState('reading');
-    setUploadError('');
-    
-    try {
-      const buffer = await file.arrayBuffer();
-      const XLSX = await import('xlsx');
-      const workbook = XLSX.read(buffer, { type: 'array' });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
-      const jsonData = XLSX.utils.sheet_to_json(worksheet, { defval: "", raw: false });
-      
-      if (!jsonData || jsonData.length === 0) {
-        throw new Error('The file appears to be empty.');
-      }
-      
-      const keys = Object.keys(jsonData[0]);
-      setGlHeaders(keys);
-      
-      // Auto-map
-      const findMatch = (matchKeys: string[]) => keys.find(k => matchKeys.some(m => k.toLowerCase().replace(/[^a-z0-9]/g, '').includes(m.toLowerCase().replace(/[^a-z0-9]/g, '')))) || '';
-      
-      const initialMapping = {
-        date: findMatch(['date', 'transactiondate', 'invoicedate', 'postingdate', 'time']),
-        voucherNo: findMatch(['voucherno', 'referenceno', 'transactionid', 'invoicenumber', 'invoiceno', 'documentid', 'refno', 'reference', 'id', 'slno']),
-        accountNumber: findMatch(['accountnumber', 'accountno', 'glaccount', 'account']),
-        accountDescription: findMatch(['accountdescription', 'accountname', 'glname']),
-        description: findMatch(['description', 'particulars', 'memo', 'notes', 'purpose', 'details', 'item', 'product', 'vendor', 'customer', 'employee', 'payee']),
-        narration: findMatch(['narration', 'remarks', 'comment']),
-        debit: findMatch(['debit', 'dr']),
-        credit: findMatch(['credit', 'cr']),
-        balance: findMatch(['balance', 'bal'])
-      };
-      
-      setGlMapping(initialMapping);
-      setUploadSuccessMessage({ filename: file.name, records: jsonData.length });
-      
-      setUploadState('mapping');
-      
-    } catch (err: any) {
-      console.error(err);
-      setUploadState('error');
-      setUploadError(err.message || 'Failed to read file');
-    }
-  };
-
-  const confirmUpload = async () => {
-    if (!uploadFile) return;
-    
-    // Validate required fields based on mapping
-    if (!glMapping.date) {
-      setUploadError('Unable to import this file because the transaction date could not be identified.');
-      return;
-    }
-    if (!glMapping.voucherNo) {
-      setUploadError('Unable to import this file because the Voucher No or Transaction ID could not be identified.');
-      return;
-    }
-    if (!glMapping.description && !glMapping.narration) {
-      setUploadError('Unable to import this file because the description could not be identified.');
-      return;
-    }
-    if (!glMapping.debit && !glMapping.credit) {
-      setUploadError('Unable to import this file because the transaction amount (Debit/Credit) could not be identified.');
-      return;
-    }
-    
-    setUploadState('uploading');
-    setUploadError('');
-    
-    const formData = new FormData();
-    formData.append('file', uploadFile);
-    formData.append('distributorName', selectedDistributor);
-    formData.append('auditId', selectedAuditFilter || 'eng-101');
-    formData.append('clientName', selectedClient || 'Apex Electronics Corp');
-    formData.append('glMapping', JSON.stringify(glMapping));
-    
-    try {
-      const res = await fetch('/api/sampling/upload', {
-        method: 'POST',
-        headers: {
-          'x-user-email': currentUser?.email || 'auditor@data360.io',
-          'x-user-role': currentUser?.role || 'Auditor'
-        },
-        body: formData
-      });
-      
-      let data: any = {};
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        data = await res.json();
-      } else {
-        const text = await res.text();
-        throw new Error(text && text.includes('<!DOCTYPE') ? 'Server returned an invalid HTML response instead of JSON.' : (text || 'Upload failed'));
-      }
-      
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || 'Failed to upload');
-      }
-      
-      const importedRecordCount = data.recordCount || (Array.isArray(data.records) ? data.records.length : (uploadFile.size ? Math.max(1, Math.round(uploadFile.size / 150)) : 100));
-
-      setUploadSuccessMessage({
-        filename: uploadFile.name,
-        records: importedRecordCount
-      });
-      setUploadState('success');
-      
-      const newPopItem = {
-        id: data.fileId,
-        googleDriveFileId: data.fileId,
-        fileName: uploadFile.name,
-        glMapping: data.glMapping || glMapping,
-        documentUsage: ['SAMPLING_POPULATION'],
-        samplingEnabled: true,
-        status: 'AVAILABLE',
-        distributorName: selectedDistributor,
-        auditId: selectedAuditFilter || 'eng-101'
-      };
-
-      setAvailablePopulations(prev => [newPopItem, ...prev.filter(p => p.googleDriveFileId !== data.fileId && p.fileName !== uploadFile.name)]);
-      setSelectedPopulation(newPopItem);
-
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`data360_active_gl_pop_${selectedDistributor}_${selectedAuditFilter || 'eng-101'}`, data.fileId);
-        localStorage.setItem('data360_active_gl_population', data.fileId);
-      }
-
-      if (Array.isArray(data.records) && data.records.length > 0) {
-        setPopulationRecords(data.records);
-      } else {
-        await loadPopulationRecords(newPopItem);
-      }
-      
-    } catch (err: any) {
-      console.error(err);
-      setUploadState('error');
-      setUploadError(err.message || 'Failed to upload file');
-    }
   };
 
   const handleClassificationToggle = (rec: any, opt: string) => {
@@ -1086,6 +1000,16 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       return {
         ...pop,
         ...(dbSample || {}),
+        // Ensure authoritative transaction fields from pop are never overwritten by empty fields from dbSample
+        date: pop.date || dbSample?.date || '—',
+        voucherNo: pop.voucherNo || dbSample?.voucherNo || '—',
+        accountNumber: (pop.accountNumber && pop.accountNumber !== '—') ? pop.accountNumber : (dbSample?.accountNumber || pop.accountNumber || '—'),
+        accountDescription: (pop.accountDescription && pop.accountDescription !== '—') ? pop.accountDescription : (dbSample?.accountDescription || pop.accountDescription || '—'),
+        description: (pop.description && pop.description !== '—') ? pop.description : (dbSample?.description || pop.description || '—'),
+        narration: (pop.narration && pop.narration !== '—') ? pop.narration : (dbSample?.narration || pop.narration || '—'),
+        debit: typeof pop.debit === 'number' && !isNaN(pop.debit) ? pop.debit : (Number(dbSample?.debit) || 0),
+        credit: typeof pop.credit === 'number' && !isNaN(pop.credit) ? pop.credit : (Number(dbSample?.credit) || 0),
+        balance: typeof pop.balance === 'number' && !isNaN(pop.balance) ? pop.balance : (Number(dbSample?.balance) || 0),
         testingClassification: cleanClassifications,
         testingStatus,
         testingReference,
@@ -1098,10 +1022,15 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             (rec.voucherNo || '').toLowerCase().includes(q) ||
             (rec.description || '').toLowerCase().includes(q) ||
             (rec.testingReference || '').toLowerCase().includes(q) ||
+            (rec.accountNumber || '').toLowerCase().includes(q) ||
             (rec.accountDescription || '').toLowerCase().includes(q)
         );
     });
   }, [populationRecords, assignedSamples, classificationChanges, searchQuery]);
+
+  const totalGLDebit = useMemo(() => mergedRecords.reduce((sum, r) => sum + (Number(r.debit) || 0), 0), [mergedRecords]);
+  const totalGLCredit = useMemo(() => mergedRecords.reduce((sum, r) => sum + (Number(r.credit) || 0), 0), [mergedRecords]);
+  const totalGLBalance = useMemo(() => totalGLDebit - totalGLCredit, [totalGLDebit, totalGLCredit]);
 
   const openReviewModal = (record: any, classificationContext?: string) => {
     setReviewRecord({ ...record, _activeClassificationContext: classificationContext || (Array.isArray(record.testingClassification) ? record.testingClassification[0] : record.testingClassification) });
@@ -1171,6 +1100,28 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   // Sub-Tab Rendering logic
   const renderGLTab = () => (
     <div className="space-y-4">
+      {/* GL Population Metric Cards */}
+      {mergedRecords.length > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-sm">
+            <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Total Transactions</p>
+            <p className="text-xl font-bold text-white mt-1">{mergedRecords.length.toLocaleString()}</p>
+          </div>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-sm">
+            <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Total Debit</p>
+            <p className="text-xl font-bold text-emerald-400 mt-1">{formatCurrency(totalGLDebit, currencyMode)}</p>
+          </div>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-sm">
+            <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Total Credit</p>
+            <p className="text-xl font-bold text-indigo-400 mt-1">{formatCurrency(totalGLCredit, currencyMode)}</p>
+          </div>
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-sm">
+            <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Net Balance</p>
+            <p className="text-xl font-bold text-slate-200 mt-1">{formatCurrency(totalGLBalance, currencyMode)}</p>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
           <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -1210,19 +1161,14 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             </button>
           )}
           <button 
-            onClick={() => document.getElementById('gl-upload-input')?.click()}
-            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-500/20 active:scale-95"
+            onClick={() => fetchSamplingWorkspace()}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95 disabled:opacity-50"
+            title="Reload latest population records from database"
           >
-            <Upload className="w-4 h-4" /> + Upload General Ledger
+            <Database className={`w-4 h-4 text-indigo-400 ${loading ? 'animate-spin' : ''}`} />
+            Sync from DB
           </button>
-          <input 
-            type="file" 
-            id="gl-upload-input" 
-            accept=".xlsx, .xls, .csv" 
-            className="hidden" 
-            onChange={handleFileUpload}
-            onClick={(e) => { (e.target as HTMLInputElement).value = '' }}
-          />
         </div>
       </div>
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto shadow-xl">
@@ -1231,29 +1177,66 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
           <tr className="bg-slate-950/50 border-b border-slate-800">
             <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Date</th>
             <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Voucher No</th>
-            <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Account</th>
-            <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Description</th>
+            <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Account #</th>
+            <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Account Description</th>
+            <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Transaction Description</th>
             <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Debit</th>
             <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Credit</th>
+            <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Balance</th>
             {!isDistributor && <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] bg-slate-900">Testing Classification</th>}
             <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] bg-slate-900 text-center">Required Data</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800/50">
           {mergedRecords.length === 0 ? (
-            <tr><td colSpan={isDistributor ? 7 : 8} className="py-12 text-center text-slate-400">No records found.</td></tr>
+            <tr>
+              <td colSpan={isDistributor ? 8 : 10} className="py-16 text-center">
+                <div className="flex flex-col items-center justify-center max-w-md mx-auto space-y-3">
+                  <div className="w-12 h-12 rounded-full bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
+                    <Database className="w-6 h-6" />
+                  </div>
+                  <h4 className="text-base font-bold text-white">No General Ledger Population Found</h4>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    {availablePopulations.length === 0
+                      ? 'No General Ledger population has been uploaded yet for this engagement. Upload and configure the General Ledger in Engagement Workspace → Sampling.'
+                      : 'The active population contains no transaction records.'}
+                  </p>
+                  {onNavigateToUpload && availablePopulations.length === 0 && (
+                    <button
+                      onClick={onNavigateToUpload}
+                      className="mt-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-indigo-600/20 flex items-center gap-1.5"
+                    >
+                      <Database className="w-3.5 h-3.5" /> Go to Engagement Workspace → Sampling
+                    </button>
+                  )}
+                </div>
+              </td>
+            </tr>
           ) : (
             mergedRecords.map((rec, i) => (
               <tr key={rec.id + i} className="hover:bg-slate-800/30 transition-colors group">
-                <td className="py-2 px-4 text-slate-300">{rec.date}</td>
-                <td className="py-2 px-4 font-medium text-slate-200">{rec.voucherNo}</td>
-                <td className="py-2 px-4 text-slate-400 truncate max-w-[150px]" title={rec.accountDescription}>{rec.accountDescription !== '—' ? rec.accountDescription : rec.accountNumber}</td>
-                <td className="py-2 px-4 text-slate-400 truncate max-w-[200px]" title={rec.description}>{rec.description}</td>
-                <td className="py-2 px-4 text-emerald-400/90 font-medium text-right">{formatCurrency(rec.debit, currencyMode)}</td>
-                <td className="py-2 px-4 text-rose-400/90 font-medium text-right">{formatCurrency(rec.credit, currencyMode)}</td>
+                <td className="py-2.5 px-4 text-slate-300 font-mono text-xs">{rec.date}</td>
+                <td className="py-2.5 px-4 font-mono font-medium text-slate-200 text-xs">{rec.voucherNo}</td>
+                <td className="py-2.5 px-4 text-slate-400 font-mono text-xs">{rec.accountNumber || '—'}</td>
+                <td className="py-2.5 px-4 text-slate-200 font-medium truncate max-w-[180px]" title={rec.accountDescription}>{rec.accountDescription || '—'}</td>
+                <td className="py-2.5 px-4 text-slate-300 truncate max-w-[220px]" title={`${rec.description} ${rec.narration && rec.narration !== '—' && rec.narration !== rec.description ? `- ${rec.narration}` : ''}`}>
+                  <span>{rec.description}</span>
+                  {rec.narration && rec.narration !== '—' && rec.narration !== rec.description && (
+                    <span className="block text-[10px] text-slate-500 truncate">{rec.narration}</span>
+                  )}
+                </td>
+                <td className="py-2.5 px-4 text-emerald-400 font-semibold font-mono text-right">
+                  {Number(rec.debit) > 0 ? formatCurrency(rec.debit, currencyMode) : '—'}
+                </td>
+                <td className="py-2.5 px-4 text-indigo-400 font-semibold font-mono text-right">
+                  {Number(rec.credit) > 0 ? formatCurrency(rec.credit, currencyMode) : '—'}
+                </td>
+                <td className="py-2.5 px-4 text-slate-300 font-mono text-right">
+                  {rec.balance !== undefined && rec.balance !== null && Number(rec.balance) !== 0 ? formatCurrency(rec.balance, currencyMode) : '—'}
+                </td>
                 
                 {!isDistributor && (
-                <td className="py-2 px-4 bg-slate-900/40 relative">
+                <td className="py-2.5 px-4 bg-slate-900/40 relative">
 
                   <button 
                     onClick={(e) => {
@@ -1322,7 +1305,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                 
                 </td>
                 )}
-                <td className="py-2 px-4 bg-slate-900/40">
+                <td className="py-2.5 px-4 bg-slate-900/40">
                   <div className="flex justify-center">
                     <button
                       onClick={(e) => {
@@ -1366,25 +1349,35 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
               <tr className="bg-slate-950/50 border-b border-slate-800">
                 <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">No</th>
                 <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Document ID</th>
-                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Transaction Date</th>
-                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">GL Description</th>
-                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Amount Local</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Date</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Account #</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Account Description</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Description</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Debit</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Credit</th>
                 <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-center">Testing Status</th>
                 <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-center">Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/50">
               {records.length === 0 ? (
-                <tr><td colSpan={7} className="py-12 text-center text-slate-400">No samples assigned to this category.</td></tr>
+                <tr><td colSpan={10} className="py-12 text-center text-slate-400">No samples assigned to this category.</td></tr>
               ) : (
                 records.map((rec, i) => (
                   <tr key={rec.id + i} className="hover:bg-slate-800/30 transition-colors group">
-                    <td className="py-3 px-4 text-slate-400">{i + 1}</td>
-                    <td className="py-3 px-4 font-medium text-indigo-300">{rec.testingReference || rec.voucherNo || rec.id}</td>
-                    <td className="py-3 px-4 text-slate-300">{rec.date}</td>
-                    <td className="py-3 px-4 text-slate-400 truncate max-w-[250px]" title={rec.description}>{rec.description}</td>
-                    <td className="py-3 px-4 font-medium text-slate-200 text-right">{formatCurrency(rec.debit || rec.credit, currencyMode)}</td>
-                    <td className="py-3 px-4 text-center">
+                    <td className="py-2.5 px-4 text-slate-400 font-mono text-xs">{i + 1}</td>
+                    <td className="py-2.5 px-4 font-mono font-medium text-indigo-300 text-xs">{rec.testingReference || rec.voucherNo || rec.id}</td>
+                    <td className="py-2.5 px-4 text-slate-300 font-mono text-xs">{rec.date}</td>
+                    <td className="py-2.5 px-4 text-slate-400 font-mono text-xs">{rec.accountNumber || '—'}</td>
+                    <td className="py-2.5 px-4 text-slate-200 font-medium truncate max-w-[160px]" title={rec.accountDescription}>{rec.accountDescription || '—'}</td>
+                    <td className="py-2.5 px-4 text-slate-400 truncate max-w-[200px]" title={rec.description}>{rec.description}</td>
+                    <td className="py-2.5 px-4 font-mono font-medium text-emerald-400 text-right">
+                      {Number(rec.debit) > 0 ? formatCurrency(rec.debit, currencyMode) : '—'}
+                    </td>
+                    <td className="py-2.5 px-4 font-mono font-medium text-indigo-400 text-right">
+                      {Number(rec.credit) > 0 ? formatCurrency(rec.credit, currencyMode) : '—'}
+                    </td>
+                    <td className="py-2.5 px-4 text-center">
                       <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
                         ${rec.testingStatus === 'Assigned' ? 'bg-blue-500/20 text-blue-400' : 
                           rec.testingStatus === 'Tested' ? 'bg-emerald-500/20 text-emerald-400' : 
@@ -1393,7 +1386,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                         {rec.testingStatus || 'Assigned'}
                       </span>
                     </td>
-                    <td className="py-3 px-4 text-center">
+                    <td className="py-2.5 px-4 text-center">
                       <button 
                         onClick={() => openReviewModal(rec, classification)}
                         className="text-xs font-bold bg-slate-800 hover:bg-indigo-600 text-white px-3 py-1.5 rounded transition-colors inline-flex items-center gap-1"
@@ -1410,148 +1403,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       </div>
     );
   };
-
-  const renderUploadModal = () => {
-    if (!uploadModalOpen) return null;
-
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
-        <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-          {/* Header */}
-          <div className="flex items-center justify-between p-6 border-b border-slate-800 bg-slate-900/50">
-            <div>
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <FileSpreadsheet className="w-5 h-5 text-indigo-400" /> 
-                {uploadState === 'success' ? 'Upload Complete' : 'Upload General Ledger'}
-              </h2>
-              {uploadFile && <p className="text-sm text-slate-400 mt-1 font-mono">{uploadFile.name}</p>}
-            </div>
-            {uploadState !== 'uploading' && (
-              <button onClick={() => setUploadModalOpen(false)} className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors">
-                <X className="w-5 h-5" />
-              </button>
-            )}
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-6">
-            {uploadError && (
-              <div className="mb-6 p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-start gap-3">
-                <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-                <div className="text-sm">{uploadError}</div>
-              </div>
-            )}
-
-            {uploadState === 'reading' && (
-              <div className="py-12 flex flex-col items-center justify-center text-slate-400">
-                <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                <p>Reading file...</p>
-              </div>
-            )}
-
-            {uploadState === 'mapping' && (
-              <div className="space-y-6">
-                <div className="bg-blue-500/10 border border-blue-500/20 p-4 rounded-xl">
-                  <h3 className="text-sm font-bold text-blue-400 flex items-center gap-2 mb-1">
-                    <Info className="w-4 h-4" /> Column Mapping
-                  </h3>
-                  <p className="text-xs text-blue-300">
-                    Please confirm how the columns from your uploaded file map to the required system fields. We've auto-matched these where possible.
-                  </p>
-                </div>
-                
-                <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden divide-y divide-slate-800/50">
-                  <div className="grid grid-cols-2 p-3 bg-slate-900/80">
-                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">System Field</div>
-                    <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500">Uploaded Column</div>
-                  </div>
-                  
-                  {[
-                    { id: 'date', label: 'Transaction Date *' },
-                    { id: 'voucherNo', label: 'Voucher No / Transaction ID *' },
-                    { id: 'accountNumber', label: 'Account Number' },
-                    { id: 'accountDescription', label: 'Account Description' },
-                    { id: 'description', label: 'Description * (or Narration)' },
-                    { id: 'narration', label: 'Narration / Remarks' },
-                    { id: 'debit', label: 'Debit Amount * (or Credit)' },
-                    { id: 'credit', label: 'Credit Amount * (or Debit)' },
-                    { id: 'balance', label: 'Balance' }
-                  ].map(field => (
-                    <div key={field.id} className="grid grid-cols-2 p-3 items-center hover:bg-slate-900/30">
-                      <div className="text-sm font-medium text-slate-300">{field.label}</div>
-                      <div>
-                        <select 
-                          className="w-full bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg px-3 py-2 focus:ring-1 focus:ring-indigo-500 outline-none"
-                          value={glMapping[field.id] || ''}
-                          onChange={e => setGlMapping({...glMapping, [field.id]: e.target.value})}
-                        >
-                          <option value="">-- Not Mapped --</option>
-                          {glHeaders.map(h => <option key={h} value={h}>{h}</option>)}
-                        </select>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {uploadState === 'uploading' && (
-              <div className="py-12 flex flex-col items-center justify-center text-slate-400">
-                <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-                <p>Importing population to database...</p>
-              </div>
-            )}
-
-            {uploadState === 'success' && (
-              <div className="py-8 flex flex-col items-center justify-center text-center">
-                <div className="w-16 h-16 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mb-6">
-                  <CheckCircle2 className="w-8 h-8" />
-                </div>
-                <h3 className="text-xl font-bold text-white mb-2">General Ledger Uploaded Successfully</h3>
-                <p className="text-slate-400 mb-6">
-                  Successfully imported <strong className="text-white">{uploadSuccessMessage.records.toLocaleString()}</strong> records.
-                </p>
-                <div className="inline-block bg-slate-950 border border-slate-800 rounded-lg px-4 py-2 text-sm text-slate-300 font-mono">
-                  {uploadSuccessMessage.filename}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Footer */}
-          <div className="p-4 border-t border-slate-800 bg-slate-900/50 flex items-center justify-between">
-            <div></div>
-            <div className="flex gap-3">
-              {(uploadState === 'mapping' || uploadState === 'error') && (
-                <>
-                  <button 
-                    onClick={() => setUploadModalOpen(false)}
-                    className="px-4 py-2 text-sm font-bold text-slate-300 hover:text-white transition-colors"
-                  >
-                    Cancel
-                  </button>
-                  <button 
-                    onClick={confirmUpload}
-                    className="px-6 py-2 text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors flex items-center gap-2"
-                  >
-                    <Upload className="w-4 h-4" /> Import GL
-                  </button>
-                </>
-              )}
-              {uploadState === 'success' && (
-                <button 
-                  onClick={() => setUploadModalOpen(false)}
-                  className="px-6 py-2 text-sm font-bold bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors flex items-center gap-2"
-                >
-                  Close & View Data
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
 
   const renderReviewModal = () => {
     if (!reviewRecord) return null;
@@ -1596,12 +1447,15 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
               <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
                 <Database className="w-4 h-4 text-indigo-400" /> Source GL Information
               </h3>
-              <div className="grid grid-cols-4 gap-4">
-                <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Date</div><div className="text-sm text-slate-200">{reviewRecord.date}</div></div>
-                <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Voucher No</div><div className="text-sm text-slate-200">{reviewRecord.voucherNo}</div></div>
-                <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Account</div><div className="text-sm text-slate-200">{reviewRecord.accountDescription !== '—' ? reviewRecord.accountDescription : reviewRecord.accountNumber}</div></div>
-                <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Amount Local</div><div className="text-sm font-medium text-emerald-400">{formatCurrency(reviewRecord.debit || reviewRecord.credit, currencyMode)}</div></div>
-                <div className="col-span-4"><div className="text-[10px] text-slate-500 uppercase tracking-wider">Description / Narration</div><div className="text-sm text-slate-300">{reviewRecord.description} {reviewRecord.narration !== '—' ? `- ${reviewRecord.narration}` : ''}</div></div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Date</div><div className="text-sm text-slate-200 font-mono">{reviewRecord.date}</div></div>
+                <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Voucher No</div><div className="text-sm text-slate-200 font-mono">{reviewRecord.voucherNo}</div></div>
+                <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Account #</div><div className="text-sm text-slate-200 font-mono">{reviewRecord.accountNumber || '—'}</div></div>
+                <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Account Description</div><div className="text-sm text-slate-200 font-medium">{reviewRecord.accountDescription || '—'}</div></div>
+                <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Debit</div><div className="text-sm font-medium text-emerald-400 font-mono">{formatCurrency(reviewRecord.debit, currencyMode)}</div></div>
+                <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Credit</div><div className="text-sm font-medium text-indigo-400 font-mono">{formatCurrency(reviewRecord.credit, currencyMode)}</div></div>
+                <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Balance</div><div className="text-sm font-medium text-slate-300 font-mono">{formatCurrency(reviewRecord.balance, currencyMode)}</div></div>
+                <div className="col-span-2 md:col-span-4"><div className="text-[10px] text-slate-500 uppercase tracking-wider">Description / Narration</div><div className="text-sm text-slate-300">{reviewRecord.description} {reviewRecord.narration && reviewRecord.narration !== '—' && reviewRecord.narration !== reviewRecord.description ? `- ${reviewRecord.narration}` : ''}</div></div>
               </div>
             </div>
 
@@ -1925,7 +1779,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       </div>
 
       {!isDistributor && renderReviewModal()}
-      {renderUploadModal()}
       {renderQuestionBuilderModal()}
       
       {openQuestionnaireFor && (
