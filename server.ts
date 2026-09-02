@@ -1485,15 +1485,20 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   // GET /api/sampling/transactions
   app.get('/api/sampling/transactions', authenticateRequest, async (req: any, res: any) => {
     try {
-      const { distributorId, auditId } = req.query;
+      const distributorId = req.query.distributorId || req.query.distributor;
+      const auditId = req.query.auditId || req.query.audit;
       const supabase = getSupabaseServerClient();
       let query = supabase.from('system_audit_logs').select('*').eq('event_type', 'GL_SAMPLE');
       const { data, error } = await query;
       if (error) throw error;
       
-      const transactions = data
+      const transactions = (data || [])
         .map(d => ({ dbId: d.id, ...d.details }))
-        .filter(t => t.distributorId === distributorId && t.auditId === auditId);
+        .filter(t => {
+          const matchDist = !distributorId || distributorId === 'All Distributors' || t.distributorId === distributorId;
+          const matchAudit = !auditId || auditId === 'All Audits' || t.auditId === auditId;
+          return matchDist && matchAudit;
+        });
         
       res.json({ success: true, transactions });
     } catch (err: any) {
@@ -1506,42 +1511,43 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   app.post('/api/sampling/transactions', express.json(), authenticateRequest, async (req: any, res: any) => {
     try {
       const payload = req.body;
-      const { sampleId, distributorId, auditId } = payload;
       const supabase = getSupabaseServerClient();
+      const userRole = req.headers['x-user-role'] || req.auth?.role;
       
-            // Check if it already exists
-      const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'GL_SAMPLE');
-      const found = existing?.find(d => d.details.sampleId === sampleId && d.details.distributorId === distributorId && d.details.auditId === auditId);
-      
-      if (found) {
-        // Enforce role-based permissions
-        const userRole = req.headers['x-user-role'];
-        let updatedDetails = { ...found.details, ...payload };
-        
-        if (userRole === 'Distributor') {
-           // Prevent Distributor from modifying auditor-only testing fields
-           updatedDetails.testingClassification = found.details.testingClassification;
-           updatedDetails.testingStatus = found.details.testingStatus;
-           updatedDetails.testingReference = found.details.testingReference;
-        }
-
-        // Update
-        const { error } = await supabase.from('system_audit_logs').update({
-          details: updatedDetails
-        }).eq('id', found.id);
-        if (error) throw error;
-        res.json({ success: true, message: 'Updated successfully' });
-      } else {
-        // Insert
-        const { error } = await supabase.from('system_audit_logs').insert({
-          event_type: 'GL_SAMPLE',
-          target_user_email: `${distributorId}`,
-          details: payload,
-          created_at: new Date().toISOString()
-        });
-        if (error) throw error;
-        res.json({ success: true, message: 'Inserted successfully' });
+      const items: any[] = Array.isArray(payload.transactions) ? payload.transactions : (payload.sampleId ? [payload] : []);
+      if (items.length === 0) {
+        return res.status(400).json({ success: false, error: 'No transaction items provided' });
       }
+
+      const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'GL_SAMPLE');
+      const existingList = existing || [];
+
+      for (const item of items) {
+        const { sampleId, distributorId, auditId } = item;
+        if (!sampleId) continue;
+        const found = existingList.find(d => d.details?.sampleId === sampleId && d.details?.distributorId === distributorId && d.details?.auditId === auditId);
+        
+        if (found) {
+          let updatedDetails = { ...found.details, ...item };
+          if (userRole === 'Distributor') {
+            updatedDetails.testingClassification = found.details.testingClassification;
+            updatedDetails.testingStatus = found.details.testingStatus;
+            updatedDetails.testingReference = found.details.testingReference;
+          }
+          await supabase.from('system_audit_logs').update({
+            details: updatedDetails
+          }).eq('id', found.id);
+        } else {
+          await supabase.from('system_audit_logs').insert({
+            event_type: 'GL_SAMPLE',
+            target_user_email: `${distributorId || 'distributor'}`,
+            details: item,
+            created_at: new Date().toISOString()
+          });
+        }
+      }
+
+      res.json({ success: true, message: 'Saved successfully', count: items.length });
     } catch (err: any) {
       console.error(err);
       res.status(500).json({ success: false, error: err.message });
@@ -1812,7 +1818,8 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
                  // Inherited source classification based on uploader identity
                  source: (file.uploadedBy && file.uploadedBy.toLowerCase().includes('auditor')) ? 'Auditor Upload' : 'Distributor Upload',
                  samplingEnabled: file.samplingEnabled || false,
-                 samplingStatus: file.samplingStatus || undefined
+                 samplingStatus: file.samplingStatus || undefined,
+                 glMapping: file.glMapping || file.mappedData || {}
                });
                existingFileIds.add(gId);
             });

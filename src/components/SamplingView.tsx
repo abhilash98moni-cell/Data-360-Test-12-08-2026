@@ -121,6 +121,10 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   
   const [populationRecords, setPopulationRecords] = useState<any[]>([]);
   const [assignedSamples, setAssignedSamples] = useState<any[]>([]);
+  const [classificationChanges, setClassificationChanges] = useState<Record<string, string[]>>({});
+  const [isSavingClassifications, setIsSavingClassifications] = useState(false);
+  const [classificationSaveSuccess, setClassificationSaveSuccess] = useState(false);
+  const [classificationSaveError, setClassificationSaveError] = useState<string | null>(null);
   
   const [reviewRecord, setReviewRecord] = useState<any | null>(null);
   const [reviewAnswers, setReviewAnswers] = useState<Record<string, { result: string, comment: string }>>({});
@@ -848,55 +852,116 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
     }
   };
 
-  const handleClassify = async (record: any, newClassifications: string[]) => {
-    const isClearing = newClassifications.length === 0 || newClassifications.includes('N/A');
-    const finalClassifications = isClearing ? (newClassifications.includes('N/A') ? ['N/A'] : []) : newClassifications;
+  const handleClassificationToggle = (rec: any, opt: string) => {
+    const current = classificationChanges[rec.id] !== undefined
+      ? classificationChanges[rec.id]
+      : (Array.isArray(rec.testingClassification) ? rec.testingClassification : []);
     
-    let refPrefix = '';
-    if (!isClearing && finalClassifications.length > 0) {
-       const first = finalClassifications[0];
-       if (first === '3rd Party Disbursement') refPrefix = '3PD';
-       else if (first === 'Employee Disbursement & Reimbursement') refPrefix = 'EMP';
-       else if (first === 'Sales Testing') refPrefix = 'SAL';
+    let next: string[] = [];
+    if (opt === 'N/A') {
+      next = current.includes('N/A') ? [] : ['N/A'];
+    } else {
+      const withoutNA = current.filter(c => c !== 'N/A' && c !== 'Not Selected' && c !== 'Pending Classification');
+      if (withoutNA.includes(opt)) {
+        next = withoutNA.filter(c => c !== opt);
+      } else {
+        next = [...withoutNA, opt];
+      }
     }
-    
-    const newRef = isClearing ? '' : (record.testingReference || `${refPrefix}-${record.id}`);
-    
-    const payload = {
-       sampleId: record.id,
-       distributorId: selectedDistributor,
-       auditId: selectedAuditFilter || 'eng-101',
-       fileId: selectedPopulation?.id || 'unknown',
-       testingClassification: finalClassifications,
-       testingStatus: isClearing ? 'Pending Classification' : (record.testingStatus === 'Pending Classification' ? 'Assigned' : record.testingStatus),
-       testingReference: newRef,
-       originalRow: record.originalRow,
-       date: record.date,
-       voucherNo: record.voucherNo,
-       accountNumber: record.accountNumber,
-       accountDescription: record.accountDescription,
-       description: record.description,
-       narration: record.narration,
-       debit: record.debit,
-       credit: record.credit,
-       balance: record.balance
-    };
-    
+
+    setClassificationChanges(prev => ({
+      ...prev,
+      [rec.id]: next
+    }));
+    setClassificationSaveSuccess(false);
+    setClassificationSaveError(null);
+  };
+
+  const handleClearClassification = (rec: any) => {
+    setClassificationChanges(prev => ({
+      ...prev,
+      [rec.id]: []
+    }));
+    setClassificationSaveSuccess(false);
+    setClassificationSaveError(null);
+  };
+
+  const handleSaveAllClassifications = async () => {
+    const changedIds = Object.keys(classificationChanges);
+    if (changedIds.length === 0) return;
+
+    setIsSavingClassifications(true);
+    setClassificationSaveSuccess(false);
+    setClassificationSaveError(null);
+
+    const transactionsToSave = changedIds.map(id => {
+      const record = populationRecords.find(r => r.id === id) || mergedRecords.find(r => r.id === id) || {};
+      const newClassifications = classificationChanges[id] || [];
+      const isClearing = newClassifications.length === 0;
+      const isNA = newClassifications.includes('N/A');
+
+      let refPrefix = '';
+      if (!isClearing && !isNA && newClassifications.length > 0) {
+        const first = newClassifications[0];
+        if (first === '3rd Party Disbursement') refPrefix = '3PD';
+        else if (first === 'Employee Disbursement & Reimbursement') refPrefix = 'EMP';
+        else if (first === 'Sales Testing') refPrefix = 'SAL';
+      }
+
+      const existingSample = assignedSamples.find(s => 
+        s.sampleId === id || 
+        (s.voucherNo && record.voucherNo && s.voucherNo !== '—' && s.voucherNo === record.voucherNo)
+      );
+      const newRef = (isClearing || isNA) ? '' : (existingSample?.testingReference || `${refPrefix}-${record.voucherNo !== '—' && record.voucherNo ? record.voucherNo : id}`);
+
+      return {
+        sampleId: id,
+        distributorId: selectedDistributor,
+        auditId: selectedAuditFilter || 'eng-101',
+        fileId: selectedPopulation?.id || selectedPopulation?.googleDriveFileId || 'unknown',
+        testingClassification: newClassifications,
+        testingStatus: isClearing ? 'Pending Classification' : (isNA ? 'N/A' : (existingSample?.testingStatus && existingSample.testingStatus !== 'Pending Classification' ? existingSample.testingStatus : 'Assigned')),
+        testingReference: newRef,
+        originalRow: record.originalRow,
+        date: record.date,
+        voucherNo: record.voucherNo,
+        accountNumber: record.accountNumber,
+        accountDescription: record.accountDescription,
+        description: record.description,
+        narration: record.narration,
+        debit: record.debit,
+        credit: record.credit,
+        balance: record.balance
+      };
+    });
+
     try {
       const res = await fetch('/api/sampling/transactions', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'x-user-email': currentUser?.email || '',
-          'x-user-role': currentUser?.role || ''
+          'x-user-role': currentUser?.role || '',
+          'x-user-organization': currentUser?.organization || ''
         },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ transactions: transactionsToSave })
       });
-      if (res.ok) {
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setClassificationChanges({});
+        setClassificationSaveSuccess(true);
         await fetchAssignedSamples();
+        setTimeout(() => {
+          setClassificationSaveSuccess(false);
+        }, 4000);
+      } else {
+        setClassificationSaveError(data.error || 'Failed to save classifications');
       }
-    } catch (err) {
-      console.error("Failed to classify record", err);
+    } catch (err: any) {
+      console.error("Failed to save classifications", err);
+      setClassificationSaveError(err.message || 'Failed to save classifications');
+    } finally {
+      setIsSavingClassifications(false);
     }
   };
 
@@ -910,27 +975,43 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
 
   const mergedRecords = useMemo(() => {
     return populationRecords.map(pop => {
-      const dbSample = assignedSamples.find(s => s.sampleId === pop.id);
-      if (dbSample) {
+      const dbSample = assignedSamples.find(s => 
+        s.sampleId === pop.id || 
+        (s.voucherNo && pop.voucherNo && s.voucherNo !== '—' && s.voucherNo === pop.voucherNo && s.date === pop.date)
+      );
+
+      let currentClassifications: string[] = [];
+      if (classificationChanges[pop.id] !== undefined) {
+        currentClassifications = classificationChanges[pop.id];
+      } else if (dbSample) {
         let tc = dbSample.testingClassification;
-        let parsedClassifications = [];
         if (Array.isArray(tc)) {
-            parsedClassifications = tc;
+          currentClassifications = tc;
         } else if (typeof tc === 'string') {
-            if (tc === 'Not Selected' || tc === '' || tc === 'Pending Classification') {
-                parsedClassifications = [];
-            } else {
-                parsedClassifications = [tc];
-            }
+          if (tc === 'Not Selected' || tc === '' || tc === 'Pending Classification') {
+            currentClassifications = [];
+          } else {
+            currentClassifications = [tc];
+          }
         }
-        return { ...pop, ...dbSample, testingClassification: parsedClassifications, isAssigned: true };
+      }
+
+      const cleanClassifications = currentClassifications.filter(c => c && c !== 'Not Selected' && c !== 'Pending Classification');
+
+      if (dbSample) {
+        return { 
+          ...pop, 
+          ...dbSample, 
+          testingClassification: cleanClassifications, 
+          isAssigned: cleanClassifications.length > 0 && !cleanClassifications.includes('N/A')
+        };
       }
       return { 
         ...pop, 
-        testingClassification: [], 
-        testingStatus: 'Pending Classification',
+        testingClassification: cleanClassifications, 
+        testingStatus: cleanClassifications.length > 0 ? (cleanClassifications.includes('N/A') ? 'N/A' : 'Assigned') : 'Pending Classification',
         testingReference: '',
-        isAssigned: false 
+        isAssigned: cleanClassifications.length > 0 && !cleanClassifications.includes('N/A') 
       };
     }).filter(rec => {
         if (!searchQuery) return true;
@@ -938,10 +1019,11 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         return (
             (rec.voucherNo || '').toLowerCase().includes(q) ||
             (rec.description || '').toLowerCase().includes(q) ||
-            (rec.testingReference || '').toLowerCase().includes(q)
+            (rec.testingReference || '').toLowerCase().includes(q) ||
+            (rec.accountDescription || '').toLowerCase().includes(q)
         );
     });
-  }, [populationRecords, assignedSamples, searchQuery]);
+  }, [populationRecords, assignedSamples, classificationChanges, searchQuery]);
 
   const openReviewModal = (record: any, classificationContext?: string) => {
     setReviewRecord({ ...record, _activeClassificationContext: classificationContext || (Array.isArray(record.testingClassification) ? record.testingClassification[0] : record.testingClassification) });
@@ -997,8 +1079,8 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         setSaveSuccess(true);
         await fetchAssignedSamples();
         setTimeout(() => {
-           setReviewRecord(null);
-           setSaveSuccess(false);
+            setReviewRecord(null);
+            setSaveSuccess(false);
         }, 1000);
       }
     } catch (err) {
@@ -1011,9 +1093,44 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   // Sub-Tab Rendering logic
   const renderGLTab = () => (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="text-lg font-bold text-white flex items-center gap-2"><Database className="w-5 h-5 text-indigo-400" /> General Ledger Transactions</h3>
-        <div className="flex gap-3">
+      <div className="flex items-center justify-between flex-wrap gap-4">
+        <div>
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <Database className="w-5 h-5 text-indigo-400" /> General Ledger Transactions
+          </h3>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Select Testing Classifications for each transaction, then click &quot;Save Changes&quot;.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 flex-wrap">
+          {classificationSaveSuccess && (
+            <span className="text-emerald-400 text-xs font-semibold flex items-center gap-1.5 bg-emerald-950/60 border border-emerald-800 px-3 py-2 rounded-xl">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Testing Classifications saved successfully!
+            </span>
+          )}
+          {classificationSaveError && (
+            <span className="text-rose-400 text-xs font-semibold flex items-center gap-1.5 bg-rose-950/60 border border-rose-800 px-3 py-2 rounded-xl">
+              <AlertTriangle className="w-4 h-4 text-rose-400" /> {classificationSaveError}
+            </span>
+          )}
+          {!isDistributor && !isEvidenceManagementMode && (
+            <button
+              onClick={handleSaveAllClassifications}
+              disabled={isSavingClassifications || Object.keys(classificationChanges).length === 0}
+              className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all shadow-lg active:scale-95 ${
+                Object.keys(classificationChanges).length > 0
+                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/20 ring-2 ring-emerald-400/30'
+                  : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-300 border border-slate-700 disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+            >
+              <Save className="w-4 h-4" />
+              {isSavingClassifications
+                ? 'Saving Changes...'
+                : Object.keys(classificationChanges).length > 0
+                ? `Save Changes (${Object.keys(classificationChanges).length})`
+                : 'Save Changes'}
+            </button>
+          )}
           <button 
             onClick={() => document.getElementById('gl-upload-input')?.click()}
             className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-500/20 active:scale-95"
@@ -1065,7 +1182,13 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                       e.stopPropagation();
                       setOpenClassificationId(openClassificationId === rec.id ? null : rec.id);
                     }}
-                    className="flex items-center justify-between w-48 bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded px-3 py-1.5 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors hover:border-slate-500"
+                    className={`flex items-center justify-between w-48 bg-slate-950 border text-xs rounded px-3 py-1.5 focus:ring-1 focus:ring-indigo-500 outline-none transition-colors ${
+                      classificationChanges[rec.id] !== undefined
+                        ? 'border-amber-500/70 text-amber-200'
+                        : rec.testingClassification.length > 0
+                        ? 'border-slate-700 text-slate-200'
+                        : 'border-slate-800 text-slate-400 hover:border-slate-600'
+                    }`}
                   >
                     <span className="truncate">
                       {rec.testingClassification.length === 0 ? 'Not Selected' :
@@ -1080,8 +1203,11 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                       style={{ right: '0', top: '100%' }}
                       onClick={(e) => e.stopPropagation()}
                     >
-                      <div className="p-3 border-b border-slate-700 font-bold text-slate-300 text-xs uppercase tracking-wider">
-                        Testing Classification
+                      <div className="p-3 border-b border-slate-700 font-bold text-slate-300 text-xs uppercase tracking-wider flex items-center justify-between">
+                        <span>Testing Classification</span>
+                        {classificationChanges[rec.id] !== undefined && (
+                          <span className="text-[10px] text-amber-400 font-normal">Unsaved</span>
+                        )}
                       </div>
                       <div className="p-3 space-y-3">
                         {['3rd Party Disbursement', 'Employee Disbursement & Reimbursement', 'Sales Testing', 'N/A'].map(opt => {
@@ -1091,30 +1217,17 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                               <input 
                                 type="checkbox" 
                                 checked={isSelected}
-                                onChange={() => {
-                                  let newClassifications = [...rec.testingClassification];
-                                  if (opt === 'N/A') {
-                                    newClassifications = isSelected ? [] : ['N/A'];
-                                  } else {
-                                    if (newClassifications.includes('N/A')) newClassifications = [];
-                                    if (isSelected) {
-                                      newClassifications = newClassifications.filter(c => c !== opt);
-                                    } else {
-                                      newClassifications.push(opt);
-                                    }
-                                  }
-                                  handleClassify(rec, newClassifications);
-                                }}
+                                onChange={() => handleClassificationToggle(rec, opt)}
                                 className="mt-0.5 shrink-0 rounded border-slate-600 text-indigo-500 focus:ring-indigo-500 bg-slate-900 w-4 h-4 cursor-pointer"
                               />
                               <span className={`text-xs leading-tight ${isSelected ? 'text-white font-medium' : 'text-slate-300 group-hover:text-white'}`}>{opt}</span>
                             </label>
-                          )
+                          );
                         })}
                       </div>
                       <div className="p-2 border-t border-slate-700 bg-slate-900/50 flex justify-between">
                          <button 
-                           onClick={() => handleClassify(rec, [])}
+                           onClick={() => handleClearClassification(rec)}
                            className="text-xs px-2 py-1 text-slate-400 hover:text-white transition-colors"
                          >
                            Clear
@@ -1158,56 +1271,67 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
     const records = mergedRecords.filter(r => Array.isArray(r.testingClassification) && r.testingClassification.includes(classification));
     
     return (
-      <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto shadow-xl">
-        <table className="w-full text-left border-collapse whitespace-nowrap text-sm">
-          <thead>
-            <tr className="bg-slate-950/50 border-b border-slate-800">
-              <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">No</th>
-              <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Document ID</th>
-              <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Transaction Date</th>
-              <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">GL Description</th>
-              <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Amount Local</th>
-              <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-center">Testing Status</th>
-              <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-center">Action</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-800/50">
-            {records.length === 0 ? (
-              <tr><td colSpan={7} className="py-12 text-center text-slate-400">No samples assigned to this category.</td></tr>
-            ) : (
-              records.map((rec, i) => (
-                <tr key={rec.id} className="hover:bg-slate-800/30 transition-colors group">
-                  <td className="py-3 px-4 text-slate-400">{i + 1}</td>
-                  <td className="py-3 px-4 font-medium text-indigo-300">{rec.testingReference}</td>
-                  <td className="py-3 px-4 text-slate-300">{rec.date}</td>
-                  <td className="py-3 px-4 text-slate-400 truncate max-w-[250px]" title={rec.description}>{rec.description}</td>
-                  <td className="py-3 px-4 font-medium text-slate-200 text-right">{formatCurrency(rec.debit || rec.credit, currencyMode)}</td>
-                  <td className="py-3 px-4 text-center">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
-                      ${rec.testingStatus === 'Assigned' ? 'bg-blue-500/20 text-blue-400' : 
-                        rec.testingStatus === 'Tested' ? 'bg-emerald-500/20 text-emerald-400' : 
-                        'bg-rose-500/20 text-rose-400'}`}>
-                      {rec.testingStatus}
-                    </span>
-                  </td>
-                  <td className="py-3 px-4 text-center">
-                    <button 
-                      onClick={() => openReviewModal(rec)}
-                      className="text-xs font-bold bg-slate-800 hover:bg-indigo-600 text-white px-3 py-1.5 rounded transition-colors inline-flex items-center gap-1"
-                    >
-                      <Edit className="w-3 h-3" /> Review
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <FileText className="w-5 h-5 text-indigo-400" /> {classification}
+            </h3>
+            <p className="text-xs text-slate-400 mt-0.5">
+              {records.length} transaction{records.length === 1 ? '' : 's'} assigned to this testing category.
+            </p>
+          </div>
+        </div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-x-auto shadow-xl">
+          <table className="w-full text-left border-collapse whitespace-nowrap text-sm">
+            <thead>
+              <tr className="bg-slate-950/50 border-b border-slate-800">
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">No</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Document ID</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Transaction Date</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">GL Description</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Amount Local</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-center">Testing Status</th>
+                <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-center">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/50">
+              {records.length === 0 ? (
+                <tr><td colSpan={7} className="py-12 text-center text-slate-400">No samples assigned to this category.</td></tr>
+              ) : (
+                records.map((rec, i) => (
+                  <tr key={rec.id + i} className="hover:bg-slate-800/30 transition-colors group">
+                    <td className="py-3 px-4 text-slate-400">{i + 1}</td>
+                    <td className="py-3 px-4 font-medium text-indigo-300">{rec.testingReference || rec.voucherNo || rec.id}</td>
+                    <td className="py-3 px-4 text-slate-300">{rec.date}</td>
+                    <td className="py-3 px-4 text-slate-400 truncate max-w-[250px]" title={rec.description}>{rec.description}</td>
+                    <td className="py-3 px-4 font-medium text-slate-200 text-right">{formatCurrency(rec.debit || rec.credit, currencyMode)}</td>
+                    <td className="py-3 px-4 text-center">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider
+                        ${rec.testingStatus === 'Assigned' ? 'bg-blue-500/20 text-blue-400' : 
+                          rec.testingStatus === 'Tested' ? 'bg-emerald-500/20 text-emerald-400' : 
+                          rec.testingStatus === 'Exception' ? 'bg-rose-500/20 text-rose-400' :
+                          'bg-slate-700/50 text-slate-300'}`}>
+                        {rec.testingStatus || 'Assigned'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      <button 
+                        onClick={() => openReviewModal(rec, classification)}
+                        className="text-xs font-bold bg-slate-800 hover:bg-indigo-600 text-white px-3 py-1.5 rounded transition-colors inline-flex items-center gap-1"
+                      >
+                        <Edit className="w-3 h-3" /> Review
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     );
   };
-
-  
 
   const renderUploadModal = () => {
     if (!uploadModalOpen) return null;
