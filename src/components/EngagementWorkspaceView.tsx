@@ -138,7 +138,7 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
           selectedAuditFilter={selectedAuditFilter}
           currentUser={currentUser}
           currencyMode={currencyMode}
-          isEvidenceManagementMode={true}
+          isEvidenceManagementMode={false}
         />
       )}
       {activeSubTab === 'iir' && (

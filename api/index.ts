@@ -856,8 +856,8 @@ app.post('/api/sampling/upload', upload.single('file'), async (req: any, res: an
 // Sampling workspace state endpoints
 app.get('/api/sampling/state', async (req: any, res: any) => {
   try {
-    const distributorId = req.query.distributorId || req.query.distributor || 'Midwest Trading Co.';
-    const auditId = req.query.auditId || req.query.audit || 'eng-101';
+    const distributorId = req.query.distributorId || req.query.distributor;
+    const auditId = req.query.auditId || req.query.audit;
     const supabase = getSupabaseServerClient();
     
     const { data, error } = await supabase
@@ -868,15 +868,26 @@ app.get('/api/sampling/state', async (req: any, res: any) => {
 
     if (error) throw error;
 
-    const stateItem = (data || []).find(d => {
-      const details = d.details || {};
-      return (
-        (!distributorId || distributorId === 'All Distributors' || details.distributorId === distributorId) &&
-        (!auditId || auditId === 'All Audits' || details.auditId === auditId)
-      );
+    let stateItem = (data || []).find(d => {
+      let details = d.details || {};
+      if (typeof details === 'string') {
+        try { details = JSON.parse(details); } catch(e) {}
+      }
+      const matchDist = !distributorId || distributorId === 'All Distributors' || details.distributorId === distributorId;
+      const matchAudit = !auditId || auditId === 'All Audits' || details.auditId === auditId;
+      return matchDist && matchAudit;
     });
 
-    res.json({ success: true, state: stateItem ? stateItem.details : null });
+    if (!stateItem && (data || []).length > 0) {
+      stateItem = data[0];
+    }
+
+    let stateDetails = stateItem ? stateItem.details : null;
+    if (typeof stateDetails === 'string') {
+      try { stateDetails = JSON.parse(stateDetails); } catch(e) {}
+    }
+
+    res.json({ success: true, state: stateDetails });
   } catch (err: any) {
     console.error('Error fetching sampling state:', err);
     res.status(500).json({ success: false, error: err.message });
@@ -895,7 +906,10 @@ app.post('/api/sampling/state', express.json(), async (req: any, res: any) => {
       .eq('event_type', 'SAMPLING_STATE');
 
     const found = (existing || []).find(d => {
-      const details = d.details || {};
+      let details = d.details || {};
+      if (typeof details === 'string') {
+        try { details = JSON.parse(details); } catch(e) {}
+      }
       return (
         details.distributorId === distributorId &&
         details.auditId === auditId
@@ -913,9 +927,13 @@ app.post('/api/sampling/state', express.json(), async (req: any, res: any) => {
     };
 
     if (found) {
+      let currentDet = found.details;
+      if (typeof currentDet === 'string') {
+        try { currentDet = JSON.parse(currentDet); } catch(e) {}
+      }
       await supabase
         .from('system_audit_logs')
-        .update({ details: { ...found.details, ...stateDetails } })
+        .update({ details: { ...currentDet, ...stateDetails } })
         .eq('id', found.id);
     } else {
       await supabase.from('system_audit_logs').insert({
@@ -949,42 +967,55 @@ app.get('/api/sampling/populations', async (req: any, res: any) => {
 
     if (error) throw error;
 
-    const populations = (data || [])
+    const allPopulations = (data || [])
       .map(row => {
-        const r = row.details || {};
+        let r = row.details || {};
+        if (typeof r === 'string') {
+          try { r = JSON.parse(r); } catch(e) {}
+        }
         return {
           id: row.id,
-          clientName: r.client_name || 'Apex Electronics Corp',
-          auditId: r.audit_id || 'eng-101',
-          auditCode: r.audit_code || 'AUD-2026-001',
-          distributorName: r.distributor_name,
-          requestRef: r.requirement_ref || 'SAMPLING',
-          requestTitle: r.requirement_title || 'General Ledger Population',
+          clientName: r.client_name || r.clientName || 'Apex Electronics Corp',
+          auditId: r.audit_id || r.auditId || 'eng-101',
+          auditCode: r.audit_code || r.auditCode || 'AUD-2026-001',
+          distributorName: r.distributor_name || r.distributorName || 'Midwest Trading Co.',
+          requestRef: r.requirement_ref || r.requestRef || 'SAMPLING',
+          requestTitle: r.requirement_title || r.requestTitle || 'General Ledger Population',
           section: r.section || 'Sampling',
-          fileName: r.file_name,
-          fileSizeMB: Number(r.file_size_mb || 1.0),
-          fileType: r.file_type || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          googleDriveFileId: r.google_drive_file_id || r.storage_path,
-          uploadedBy: r.uploaded_by || 'Auditor User',
-          uploadedDate: r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : new Date().toLocaleString(),
+          fileName: r.file_name || r.fileName,
+          fileSizeMB: Number(r.file_size_mb || r.fileSizeMB || 1.0),
+          fileType: r.file_type || r.fileType || 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+          googleDriveFileId: r.google_drive_file_id || r.googleDriveFileId || r.storage_path || row.id,
+          uploadedBy: r.uploaded_by || r.uploadedBy || 'Auditor User',
+          uploadedDate: r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : (r.uploadedDate || new Date().toLocaleString()),
           status: r.review_status || r.status || 'AVAILABLE',
           samplingEnabled: r.samplingEnabled ?? true,
           samplingStatus: r.samplingStatus || 'ADDED',
-          documentUsage: Array.isArray(r.document_usage) ? r.document_usage : ['SAMPLING_POPULATION'],
-          glMapping: r.glMapping,
-          recordCount: r.records_count || (Array.isArray(r.parsed_records) ? r.parsed_records.length : 0),
+          documentUsage: Array.isArray(r.document_usage) ? r.document_usage : (Array.isArray(r.documentUsage) ? r.documentUsage : ['SAMPLING_POPULATION']),
+          glMapping: r.glMapping || r.gl_mapping,
+          recordCount: r.records_count || r.recordCount || (Array.isArray(r.parsed_records) ? r.parsed_records.length : 0),
           hasParsedRecords: Array.isArray(r.parsed_records) && r.parsed_records.length > 0
         };
       })
       .filter(p => {
         const usage = p.documentUsage || [];
-        const hasSampling = p.samplingEnabled === true || usage.includes('SAMPLING_POPULATION') || p.requestRef === 'SAMPLING';
-        const matchDist = !distributorId || distributorId === 'All Distributors' || p.distributorName === distributorId;
-        const matchAudit = !auditId || auditId === 'All Audits' || p.auditId === auditId;
-        const matchClient = !client || client === 'All Clients' || p.clientName === client;
+        const hasSampling = p.samplingEnabled === true || usage.includes('SAMPLING_POPULATION') || p.requestRef === 'SAMPLING' || p.section === 'Sampling';
         const isTemplate = (p.fileName || '').toLowerCase().includes('template') || (p.fileName || '').toLowerCase().includes('questionnaire');
-        return hasSampling && matchDist && matchAudit && matchClient && !isTemplate;
+        return hasSampling && !isTemplate;
       });
+
+    // Primary filter with distributor and audit
+    let populations = allPopulations.filter(p => {
+      const matchDist = !distributorId || distributorId === 'All Distributors' || p.distributorName === distributorId;
+      const matchAudit = !auditId || auditId === 'All Audits' || p.auditId === auditId;
+      const matchClient = !client || client === 'All Clients' || p.clientName === client;
+      return matchDist && matchAudit && matchClient;
+    });
+
+    // Fallback: If no exact match, return all valid sampling populations so user never loses their GL file
+    if (populations.length === 0 && allPopulations.length > 0) {
+      populations = allPopulations;
+    }
 
     res.json({ success: true, populations });
   } catch (err: any) {
@@ -1012,16 +1043,22 @@ app.get('/api/sampling/population-records', async (req: any, res: any) => {
 
     if (fileId) {
       targetRow = (data || []).find(row => {
-        const d = row.details || {};
+        let d = row.details || {};
+        if (typeof d === 'string') {
+          try { d = JSON.parse(d); } catch(e) {}
+        }
         return row.id === fileId || d.google_drive_file_id === fileId || d.storage_path === fileId || d.file_name === fileId;
       });
     }
 
     if (!targetRow && (data || []).length > 0) {
       targetRow = (data || []).find(row => {
-        const d = row.details || {};
-        const isMatch = (!distributorId || distributorId === 'All Distributors' || d.distributor_name === distributorId) &&
-                        (!auditId || auditId === 'All Audits' || d.audit_id === auditId);
+        let d = row.details || {};
+        if (typeof d === 'string') {
+          try { d = JSON.parse(d); } catch(e) {}
+        }
+        const isMatch = (!distributorId || distributorId === 'All Distributors' || d.distributor_name === distributorId || d.distributorName === distributorId) &&
+                        (!auditId || auditId === 'All Audits' || d.audit_id === auditId || d.auditId === auditId);
         const hasSampling = d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING';
         return isMatch && hasSampling;
       }) || (data || [])[0];
@@ -1031,14 +1068,17 @@ app.get('/api/sampling/population-records', async (req: any, res: any) => {
       return res.json({ success: true, records: [], glMapping: {}, fileId: null, fileName: null });
     }
 
-    const details = targetRow.details || {};
+    let details = targetRow.details || {};
+    if (typeof details === 'string') {
+      try { details = JSON.parse(details); } catch(e) {}
+    }
     
     if (Array.isArray(details.parsed_records) && details.parsed_records.length > 0) {
       return res.json({
         success: true,
         fileId: details.google_drive_file_id || targetRow.id,
         fileName: details.file_name,
-        glMapping: details.glMapping || {},
+        glMapping: details.glMapping || details.gl_mapping || {},
         records: details.parsed_records,
         recordCount: details.parsed_records.length
       });
@@ -1048,7 +1088,7 @@ app.get('/api/sampling/population-records', async (req: any, res: any) => {
       success: true,
       fileId: details.google_drive_file_id || targetRow.id,
       fileName: details.file_name,
-      glMapping: details.glMapping || {},
+      glMapping: details.glMapping || details.gl_mapping || {},
       records: [],
       recordCount: 0
     });
@@ -1091,7 +1131,13 @@ app.get('/api/sampling/transactions', async (req: any, res: any) => {
     if (error) throw error;
     
     const transactions = (data || [])
-      .map(d => ({ dbId: d.id, ...d.details }))
+      .map(d => {
+        let details = d.details;
+        if (typeof details === 'string') {
+          try { details = JSON.parse(details); } catch(e) {}
+        }
+        return { dbId: d.id, ...details };
+      })
       .filter(t => {
         const matchDist = !distributorId || distributorId === 'All Distributors' || t.distributorId === distributorId;
         const matchAudit = !auditId || auditId === 'All Audits' || t.auditId === auditId;
@@ -1106,7 +1152,7 @@ app.get('/api/sampling/transactions', async (req: any, res: any) => {
 
 const handleSaveSamplingTransactionsApi = async (req: any, res: any) => {
   try {
-    const payload = req.body;
+    const payload = req.body || {};
     const supabase = getSupabaseServerClient();
     const userRole = req.headers['x-user-role'];
     
@@ -1125,11 +1171,17 @@ const handleSaveSamplingTransactionsApi = async (req: any, res: any) => {
       const audId = item.auditId || auditId;
       if (!sampleId) continue;
 
-      const found = existingList.find(d => 
-        d.details?.sampleId === sampleId && 
-        d.details?.distributorId === distId && 
-        d.details?.auditId === audId
-      );
+      const found = existingList.find(d => {
+        let det = d.details;
+        if (typeof det === 'string') {
+          try { det = JSON.parse(det); } catch(e) {}
+        }
+        return (
+          (det?.sampleId === sampleId || det?.id === sampleId || (det?.voucherNo && item.voucherNo && det.voucherNo !== '—' && det.voucherNo === item.voucherNo)) &&
+          (!distId || distId === 'All Distributors' || det?.distributorId === distId) &&
+          (!audId || audId === 'All Audits' || det?.auditId === audId)
+        );
+      });
       
       const cleanItem = {
         ...item,
@@ -1140,11 +1192,15 @@ const handleSaveSamplingTransactionsApi = async (req: any, res: any) => {
       };
 
       if (found) {
-        let updatedDetails = { ...found.details, ...cleanItem };
+        let currentDetails = found.details;
+        if (typeof currentDetails === 'string') {
+          try { currentDetails = JSON.parse(currentDetails); } catch(e) {}
+        }
+        let updatedDetails = { ...currentDetails, ...cleanItem };
         if (userRole === 'Distributor') {
-          updatedDetails.testingClassification = found.details.testingClassification;
-          updatedDetails.testingStatus = found.details.testingStatus;
-          updatedDetails.testingReference = found.details.testingReference;
+          updatedDetails.testingClassification = currentDetails.testingClassification;
+          updatedDetails.testingStatus = currentDetails.testingStatus;
+          updatedDetails.testingReference = currentDetails.testingReference;
         }
         await supabase.from('system_audit_logs').update({
           details: updatedDetails
@@ -1159,6 +1215,51 @@ const handleSaveSamplingTransactionsApi = async (req: any, res: any) => {
       }
     }
 
+    // Sync with EVIDENCE_FILE's parsed_records so population-records endpoint returns updated state immediately
+    const { data: evidenceRows } = await supabase
+      .from('system_audit_logs')
+      .select('*')
+      .eq('event_type', 'EVIDENCE_FILE');
+
+    if (evidenceRows && evidenceRows.length > 0) {
+      for (const evRow of evidenceRows) {
+        let evDetails = evRow.details;
+        if (typeof evDetails === 'string') {
+          try { evDetails = JSON.parse(evDetails); } catch(e) {}
+        }
+        if (!evDetails) continue;
+
+        const isTargetFile = (activePopulationId && (evRow.id === activePopulationId || evDetails.google_drive_file_id === activePopulationId || evDetails.storage_path === activePopulationId)) ||
+          (evDetails.distributor_name === distributorId && evDetails.audit_id === auditId);
+
+        if (isTargetFile && Array.isArray(evDetails.parsed_records)) {
+          let updated = false;
+          const updatedRecords = evDetails.parsed_records.map((rec: any) => {
+            const matchItem = items.find(it => (it.sampleId === rec.id || it.id === rec.id || (it.voucherNo && rec.voucherNo && it.voucherNo !== '—' && it.voucherNo === rec.voucherNo)));
+            if (matchItem) {
+              updated = true;
+              return {
+                ...rec,
+                testingClassification: matchItem.testingClassification,
+                testingStatus: matchItem.testingStatus,
+                testingReference: matchItem.testingReference,
+                attributeResults: matchItem.attributeResults,
+                evidenceFields: matchItem.evidenceFields,
+                exceptions: matchItem.exceptions
+              };
+            }
+            return rec;
+          });
+
+          if (updated) {
+            await supabase.from('system_audit_logs').update({
+              details: { ...evDetails, parsed_records: updatedRecords }
+            }).eq('id', evRow.id);
+          }
+        }
+      }
+    }
+
     if (activePopulationId) {
       const { data: existingState } = await supabase
         .from('system_audit_logs')
@@ -1166,7 +1267,10 @@ const handleSaveSamplingTransactionsApi = async (req: any, res: any) => {
         .eq('event_type', 'SAMPLING_STATE');
 
       const foundState = (existingState || []).find(d => {
-        const details = d.details || {};
+        let details = d.details || {};
+        if (typeof details === 'string') {
+          try { details = JSON.parse(details); } catch(e) {}
+        }
         return details.distributorId === distributorId && details.auditId === auditId;
       });
 
@@ -1179,9 +1283,13 @@ const handleSaveSamplingTransactionsApi = async (req: any, res: any) => {
       };
 
       if (foundState) {
+        let currentDetails = foundState.details;
+        if (typeof currentDetails === 'string') {
+          try { currentDetails = JSON.parse(currentDetails); } catch(e) {}
+        }
         await supabase
           .from('system_audit_logs')
-          .update({ details: { ...foundState.details, ...stateDetails } })
+          .update({ details: { ...currentDetails, ...stateDetails } })
           .eq('id', foundState.id);
       } else {
         await supabase.from('system_audit_logs').insert({

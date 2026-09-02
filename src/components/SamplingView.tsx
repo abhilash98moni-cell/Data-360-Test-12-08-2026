@@ -1035,7 +1035,8 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
     return populationRecords.map(pop => {
       const dbSample = assignedSamples.find(s => 
         s.sampleId === pop.id || 
-        (s.voucherNo && pop.voucherNo && s.voucherNo !== '—' && s.voucherNo === pop.voucherNo && s.date === pop.date)
+        s.id === pop.id ||
+        (s.voucherNo && pop.voucherNo && s.voucherNo !== '—' && s.voucherNo === pop.voucherNo)
       );
 
       let currentClassifications: string[] = [];
@@ -1052,24 +1053,43 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             currentClassifications = [tc];
           }
         }
+      } else if (pop.testingClassification) {
+        let tc = pop.testingClassification;
+        if (Array.isArray(tc)) {
+          currentClassifications = tc;
+        } else if (typeof tc === 'string' && tc && tc !== 'Not Selected' && tc !== 'Pending Classification') {
+          currentClassifications = [tc];
+        }
       }
 
       const cleanClassifications = currentClassifications.filter(c => c && c !== 'Not Selected' && c !== 'Pending Classification');
+      const isNA = cleanClassifications.includes('N/A');
+      const isAssigned = cleanClassifications.length > 0 && !isNA;
+
+      let testingStatus = pop.testingStatus || 'Pending Classification';
+      let testingReference = pop.testingReference || '';
 
       if (dbSample) {
-        return { 
-          ...pop, 
-          ...dbSample, 
-          testingClassification: cleanClassifications, 
-          isAssigned: cleanClassifications.length > 0 && !cleanClassifications.includes('N/A')
-        };
+        testingStatus = dbSample.testingStatus || (isNA ? 'N/A' : isAssigned ? 'Assigned' : 'Pending Classification');
+        testingReference = dbSample.testingReference || '';
+      } else if (isNA) {
+        testingStatus = 'N/A';
+      } else if (isAssigned) {
+        testingStatus = 'Assigned';
       }
-      return { 
-        ...pop, 
-        testingClassification: cleanClassifications, 
-        testingStatus: cleanClassifications.length > 0 ? (cleanClassifications.includes('N/A') ? 'N/A' : 'Assigned') : 'Pending Classification',
-        testingReference: '',
-        isAssigned: cleanClassifications.length > 0 && !cleanClassifications.includes('N/A') 
+
+      if (!testingReference && isAssigned) {
+        const prefix = cleanClassifications[0] === '3rd Party Disbursement' ? '3PD' : cleanClassifications[0] === 'Employee Disbursement & Reimbursement' ? 'EMP' : 'SAL';
+        testingReference = `${prefix}-${pop.voucherNo && pop.voucherNo !== '—' ? pop.voucherNo : pop.id}`;
+      }
+
+      return {
+        ...pop,
+        ...(dbSample || {}),
+        testingClassification: cleanClassifications,
+        testingStatus,
+        testingReference,
+        isAssigned
       };
     }).filter(rec => {
         if (!searchQuery) return true;
@@ -1171,7 +1191,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
               <AlertTriangle className="w-4 h-4 text-rose-400" /> {classificationSaveError}
             </span>
           )}
-          {!isDistributor && !isEvidenceManagementMode && (
+          {!isDistributor && (
             <button
               onClick={handleSaveAllClassifications}
               disabled={isSavingClassifications || Object.keys(classificationChanges).length === 0}
@@ -1215,13 +1235,13 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px]">Description</th>
             <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Debit</th>
             <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Credit</th>
-            {!isDistributor && !isEvidenceManagementMode && <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] bg-slate-900">Testing Classification</th>}
+            {!isDistributor && <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] bg-slate-900">Testing Classification</th>}
             <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] bg-slate-900 text-center">Required Data</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800/50">
           {mergedRecords.length === 0 ? (
-            <tr><td colSpan={isDistributor || isEvidenceManagementMode ? 7 : 8} className="py-12 text-center text-slate-400">No records found.</td></tr>
+            <tr><td colSpan={isDistributor ? 7 : 8} className="py-12 text-center text-slate-400">No records found.</td></tr>
           ) : (
             mergedRecords.map((rec, i) => (
               <tr key={rec.id + i} className="hover:bg-slate-800/30 transition-colors group">
@@ -1232,7 +1252,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                 <td className="py-2 px-4 text-emerald-400/90 font-medium text-right">{formatCurrency(rec.debit, currencyMode)}</td>
                 <td className="py-2 px-4 text-rose-400/90 font-medium text-right">{formatCurrency(rec.credit, currencyMode)}</td>
                 
-                {!isDistributor && !isEvidenceManagementMode && (
+                {!isDistributor && (
                 <td className="py-2 px-4 bg-slate-900/40 relative">
 
                   <button 
@@ -1865,11 +1885,11 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         </div>
 
         {/* Sub-Tabs */}
-        {(!isDistributor && !isEvidenceManagementMode) && (
+        {!isDistributor && (
         <div className="flex gap-2 border-b border-slate-800">
           {[
             { id: 'GL', label: 'General Ledger - Sample' },
-            ...(!isDistributor && !isEvidenceManagementMode ? [
+            ...(!isDistributor ? [
               { id: '3PD', label: '3rd Party Disbursement' },
               { id: 'EMP', label: 'Employee Disbursement & Reimbursement' },
               { id: 'SALES', label: 'Sales Testing' }
@@ -1899,12 +1919,12 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
 
       <div className="flex-1 overflow-y-auto p-8 pt-4">
         {activeTab === 'GL' && renderGLTab()}
-        {!isDistributor && !isEvidenceManagementMode && activeTab === '3PD' && renderTestingTab('3rd Party Disbursement')}
-        {!isDistributor && !isEvidenceManagementMode && activeTab === 'EMP' && renderTestingTab('Employee Disbursement & Reimbursement')}
-        {!isDistributor && !isEvidenceManagementMode && activeTab === 'SALES' && renderTestingTab('Sales Testing')}
+        {!isDistributor && activeTab === '3PD' && renderTestingTab('3rd Party Disbursement')}
+        {!isDistributor && activeTab === 'EMP' && renderTestingTab('Employee Disbursement & Reimbursement')}
+        {!isDistributor && activeTab === 'SALES' && renderTestingTab('Sales Testing')}
       </div>
 
-      {!isDistributor && !isEvidenceManagementMode && renderReviewModal()}
+      {!isDistributor && renderReviewModal()}
       {renderUploadModal()}
       {renderQuestionBuilderModal()}
       
