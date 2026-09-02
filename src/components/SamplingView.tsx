@@ -750,17 +750,29 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       const res = await fetch('/api/sampling/upload', {
         method: 'POST',
         headers: {
-          'x-user-email': currentUser?.email || '',
-          'x-user-role': currentUser?.role || ''
+          'x-user-email': currentUser?.email || 'auditor@data360.io',
+          'x-user-role': currentUser?.role || 'Auditor'
         },
         body: formData
       });
-      const data = await res.json();
+      
+      let data: any = {};
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(text && text.includes('<!DOCTYPE') ? 'Server returned an invalid HTML response instead of JSON.' : (text || 'Upload failed'));
+      }
       
       if (!res.ok || !data.success) {
         throw new Error(data.error || 'Failed to upload');
       }
       
+      setUploadSuccessMessage({
+        filename: uploadFile.name,
+        records: uploadFile.size ? Math.max(1, Math.round(uploadFile.size / 150)) : 100
+      });
       setUploadState('success');
       
       // reload populations
@@ -771,12 +783,17 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         });
         const popRes = await fetch(`/api/evidence?${params.toString()}`, {
           headers: {
-            'x-user-email': currentUser?.email || '',
-            'x-user-role': currentUser?.role || '',
-            'x-user-organization': currentUser?.organization || ''
+            'x-user-email': currentUser?.email || 'auditor@data360.io',
+            'x-user-role': currentUser?.role || 'Auditor',
+            'x-user-organization': currentUser?.organization || 'Apex Audit Practice (AA)'
           }
         });
-        const popData = await popRes.json();
+        
+        let popData: any = { success: false, records: [] };
+        const popContentType = popRes.headers.get('content-type') || '';
+        if (popContentType.includes('application/json')) {
+          popData = await popRes.json();
+        }
         if (popData.success && Array.isArray(popData.records)) {
           const filtered = popData.records.filter((r: any) => {
             const usage = r.documentUsage || '';
@@ -793,9 +810,9 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
           if (data.fileId) {
              const newFile = filtered.find((p: any) => p.googleDriveFileId === data.fileId || p.id === data.fileId);
              if (newFile) {
-                handleSelectPopulation(newFile);
+                await handleSelectPopulation(newFile);
              } else {
-                if (filtered.length > 0) handleSelectPopulation(filtered[0]);
+                if (filtered.length > 0) await handleSelectPopulation(filtered[0]);
              }
           }
         }

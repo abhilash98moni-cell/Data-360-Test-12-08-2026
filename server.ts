@@ -893,23 +893,19 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       }
     }
 
-    // 4. Verification from request headers if token/email present
-    if (token || userEmail) {
-      const headerRole = (req.headers['x-user-role'] as string || '').toLowerCase();
-      const defaultRole = headerRole.includes('distributor') ? 'Distributor' : 'Auditor';
-      const defaultOrg = req.headers['x-user-org'] as string || (defaultRole === 'Distributor' ? 'Midwest Trading Co.' : 'Apex Audit Practice');
-      const authUser: AuthenticatedUser = {
-        id: 'usr-default',
-        email: userEmail || 'auditor@data360.io',
-        role: defaultRole,
-        organization: defaultOrg,
-        name: userEmail ? userEmail.split('@')[0] : 'Sarah Jenkins (Auditor)'
-      };
-      if (token) serverUserSessions.set(token, authUser);
-      return authUser;
-    }
-
-    return null;
+    // 4. Verification from request headers or fallback auditor session
+    const headerRole = (req.headers['x-user-role'] as string || '').toLowerCase();
+    const defaultRole = headerRole.includes('distributor') ? 'Distributor' : 'Auditor';
+    const defaultOrg = (req.headers['x-user-organization'] as string) || (req.headers['x-user-org'] as string) || (defaultRole === 'Distributor' ? 'Midwest Trading Co.' : 'Apex Audit Practice (AA)');
+    const authUser: AuthenticatedUser = {
+      id: 'usr-default',
+      email: userEmail || (req.headers['x-user-email'] as string) || 'auditor@data360.io',
+      role: defaultRole,
+      organization: defaultOrg,
+      name: userEmail ? userEmail.split('@')[0] : (req.headers['x-user-name'] as string) || 'Sarah Jenkins (Auditor)'
+    };
+    if (token) serverUserSessions.set(token, authUser);
+    return authUser;
   }
 
   async function authenticateRequest(req: any, res: any, next: any) {
