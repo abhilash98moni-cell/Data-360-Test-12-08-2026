@@ -77,11 +77,23 @@ export default function App() {
 
   const [selectedClient, setSelectedClient] = useState<string>('Apex Electronics Corp');
   const [selectedDistributor, setSelectedDistributor] = useState<string>('Midwest Trading Co.');
-  const [currencyMode, setCurrencyMode] = useState<CurrencyMode>('INR');
+  const [currencyMode, setCurrencyMode] = useState<CurrencyMode>(() => {
+    const saved = localStorage.getItem('data360_currency_mode');
+    return (saved === 'USD' || saved === 'INR') ? (saved as CurrencyMode) : 'INR';
+  });
   const [themeMode, setThemeMode] = useState<'dark' | 'light'>(() => {
     const saved = localStorage.getItem('data360_theme_mode');
     return (saved === 'light' || saved === 'dark') ? saved : 'dark';
   });
+
+  const handleCurrencyModeChange = (mode: CurrencyMode) => {
+    setCurrencyMode(mode);
+    try {
+      localStorage.setItem('data360_currency_mode', mode);
+    } catch (e) {
+      console.error('Failed to save currency mode', e);
+    }
+  };
 
   const handleClientChange = (newClient: string) => {
     setSelectedClient(newClient);
@@ -241,7 +253,7 @@ export default function App() {
         selectedDistributor={selectedDistributor}
         onDistributorChange={setSelectedDistributor}
         currencyMode={currencyMode}
-        onCurrencyModeChange={setCurrencyMode}
+        onCurrencyModeChange={handleCurrencyModeChange}
         themeMode={themeMode}
         onThemeModeChange={handleThemeModeChange}
         onOpenCopilot={() => setIsCopilotOpen(true)}
@@ -334,6 +346,7 @@ export default function App() {
               selectedDistributor={currentUser?.role?.includes('Distributor') ? (currentUser.organization || selectedDistributor) : selectedDistributor}
               selectedAuditFilter={selectedEngId}
               currentUser={currentUser}
+              currencyMode={currencyMode}
               initialSubTab={activeTab === 'iir' ? 'iir' : 'questionnaire'}
               isIIRFullScreen={isIIRFullScreen}
               onToggleIIRFullScreen={() => setIsIIRFullScreen(prev => !prev)}
@@ -347,7 +360,7 @@ export default function App() {
               selectedClient={selectedClient}
               defaultAuditFilter={selectedEngId}
             />
-          ) : activeTab === 'sampling_review' ? (
+          ) : activeTab === 'sampling_review' || activeTab === 'sampling' ? (
             <SamplingView
               selectedClient={selectedClient}
               selectedDistributor={currentUser?.role?.includes('Distributor') ? (currentUser.organization || selectedDistributor) : selectedDistributor}

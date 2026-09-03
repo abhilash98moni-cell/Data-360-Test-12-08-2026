@@ -8,6 +8,7 @@ import {
 import { UserSession } from './AuthModal';
 import { 
   IndianRupee, 
+  DollarSign,
   Briefcase, 
   ShieldAlert, 
   TrendingUp, 
@@ -444,7 +445,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex items-center justify-between text-slate-400">
             <span className="text-xs font-semibold uppercase tracking-wider">Identified Leakage</span>
             <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              <IndianRupee className="h-4 w-4" />
+              {currencyMode === 'USD' ? <DollarSign className="h-4 w-4" /> : <IndianRupee className="h-4 w-4" />}
             </div>
           </div>
           <div>

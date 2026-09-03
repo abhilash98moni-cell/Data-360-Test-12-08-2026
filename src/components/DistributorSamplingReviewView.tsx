@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Search, Filter, CheckCircle2, AlertTriangle, FileText, Database, Upload, FileSpreadsheet } from 'lucide-react';
 import { UserSession } from './AuthModal';
 import { RequiredDataQuestionnaire } from './RequiredDataQuestionnaire';
+import { CurrencyMode, formatFinancialAmount } from '../utils/currencyFormatter';
 
 interface Props {
   currencyMode?: string;
@@ -11,9 +12,8 @@ interface Props {
   currentUser: UserSession | null;
 }
 
-const formatCurrency = (val: number | null, mode: string = 'INR') => {
-  if (val === null || val === undefined) return '—';
-  return new Intl.NumberFormat(mode === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: mode }).format(val);
+const formatCurrency = (val: number | null | undefined, mode: string = 'INR') => {
+  return formatFinancialAmount(val, mode === 'USD' ? 'USD' : 'INR');
 };
 
 export const DistributorSamplingReviewView: React.FC<Props> = ({
@@ -398,6 +398,7 @@ export const DistributorSamplingReviewView: React.FC<Props> = ({
           engagementId={selectedAuditFilter || 'eng-101'}
           currentUser={currentUser}
           isDistributorWorkflow={true}
+          currencyMode={currencyMode as CurrencyMode}
           onClose={() => {
             setOpenQuestionnaireFor(null);
             fetchAssignedSamples();

@@ -25,6 +25,7 @@ import {
 import * as XLSX from 'xlsx';
 import { UserSession } from './AuthModal';
 import { RequiredDataQuestionnaire } from './RequiredDataQuestionnaire';
+import { CurrencyMode, formatFinancialAmount, getCurrencySymbol } from '../utils/currencyFormatter';
 
 interface GLRecord {
   id: string;
@@ -89,9 +90,10 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   selectedDistributor,
   selectedAuditFilter,
   currentUser,
-  currencyMode = 'USD',
+  currencyMode: activeCurrencyMode = 'INR',
   onNavigateToSamplingReview
 }) => {
+  const currencyMode: CurrencyMode = (activeCurrencyMode === 'USD' ? 'USD' : 'INR');
   const isDistributor = currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor');
   const [openQuestionnaireFor, setOpenQuestionnaireFor] = useState<GLRecord | null>(null);
   const [questionnaireResponses, setQuestionnaireResponses] = useState<Record<string, any>>({});
@@ -125,7 +127,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const currencySymbol = currencyMode === 'INR' ? '₹' : currencyMode === 'EUR' ? '€' : currencyMode === 'GBP' ? '£' : '$';
+  const currencySymbol = getCurrencySymbol(currencyMode);
 
   const showToast = (type: 'success' | 'error' | 'info', message: string) => {
     setNotification({ type, message });
@@ -685,13 +687,13 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                   <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 text-center">
                     <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Total Debit</p>
                     <p className="text-base font-bold text-emerald-400 mt-0.5">
-                      {currencySymbol}{totalDebit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatFinancialAmount(totalDebit, currencyMode)}
                     </p>
                   </div>
                   <div className="bg-slate-950/60 border border-slate-800/80 rounded-xl p-3 text-center">
                     <p className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Total Credit</p>
                     <p className="text-base font-bold text-indigo-400 mt-0.5">
-                      {currencySymbol}{totalCredit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      {formatFinancialAmount(totalCredit, currencyMode)}
                     </p>
                   </div>
                 </div>
@@ -814,13 +816,13 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                       )}
                     </td>
                     <td className="py-2.5 px-3 text-right text-emerald-400 font-semibold whitespace-nowrap">
-                      {row.debit > 0 ? `${currencySymbol}${Number(row.debit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                      {Number(row.debit) > 0 ? formatFinancialAmount(row.debit, currencyMode) : '—'}
                     </td>
                     <td className="py-2.5 px-3 text-right text-indigo-400 font-semibold whitespace-nowrap">
-                      {row.credit > 0 ? `${currencySymbol}${Number(row.credit).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                      {Number(row.credit) > 0 ? formatFinancialAmount(row.credit, currencyMode) : '—'}
                     </td>
                     <td className="py-2.5 px-3 text-right text-slate-300 whitespace-nowrap">
-                      {row.balance !== undefined && row.balance !== 0 ? `${currencySymbol}${Number(row.balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
+                      {row.balance !== undefined && row.balance !== null && Number(row.balance) !== 0 ? formatFinancialAmount(row.balance, currencyMode) : '—'}
                     </td>
                     {isDistributor && (
                       <td className="py-2.5 px-3 text-center whitespace-nowrap bg-slate-950/20">
@@ -1083,6 +1085,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
           engagementId={selectedAuditFilter || 'eng-101'}
           currentUser={currentUser}
           isDistributorWorkflow={true}
+          currencyMode={currencyMode}
           onClose={() => {
             setOpenQuestionnaireFor(null);
             fetchQuestionnaireResponses();

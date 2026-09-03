@@ -25,6 +25,7 @@ import {
   DollarSign
 } from 'lucide-react';
 import { UserSession } from '../types';
+import { CurrencyMode, formatFinancialAmount } from '../utils/currencyFormatter';
 
 export interface UploadedDocument {
   id: string;
@@ -43,6 +44,7 @@ interface QuestionnaireProps {
   onClose: () => void;
   isReviewMode?: boolean;
   isDistributorWorkflow?: boolean;
+  currencyMode?: CurrencyMode | string;
 }
 
 export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
@@ -51,8 +53,10 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
   currentUser,
   onClose,
   isReviewMode = false,
-  isDistributorWorkflow = false
+  isDistributorWorkflow = false,
+  currencyMode = 'INR'
 }) => {
+  const activeCurrency: CurrencyMode = currencyMode === 'USD' ? 'USD' : 'INR';
   const isDistributor = isDistributorWorkflow || currentUser?.role?.includes('Distributor') || currentUser?.role === 'Distributor';
   
   // Core Required Data States
@@ -517,8 +521,8 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
             <div>
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-sans">Debit / Credit</span>
               <span className="text-slate-200">
-                {transaction?.debit ? `Dr: $${Number(transaction.debit).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : 
-                 transaction?.credit ? `Cr: $${Number(transaction.credit).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
+                {Number(transaction?.debit) > 0 ? `Dr: ${formatFinancialAmount(transaction.debit, activeCurrency)}` : 
+                 Number(transaction?.credit) > 0 ? `Cr: ${formatFinancialAmount(transaction.credit, activeCurrency)}` : '—'}
               </span>
             </div>
             <div>

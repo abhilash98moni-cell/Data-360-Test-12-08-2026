@@ -129,10 +129,10 @@ export const Header: React.FC<HeaderProps> = ({
           )}
 
           {/* India / Global Currency Switcher */}
-          <div className="hidden sm:flex items-center bg-slate-950/80 rounded-lg border border-slate-800 p-0.5 text-xs font-semibold">
+          <div className="flex items-center bg-slate-950/80 rounded-lg border border-slate-800 p-0.5 text-xs font-semibold">
             <button
               onClick={() => onCurrencyModeChange('INR')}
-              className={`px-2 py-0.5 rounded flex items-center gap-1 transition-all ${
+              className={`px-2 py-0.5 rounded flex items-center gap-1 transition-all cursor-pointer ${
                 currencyMode === 'INR'
                   ? 'bg-emerald-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
@@ -144,7 +144,7 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
             <button
               onClick={() => onCurrencyModeChange('USD')}
-              className={`px-2 py-0.5 rounded flex items-center gap-1 transition-all ${
+              className={`px-2 py-0.5 rounded flex items-center gap-1 transition-all cursor-pointer ${
                 currencyMode === 'USD'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'

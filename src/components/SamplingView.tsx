@@ -5,6 +5,7 @@ import { Plus,
   FileText, Info, Save, X, Edit, ExternalLink, Database
  } from 'lucide-react';
 import { UserSession } from '../types';
+import { CurrencyMode, formatFinancialAmount } from '../utils/currencyFormatter';
 
 interface SamplingViewProps {
   isEvidenceManagementMode?: boolean;
@@ -17,9 +18,8 @@ interface SamplingViewProps {
   onNavigateToUpload?: () => void;
 }
 
-const formatCurrency = (val: number | null, mode: string = 'INR') => {
-  if (val === null || val === undefined) return '—';
-  return new Intl.NumberFormat(mode === 'INR' ? 'en-IN' : 'en-US', { style: 'currency', currency: mode }).format(val);
+const formatCurrency = (val: number | null | undefined, mode: string = 'INR') => {
+  return formatFinancialAmount(val, mode === 'USD' ? 'USD' : 'INR');
 };
 
 const TESTING_TEMPLATES: Record<string, {id: string, text: string}[]> = {
@@ -1777,6 +1777,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
           transaction={openQuestionnaireFor}
           engagementId={selectedAuditFilter || 'eng-101'}
           currentUser={currentUser}
+          currencyMode={currencyMode as CurrencyMode}
           onClose={() => setOpenQuestionnaireFor(null)}
         />
       )}
