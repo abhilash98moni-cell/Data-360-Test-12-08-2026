@@ -118,7 +118,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   });
 
   // Render Distributor Portal Dashboard if logged in user is a Distributor
-  if (currentUser?.role === 'Distributor') {
+  if (currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor')) {
     const distOrg = currentUser.organization || 'Midwest Trading Co.';
     const distributorFindings = findings.filter(f => 
       f.auditedEntity.toLowerCase().includes(distOrg.toLowerCase()) ||

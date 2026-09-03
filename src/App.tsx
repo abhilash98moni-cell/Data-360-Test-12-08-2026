@@ -297,7 +297,7 @@ export default function App() {
         <main className="flex-1 min-w-0 max-w-full overflow-x-hidden bg-slate-950/90 pb-12">
           
           {(currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor')) && 
-           ['dashboard', 'master_control', 'audit_logs'].includes(activeTab) ? (
+           ['master_control', 'audit_logs'].includes(activeTab) ? (
             <div className="p-12 text-center max-w-xl mx-auto my-16 bg-slate-900 border border-slate-800 rounded-3xl space-y-4 shadow-2xl animate-fade-in text-white">
               <div className="p-4 bg-red-500/10 text-red-400 border border-red-500/30 rounded-2xl w-16 h-16 mx-auto flex items-center justify-center">
                 <ShieldAlert className="h-8 w-8" />
