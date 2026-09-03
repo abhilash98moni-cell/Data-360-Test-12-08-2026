@@ -10,21 +10,29 @@ export function getCurrencySymbol(currencyMode: CurrencyMode = 'INR'): string {
 }
 
 /**
- * Converts a base USD amount to the target currency amount.
+ * Converts a base INR GL amount to the target currency amount for display/calculation.
+ * Raw uploaded General Ledger amounts are in INR by default.
  */
-export function getConvertedAmount(amountInUSD: number, currencyMode: CurrencyMode = 'INR'): number {
-  if (typeof amountInUSD !== 'number' || isNaN(amountInUSD)) return 0;
-  return currencyMode === 'USD' ? amountInUSD : amountInUSD * USD_TO_INR_RATE;
+export function getConvertedAmount(amountInINR: number, currencyMode: CurrencyMode = 'INR'): number {
+  if (typeof amountInINR !== 'number' || isNaN(amountInINR)) return 0;
+  return currencyMode === 'INR' ? amountInINR : amountInINR / USD_TO_INR_RATE;
 }
 
 /**
- * Formats monetary amounts for financial transactions and tables (Debit, Credit, Balance, Totals).
- * Displays full numeric precision with 2 decimal places and correct locale formatting:
- * USD: $1,250.00
- * INR: ₹1,03,750.00 (converted by USD_TO_INR_RATE)
+ * Formats monetary amounts for General Ledger transactions and tables (Debit, Credit, Balance, Totals).
+ *
+ * IMPORTANT: All raw monetary values uploaded from the General Ledger Excel are treated as INR by default.
+ * - In INR view (default): displays original uploaded values directly:
+ *     10000 → ₹10,000
+ *     56000 → ₹56,000
+ *     15000 → ₹15,000
+ * - In USD view: converts the INR value for display purposes using the existing exchange rate (1 USD ≈ 83 INR):
+ *     ₹10,000 → $120.48
+ *
+ * Switching between INR and USD never modifies, overwrites, multiplies, or permanently converts stored database values.
  */
 export function formatFinancialAmount(
-  amountInUSD: number | string | null | undefined,
+  amountInINR: number | string | null | undefined,
   currencyMode: CurrencyMode = 'INR',
   options?: {
     showZeroAsDash?: boolean;
@@ -32,10 +40,19 @@ export function formatFinancialAmount(
     maximumFractionDigits?: number;
   }
 ): string {
-  if (amountInUSD === null || amountInUSD === undefined || amountInUSD === '') {
+  if (amountInINR === null || amountInINR === undefined || amountInINR === '') {
     return '—';
   }
-  const numericVal = typeof amountInUSD === 'string' ? parseFloat(amountInUSD) : amountInUSD;
+  let numericVal: number;
+  if (typeof amountInINR === 'number') {
+    numericVal = amountInINR;
+  } else if (typeof amountInINR === 'string') {
+    const cleaned = amountInINR.replace(/[^0-9.-]/g, '');
+    numericVal = parseFloat(cleaned);
+  } else {
+    return '—';
+  }
+
   if (isNaN(numericVal)) {
     return '—';
   }
@@ -44,26 +61,34 @@ export function formatFinancialAmount(
     return '—';
   }
 
-  const minDecimals = options?.minimumFractionDigits !== undefined ? options.minimumFractionDigits : 2;
   const maxDecimals = options?.maximumFractionDigits !== undefined ? options.maximumFractionDigits : 2;
 
   if (currencyMode === 'USD') {
+    // Convert INR to USD for display only using exchange rate
+    const usdAmount = numericVal / USD_TO_INR_RATE;
+    const minDecimals = options?.minimumFractionDigits !== undefined
+      ? options.minimumFractionDigits
+      : (Number.isInteger(usdAmount) ? 0 : 2);
+
     return new Intl.NumberFormat('en-US', {
       style: 'currency',
       currency: 'USD',
       minimumFractionDigits: minDecimals,
       maximumFractionDigits: maxDecimals
-    }).format(numericVal);
+    }).format(usdAmount);
   }
 
-  // INR mode: converted at 83 INR/USD
-  const inrAmount = numericVal * USD_TO_INR_RATE;
+  // INR mode (Default): directly display the original uploaded values
+  const minDecimals = options?.minimumFractionDigits !== undefined
+    ? options.minimumFractionDigits
+    : (Number.isInteger(numericVal) ? 0 : 2);
+
   return new Intl.NumberFormat('en-IN', {
     style: 'currency',
     currency: 'INR',
     minimumFractionDigits: minDecimals,
     maximumFractionDigits: maxDecimals
-  }).format(inrAmount);
+  }).format(numericVal);
 }
 
 /**
