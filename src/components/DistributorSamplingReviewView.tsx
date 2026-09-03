@@ -397,7 +397,11 @@ export const DistributorSamplingReviewView: React.FC<Props> = ({
           transaction={openQuestionnaireFor}
           engagementId={selectedAuditFilter || 'eng-101'}
           currentUser={currentUser}
-          onClose={() => setOpenQuestionnaireFor(null)}
+          isDistributorWorkflow={true}
+          onClose={() => {
+            setOpenQuestionnaireFor(null);
+            fetchAssignedSamples();
+          }}
           isReviewMode={!currentUser?.role?.includes('Distributor')}
         />
       )}

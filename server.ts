@@ -1162,7 +1162,8 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const { data, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_QUESTION_DEF');
       if (error) throw error;
       
-      const questions = data
+      const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const questions = (data || [])
         .map(d => {
            let parsed = d.details;
            if (typeof parsed === 'string') {
@@ -1170,7 +1171,50 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
            }
            return { dbId: d.id, ...parsed };
         })
-        .filter(q => q.engagement_id === auditId && q.active !== false);
+        .filter(q => {
+          if (q.active === false) return false;
+          if (!auditId || auditId === 'All Audits') return true;
+          return cleanStr(q.engagement_id) === cleanStr(auditId) || q.scope === 'all';
+        });
+
+      if (questions.length === 0) {
+        const defaultQuestions = [
+          {
+            dbId: 'def-q1',
+            question_id: 'Q-CONFIRM-INVOICE',
+            engagement_id: auditId || 'eng-101',
+            question_text: 'Confirm availability of official invoice, delivery challan, or voucher for this entry.',
+            answer_type: 'Yes / No',
+            required: true,
+            scope: 'all',
+            allow_comment: true,
+            allow_file_upload: true
+          },
+          {
+            dbId: 'def-q2',
+            question_id: 'Q-BIZ-PURPOSE',
+            engagement_id: auditId || 'eng-101',
+            question_text: 'Provide business justification and description of services/goods represented by this transaction.',
+            answer_type: 'Text',
+            required: true,
+            scope: 'all',
+            allow_comment: true,
+            allow_file_upload: false
+          },
+          {
+            dbId: 'def-q3',
+            question_id: 'Q-APPROVAL',
+            engagement_id: auditId || 'eng-101',
+            question_text: 'Was this transaction authorized and approved as per standard financial delegation limits?',
+            answer_type: 'Yes / No',
+            required: false,
+            scope: 'all',
+            allow_comment: true,
+            allow_file_upload: true
+          }
+        ];
+        return res.json({ success: true, questions: defaultQuestions });
+      }
         
       res.json({ success: true, questions });
     } catch (err: any) {
@@ -1271,13 +1315,14 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
     try {
       const { sampleId } = req.query;
       const supabase = getSupabaseServerClient();
+      const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
       
       let query = supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
       
       const { data, error } = await query;
       if (error) throw error;
       
-      const responses = data
+      const responses = (data || [])
         .map(d => {
            let parsed = d.details;
            if (typeof parsed === 'string') {
@@ -1285,7 +1330,11 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
            }
            return { dbId: d.id, ...parsed };
         })
-        .filter(r => sampleId ? r.sample_id === sampleId : true);
+        .filter(r => {
+           if (!sampleId) return true;
+           const s = cleanStr(sampleId);
+           return cleanStr(r.sample_id) === s || cleanStr(r.voucher_no) === s || cleanStr(r.voucherNo) === s;
+        });
         
       res.json({ success: true, responses });
     } catch (err: any) {
@@ -1299,8 +1348,11 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
     try {
       const payload = req.body;
       const supabase = getSupabaseServerClient();
+      const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
+      const targetSampleId = cleanStr(payload.sample_id);
+      const targetVoucherNo = cleanStr(payload.voucher_no || payload.voucherNo);
       
-      // Update existing if exists for this sample_id
+      // Update existing if exists for this sample_id or voucher_no
       const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
       
       let existingRecord = existing?.find(d => {
@@ -1308,7 +1360,10 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         if (typeof parsed === 'string') {
            try { parsed = JSON.parse(parsed); } catch(e) {}
         }
-        return parsed.sample_id === payload.sample_id;
+        const sId = cleanStr(parsed?.sample_id);
+        const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo);
+        return (targetSampleId && sId === targetSampleId) || 
+               (targetVoucherNo && (vNo === targetVoucherNo || sId === targetVoucherNo));
       });
 
       if (existingRecord) {
@@ -1316,10 +1371,18 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
          if (typeof parsedDetails === 'string') {
             try { parsedDetails = JSON.parse(parsedDetails); } catch(e) {}
          }
-         const newDetails = { ...parsedDetails, responses: payload.responses, status: payload.status, updated_at: new Date().toISOString() };
+         const newDetails = {
+           ...parsedDetails,
+           voucher_no: payload.voucher_no || payload.voucherNo || parsedDetails.voucher_no,
+           responses: payload.responses,
+           status: payload.status,
+           notes: payload.notes || payload.responses?.notes,
+           uploadedFiles: payload.uploadedFiles || payload.responses?.uploadedFiles,
+           updated_at: new Date().toISOString()
+         };
          const { error: updateErr } = await supabase.from('system_audit_logs').update({ details: JSON.stringify(newDetails) }).eq('id', existingRecord.id);
          if (updateErr) throw updateErr;
-         res.json({ success: true, dbId: existingRecord.id });
+         res.json({ success: true, dbId: existingRecord.id, status: payload.status });
       } else {
          const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
           event_type: 'REQUIRED_DATA_RESP',
@@ -1328,8 +1391,11 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           details: JSON.stringify({
             engagement_id: payload.engagement_id,
             sample_id: payload.sample_id,
+            voucher_no: payload.voucher_no || payload.voucherNo || '',
             responses: payload.responses,
             status: payload.status || 'Draft',
+            notes: payload.notes || payload.responses?.notes,
+            uploadedFiles: payload.uploadedFiles || payload.responses?.uploadedFiles,
             created_by: req.user?.email || 'unknown',
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
@@ -1337,7 +1403,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         }).select().single();
 
         if (error) throw error;
-        res.json({ success: true, dbId: insertedData.id });
+        res.json({ success: true, dbId: insertedData.id, status: payload.status });
       }
     } catch (err: any) {
       console.error(err);

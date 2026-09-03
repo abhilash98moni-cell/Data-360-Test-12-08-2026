@@ -24,6 +24,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { UserSession } from './AuthModal';
+import { RequiredDataQuestionnaire } from './RequiredDataQuestionnaire';
 
 interface GLRecord {
   id: string;
@@ -91,6 +92,10 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   currencyMode = 'USD',
   onNavigateToSamplingReview
 }) => {
+  const isDistributor = currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor');
+  const [openQuestionnaireFor, setOpenQuestionnaireFor] = useState<GLRecord | null>(null);
+  const [questionnaireResponses, setQuestionnaireResponses] = useState<Record<string, any>>({});
+
   const [activePopulation, setActivePopulation] = useState<SamplingPopulation | null>(null);
   const [availablePopulations, setAvailablePopulations] = useState<SamplingPopulation[]>([]);
   const [records, setRecords] = useState<GLRecord[]>([]);
@@ -127,6 +132,33 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
     setTimeout(() => setNotification(null), 5000);
   };
 
+  // Fetch Questionnaire Responses for status badges and persistence
+  const fetchQuestionnaireResponses = async () => {
+    try {
+      const res = await fetch('/api/sampling/required-data/responses', {
+        headers: { 'x-user-email': currentUser?.email || '' }
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.responses)) {
+        const map: Record<string, any> = {};
+        data.responses.forEach((r: any) => {
+          if (r.sample_id) {
+            map[r.sample_id] = r;
+          }
+          if (r.voucher_no) {
+            map[r.voucher_no] = r;
+          }
+          if (r.voucherNo) {
+            map[r.voucherNo] = r;
+          }
+        });
+        setQuestionnaireResponses(map);
+      }
+    } catch (e) {
+      console.error('Error fetching questionnaire responses:', e);
+    }
+  };
+
   // Fetch Authoritative Population & Records from Backend
   const loadPopulationData = async () => {
     setIsLoading(true);
@@ -143,7 +175,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       setAvailablePopulations(populations);
 
       // 2. Fetch active sampling state
-      const stateRes = await fetch(`/api/sampling/state?distributorId=${distParam}&auditId=${auditParam}`);
+      const stateRes = await fetch(`/api/sampling/state?distributorId=${distParam}&auditId=${auditParam}&client=${clientParam}`);
       const stateData = await stateRes.json();
       const activePopId = stateData.success && stateData.state ? stateData.state.activePopulationId : null;
 
@@ -157,11 +189,15 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
 
       // 4. Fetch population records
       const targetId = targetPop ? (targetPop.googleDriveFileId || targetPop.id) : activePopId;
-      const recRes = await fetch(`/api/sampling/population-records?fileId=${encodeURIComponent(targetId || '')}&distributorId=${distParam}&auditId=${auditParam}`);
+      const recRes = await fetch(`/api/sampling/population-records?fileId=${encodeURIComponent(targetId || '')}&distributorId=${distParam}&auditId=${auditParam}&client=${clientParam}`);
       const recData = await recRes.json();
 
       if (recData.success && Array.isArray(recData.records)) {
-        setRecords(recData.records);
+        const mappedRecords: GLRecord[] = recData.records.map((r: any, idx: number) => ({
+          ...r,
+          id: r.id || r.sampleId || r.voucherNo || `TX-${idx + 1}`
+        }));
+        setRecords(mappedRecords);
       } else {
         setRecords([]);
       }
@@ -175,6 +211,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
 
   useEffect(() => {
     loadPopulationData();
+    fetchQuestionnaireResponses();
   }, [selectedDistributor, selectedClient, selectedAuditFilter]);
 
   // Handle Switch Active Population
@@ -472,16 +509,21 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
           </div>
 
           <div className="flex items-center gap-3 shrink-0">
-            <button
-              onClick={handleDownloadTemplate}
-              className="px-3 py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer shadow"
-            >
-              <Download className="h-3.5 w-3.5 text-slate-400" />
-              <span>Sample GL Template</span>
-            </button>
+            {!isDistributor && (
+              <button
+                onClick={handleDownloadTemplate}
+                className="px-3 py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer shadow"
+              >
+                <Download className="h-3.5 w-3.5 text-slate-400" />
+                <span>Sample GL Template</span>
+              </button>
+            )}
 
             <button
-              onClick={loadPopulationData}
+              onClick={() => {
+                loadPopulationData();
+                fetchQuestionnaireResponses();
+              }}
               disabled={isLoading}
               className="px-3 py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer shadow"
               title="Refresh from Database"
@@ -490,7 +532,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
               <span>Sync DB</span>
             </button>
 
-            {onNavigateToSamplingReview && (
+            {!isDistributor && onNavigateToSamplingReview && (
               <button
                 onClick={onNavigateToSamplingReview}
                 className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/30 flex items-center gap-2 cursor-pointer"
@@ -503,8 +545,9 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
         </div>
       </div>
 
-      {/* Step 1: Upload GL Population Dropzone & Status Card Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      {/* Step 1: Upload GL Population Dropzone & Status Card Grid (Auditor Only) */}
+      {!isDistributor && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
         
         {/* Left Column: Drag & Drop Upload Zone */}
         <div className="lg:col-span-6 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col justify-between">
@@ -676,6 +719,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
           </div>
         </div>
       </div>
+      )}
 
       {/* Imported General Ledger Records Table (Clean, Upload-Only Table — Zero Classification UI) */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
@@ -748,6 +792,11 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                   <th className="py-2.5 px-3 text-right">Debit</th>
                   <th className="py-2.5 px-3 text-right">Credit</th>
                   <th className="py-2.5 px-3 text-right">Balance</th>
+                  {isDistributor && (
+                    <th className="py-2.5 px-3 text-center font-extrabold text-indigo-300 uppercase tracking-wider whitespace-nowrap bg-slate-900/90">
+                      REQUIRED DATA
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
@@ -773,6 +822,47 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                     <td className="py-2.5 px-3 text-right text-slate-300 whitespace-nowrap">
                       {row.balance !== undefined && row.balance !== 0 ? `${currencySymbol}${Number(row.balance).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '—'}
                     </td>
+                    {isDistributor && (
+                      <td className="py-2.5 px-3 text-center whitespace-nowrap bg-slate-950/20">
+                        {(() => {
+                          const resp = questionnaireResponses[row.id] || questionnaireResponses[row.voucherNo] || questionnaireResponses[row.sampleId];
+                          const isCompleted = resp?.status === 'Completed' || resp?.status === 'Submitted';
+                          const isDraft = resp?.status === 'Draft';
+                          return (
+                            <div className="flex items-center justify-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenQuestionnaireFor(row);
+                                }}
+                                className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm ${
+                                  isCompleted
+                                    ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30 shadow-emerald-950/40'
+                                    : isDraft
+                                    ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40 hover:bg-amber-600/30 shadow-amber-950/40'
+                                    : 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 shadow-indigo-600/20 hover:shadow-indigo-600/30'
+                                }`}
+                                title="Open Required Data Questionnaire"
+                              >
+                                <FileText className="h-3.5 w-3.5" />
+                                <span>Questionnaire</span>
+                              </button>
+                              {isCompleted ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                                  <CheckCircle2 className="h-2.5 w-2.5" />
+                                  Done
+                                </span>
+                              ) : isDraft ? (
+                                <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
+                                  Draft
+                                </span>
+                              ) : null}
+                            </div>
+                          );
+                        })()}
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
@@ -786,7 +876,11 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
             Displaying <strong className="text-white">{filteredRecords.length}</strong> of <strong className="text-white">{records.length}</strong> transactions
           </span>
           <span className="text-[11px] text-slate-500">
-            For audit attribute testing and sample selection, navigate to <strong className="text-indigo-400 font-semibold">Sampling Review</strong> in the main navigation.
+            {isDistributor ? (
+              <span>Provide required transaction evidence and questionnaire responses for audit attribute verification.</span>
+            ) : (
+              <span>For audit attribute testing and sample selection, navigate to <strong className="text-indigo-400 font-semibold">Sampling Review</strong> in the main navigation.</span>
+            )}
           </span>
         </div>
       </div>
@@ -980,6 +1074,20 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Required Data Questionnaire Modal for Transaction */}
+      {openQuestionnaireFor && (
+        <RequiredDataQuestionnaire
+          transaction={openQuestionnaireFor}
+          engagementId={selectedAuditFilter || 'eng-101'}
+          currentUser={currentUser}
+          isDistributorWorkflow={true}
+          onClose={() => {
+            setOpenQuestionnaireFor(null);
+            fetchQuestionnaireResponses();
+          }}
+        />
       )}
     </div>
   );
