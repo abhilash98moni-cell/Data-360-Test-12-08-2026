@@ -165,9 +165,16 @@ export default function App() {
       try {
         const params = new URLSearchParams();
         if (currentUser?.role) params.set('role', currentUser.role);
+        if (currentUser?.email) params.set('userEmail', currentUser.email);
         const dist = currentUser?.organization || selectedDistributor;
         if (dist) params.set('distributor', dist);
-        const res = await fetch(`/api/notifications?${params.toString()}`);
+        const res = await fetch(`/api/notifications?${params.toString()}`, {
+          headers: {
+            'x-user-role': currentUser?.role || '',
+            'x-user-organization': dist || '',
+            'x-user-email': currentUser?.email || ''
+          }
+        });
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data.notifications)) {
@@ -184,7 +191,7 @@ export default function App() {
       clearInterval(interval);
       window.removeEventListener('notification-updated', fetchUnread);
     };
-  }, [currentUser?.role, currentUser?.organization, selectedDistributor]);
+  }, [currentUser?.role, currentUser?.organization, currentUser?.email, selectedDistributor]);
 
   // Sync client & distributor when currentUser changes
   React.useEffect(() => {

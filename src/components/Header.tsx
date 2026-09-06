@@ -211,7 +211,7 @@ export const Header: React.FC<HeaderProps> = ({
               {unreadAlertsCount > 0 && (
                 <>
                   <span className="absolute top-1 right-1 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-slate-900 animate-ping pointer-events-none"></span>
-                  <span className="absolute -top-1 -right-1 flex h-4.5 min-w-[18px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white shadow-lg ring-2 ring-slate-900 leading-none">
+                  <span className="absolute -top-1 -right-1 flex h-4.5 min-w-[18px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white shadow-lg ring-2 ring-slate-900 leading-none pointer-events-none">
                     {unreadAlertsCount > 9 ? '9+' : unreadAlertsCount}
                   </span>
                 </>

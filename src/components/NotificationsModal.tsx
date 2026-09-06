@@ -43,10 +43,17 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
       setLoading(true);
       const params = new URLSearchParams();
       if (currentUser?.role) params.set('role', currentUser.role);
+      if (currentUser?.email) params.set('userEmail', currentUser.email);
       const dist = currentUser?.organization || selectedDistributor;
       if (dist) params.set('distributor', dist);
 
-      const res = await fetch(`/api/notifications?${params.toString()}`);
+      const res = await fetch(`/api/notifications?${params.toString()}`, {
+        headers: {
+          'x-user-role': currentUser?.role || '',
+          'x-user-organization': dist || '',
+          'x-user-email': currentUser?.email || ''
+        }
+      });
       if (res.ok) {
         const data = await res.json();
         if (data.notifications && Array.isArray(data.notifications)) {
@@ -75,7 +82,7 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
     if (!isOpen) return;
     const interval = setInterval(fetchNotifications, 5000);
     return () => clearInterval(interval);
-  }, [isOpen, currentUser?.role]);
+  }, [isOpen, currentUser?.role, currentUser?.organization, selectedDistributor]);
 
   // Close on Escape key
   useEffect(() => {
@@ -97,7 +104,20 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
     setNotifications(notifications.map(n => ({ ...n, isRead: true })));
     if (onUpdateUnreadCount) onUpdateUnreadCount(0);
     try {
-      await fetch('/api/notifications/read-all', { method: 'PUT' });
+      const params = new URLSearchParams();
+      if (currentUser?.role) params.set('role', currentUser.role);
+      const dist = currentUser?.organization || selectedDistributor;
+      if (dist) params.set('distributor', dist);
+      if (currentUser?.email) params.set('userEmail', currentUser.email);
+
+      await fetch(`/api/notifications/read-all?${params.toString()}`, { 
+        method: 'PUT',
+        headers: {
+          'x-user-role': currentUser?.role || '',
+          'x-user-organization': dist || '',
+          'x-user-email': currentUser?.email || ''
+        }
+      });
       window.dispatchEvent(new CustomEvent('notification-updated'));
     } catch (err) {
       console.warn('Failed to mark all as read on server:', err);
@@ -113,7 +133,14 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
       return next;
     });
     try {
-      await fetch(`/api/notifications/${id}/read`, { method: 'PUT' });
+      await fetch(`/api/notifications/${id}/read`, { 
+        method: 'PUT',
+        headers: {
+          'x-user-role': currentUser?.role || '',
+          'x-user-organization': currentUser?.organization || selectedDistributor || '',
+          'x-user-email': currentUser?.email || ''
+        }
+      });
       window.dispatchEvent(new CustomEvent('notification-updated'));
     } catch (e) {
       console.warn('Failed to mark notification read:', e);
@@ -129,7 +156,14 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
       return next;
     });
     try {
-      await fetch(`/api/notifications/${id}`, { method: 'DELETE' });
+      await fetch(`/api/notifications/${id}`, { 
+        method: 'DELETE',
+        headers: {
+          'x-user-role': currentUser?.role || '',
+          'x-user-organization': currentUser?.organization || selectedDistributor || '',
+          'x-user-email': currentUser?.email || ''
+        }
+      });
       window.dispatchEvent(new CustomEvent('notification-updated'));
     } catch (err) {
       console.warn('Failed to delete notification:', err);
@@ -153,18 +187,18 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
   return (
     <div 
       id="notifications-overlay"
-      className="fixed inset-0 z-50 overflow-hidden"
+      className="fixed inset-0 z-[100] overflow-hidden"
       onClick={onClose}
     >
       {/* Backdrop overlay for outside clicks */}
-      <div className="absolute inset-0 bg-slate-950/40 backdrop-blur-[1px] transition-opacity animate-fade-in" />
+      <div className="absolute inset-0 bg-slate-950/50 backdrop-blur-[2px] transition-opacity animate-fade-in" />
 
       {/* Notification Dropdown / Panel */}
       <div 
         id="notifications-panel"
         ref={panelRef}
         onClick={(e) => e.stopPropagation()}
-        className="fixed top-13 right-2 sm:right-4 md:right-8 z-50 w-[calc(100vw-1rem)] sm:w-[500px] max-w-lg bg-slate-900 border border-slate-700/90 rounded-2xl overflow-hidden shadow-2xl text-white flex flex-col max-h-[calc(100vh-4.5rem)] animate-in fade-in slide-in-from-top-2 duration-150"
+        className="fixed top-16 right-2 sm:right-4 md:right-8 z-[101] w-[calc(100vw-1rem)] sm:w-[500px] max-w-lg bg-slate-900 border border-slate-700/90 rounded-2xl overflow-hidden shadow-2xl text-white flex flex-col max-h-[calc(100vh-5rem)] animate-in fade-in slide-in-from-top-2 duration-150"
       >
         
         {/* Header */}

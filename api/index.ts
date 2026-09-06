@@ -27,6 +27,13 @@ import {
   reviewAuthoritativeQuestionnaireEditAccess,
   customizeAuthoritativeQuestionnaire
 } from '../src/services/questionnaireService.js';
+import {
+  dispatchNotification,
+  getNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+  deleteNotification
+} from '../src/services/notificationService.js';
 
 dotenv.config();
 
@@ -199,16 +206,24 @@ app.post('/api/iir/submit', async (req, res) => {
     }
 
     try {
-      await supabase.from('notifications').insert({
-        target_organization: client,
-        category: 'Submission Completed',
+      await dispatchNotification({
+        target_role: 'Auditor',
+        target_organization: distributor,
+        category: 'Data Submitted',
         title: `IRL Submitted by ${distributor}`,
-        message: `Distributor ${distributor} has submitted their Initial Information Request List for client ${client}.`,
-        is_read: false,
-        created_at: new Date().toISOString()
+        message: `Distributor ${distributor} has submitted their Initial Information Request List (${requests.length} items) for client ${client}.`,
+        link_tab: 'iir',
+        metadata: {
+          client,
+          distributorName: distributor,
+          linkTab: 'iir',
+          targetRole: 'Auditor',
+          status: 'Submitted',
+          action: 'Submitted'
+        }
       });
     } catch (e) {
-      console.warn('Supabase notification note:', e);
+      console.warn('Notification dispatch note:', e);
     }
 
     return res.json({
@@ -315,6 +330,47 @@ app.post('/api/iir/update-item-status', async (req, res) => {
       });
     } catch (e) {
       console.warn('Review status audit log note:', e);
+    }
+
+    try {
+      const notifCategory = reviewerStatus === 'Accepted'
+        ? 'Evidence Accepted'
+        : reviewerStatus === 'Rejected'
+        ? 'Evidence Rejected'
+        : 'Clarification Requested';
+
+      const notifTitle = reviewerStatus === 'Accepted'
+        ? `Requirement Accepted: ${itemId}`
+        : reviewerStatus === 'Rejected'
+        ? `Requirement Rejected: ${itemId}`
+        : `Clarification Requested: ${itemId}`;
+
+      const notifMsg = reviewerStatus === 'Accepted'
+        ? `Auditor accepted submitted response and evidence for Requirement ${itemId}.`
+        : reviewerStatus === 'Rejected'
+        ? `Auditor rejected Requirement ${itemId}. Reason: "${reviewerNote || 'Requirements not met.'}"`
+        : `Auditor requested clarification on Requirement ${itemId}: "${reviewerNote || 'Please provide additional details.'}"`;
+
+      await dispatchNotification({
+        target_organization: distributor,
+        target_role: 'Distributor',
+        category: notifCategory,
+        title: notifTitle,
+        message: notifMsg,
+        link_tab: 'engagement_workspace',
+        metadata: {
+          requirementId: itemId,
+          client,
+          distributorName: distributor,
+          status: reviewerStatus,
+          action: reviewerStatus,
+          targetRole: 'Distributor',
+          targetOrganization: distributor,
+          linkTab: 'engagement_workspace'
+        }
+      });
+    } catch (e) {
+      console.warn('Item status notification error:', e);
     }
 
     return res.json({
@@ -584,6 +640,30 @@ app.post('/api/storage/upload', upload.single('file'), async (req, res) => {
         isReferenceMaterial: isRef
       }
     );
+
+    if (!isRef) {
+      try {
+        await dispatchNotification({
+          target_role: 'Auditor',
+          target_organization: distributorName,
+          category: 'Evidence Uploaded',
+          title: `Evidence Uploaded: ${requirementId || metadata.fileName}`,
+          message: `Distributor ${distributorName} uploaded evidence file "${metadata.fileName}" for ${requirementId || 'Audit Requirement'}.`,
+          link_tab: 'evidence_management',
+          metadata: {
+            requirementId,
+            fileName: metadata.fileName,
+            distributorName,
+            clientName,
+            targetRole: 'Auditor',
+            action: 'Uploaded',
+            linkTab: 'evidence_management'
+          }
+        });
+      } catch (e) {
+        console.warn('Upload notification error:', e);
+      }
+    }
 
     res.json({
       success: true,
