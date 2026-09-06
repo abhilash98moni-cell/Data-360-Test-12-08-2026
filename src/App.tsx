@@ -140,7 +140,9 @@ export default function App() {
   const [isNewAuditOpen, setIsNewAuditOpen] = useState(false);
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
   const [isIIRFullScreen, setIsIIRFullScreen] = useState(false);
+  const [targetVoucherNo, setTargetVoucherNo] = useState<string | null>(null);
 
   // Active User Session State — Loaded from localStorage if available
   const [currentUser, setCurrentUser] = useState<UserSession | null>(() => {
@@ -156,6 +158,33 @@ export default function App() {
     }
     return null; // Start unauthenticated so user can sign in / sign up dynamically!
   });
+
+  // Periodic polling for unread notifications
+  React.useEffect(() => {
+    const fetchUnread = async () => {
+      try {
+        const params = new URLSearchParams();
+        if (currentUser?.role) params.set('role', currentUser.role);
+        const dist = currentUser?.organization || selectedDistributor;
+        if (dist) params.set('distributor', dist);
+        const res = await fetch(`/api/notifications?${params.toString()}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.notifications)) {
+            const unread = data.notifications.filter((n: any) => !n.isRead).length;
+            setUnreadNotificationsCount(unread);
+          }
+        }
+      } catch (e) {}
+    };
+    fetchUnread();
+    window.addEventListener('notification-updated', fetchUnread);
+    const interval = setInterval(fetchUnread, 5000);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('notification-updated', fetchUnread);
+    };
+  }, [currentUser?.role, currentUser?.organization, selectedDistributor]);
 
   // Sync client & distributor when currentUser changes
   React.useEffect(() => {
@@ -258,12 +287,13 @@ export default function App() {
         onThemeModeChange={handleThemeModeChange}
         onOpenCopilot={() => setIsCopilotOpen(true)}
         onOpenNewAudit={() => setIsNewAuditOpen(true)}
-        unreadAlertsCount={3}
+        unreadAlertsCount={unreadNotificationsCount}
         onNavigateToIIR={() => {
           setActiveTab('engagement_workspace');
         }}
         currentUser={currentUser}
         onOpenAuth={() => setIsAuthOpen(true)}
+        onOpenNotifications={() => setIsNotificationsOpen(prev => !prev)}
         onLogout={handleLogout}
         onNavigateToProfile={(tab) => {
           setActiveTab('profile');
@@ -351,6 +381,7 @@ export default function App() {
               isIIRFullScreen={isIIRFullScreen}
               onToggleIIRFullScreen={() => setIsIIRFullScreen(prev => !prev)}
               onDistributorChangeGlobal={setSelectedDistributor}
+              targetVoucherNo={targetVoucherNo}
             />
           ) : activeTab === 'evidence' ? (
             <EvidenceManagementView 
@@ -368,6 +399,7 @@ export default function App() {
               currentUser={currentUser}
               currencyMode={currencyMode}
               onNavigateToUpload={() => setActiveTab('engagement_workspace')}
+              targetVoucherNo={targetVoucherNo}
             />
 
           ) : activeTab === 'reporting' ? (
@@ -431,6 +463,21 @@ export default function App() {
       <NotificationsModal 
         isOpen={isNotificationsOpen}
         onClose={() => setIsNotificationsOpen(false)}
+        currentUser={currentUser}
+        selectedDistributor={selectedDistributor}
+        onUpdateUnreadCount={setUnreadNotificationsCount}
+        onNavigateToTab={(tab, targetVoucher) => {
+          if (targetVoucher) {
+            setTargetVoucherNo(targetVoucher);
+          }
+          if (tab === 'sampling_review' || tab === 'sampling') {
+            setActiveTab('sampling_review');
+          } else if (tab === 'engagement_workspace') {
+            setActiveTab('engagement_workspace');
+          } else {
+            setActiveTab(tab);
+          }
+        }}
       />
     </div>
   );

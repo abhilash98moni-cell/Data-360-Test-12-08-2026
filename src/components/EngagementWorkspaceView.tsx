@@ -33,6 +33,7 @@ interface EngagementWorkspaceViewProps {
   isIIRFullScreen?: boolean;
   onToggleIIRFullScreen?: () => void;
   onDistributorChangeGlobal?: (distributor: string) => void;
+  targetVoucherNo?: string | null;
 }
 
 export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = ({
@@ -47,9 +48,16 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
   isIIRFullScreen = false,
   onToggleIIRFullScreen,
   onDistributorChangeGlobal,
-  currencyMode
+  currencyMode,
+  targetVoucherNo
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<EngagementSubTab>(initialSubTab);
+  const [activeSubTab, setActiveSubTab] = useState<EngagementSubTab>(targetVoucherNo ? 'sampling' : initialSubTab);
+
+  React.useEffect(() => {
+    if (targetVoucherNo) {
+      setActiveSubTab('sampling');
+    }
+  }, [targetVoucherNo]);
 
   const isDistributor = currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor');
   const isAuditor = !isDistributor;
@@ -141,6 +149,7 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
           currentUser={currentUser}
           currencyMode={currencyMode}
           onNavigateToSamplingReview={onNavigateToSamplingReview}
+          targetVoucherNo={targetVoucherNo}
         />
       )}
       {activeSubTab === 'iir' && (

@@ -83,6 +83,7 @@ interface SamplingUploadViewProps {
   currentUser: UserSession | null;
   currencyMode?: string;
   onNavigateToSamplingReview?: () => void;
+  targetVoucherNo?: string | null;
 }
 
 export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
@@ -91,7 +92,8 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   selectedAuditFilter,
   currentUser,
   currencyMode: activeCurrencyMode = 'INR',
-  onNavigateToSamplingReview
+  onNavigateToSamplingReview,
+  targetVoucherNo
 }) => {
   const currencyMode: CurrencyMode = (activeCurrencyMode === 'USD' ? 'USD' : 'INR');
   const isDistributor = currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor');
@@ -101,6 +103,29 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   const [activePopulation, setActivePopulation] = useState<SamplingPopulation | null>(null);
   const [availablePopulations, setAvailablePopulations] = useState<SamplingPopulation[]>([]);
   const [records, setRecords] = useState<GLRecord[]>([]);
+
+  useEffect(() => {
+    if (targetVoucherNo) {
+      const found = records.find(r => r.voucherNo === targetVoucherNo || r.id === targetVoucherNo);
+      if (found) {
+        setOpenQuestionnaireFor(found);
+      } else {
+        setOpenQuestionnaireFor({
+          id: targetVoucherNo,
+          date: new Date().toISOString().split('T')[0],
+          accountNumber: 'GL-REQ',
+          accountDescription: 'Sampling Transaction Required Data',
+          description: `Transaction / Voucher #${targetVoucherNo}`,
+          voucherNo: targetVoucherNo,
+          narration: `Audit sampling transaction for voucher #${targetVoucherNo}`,
+          debit: 0,
+          credit: 0,
+          balance: 0,
+          currency: currencyMode
+        });
+      }
+    }
+  }, [targetVoucherNo, records]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isUploading, setIsUploading] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
@@ -828,38 +853,54 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                       <td className="py-2.5 px-3 text-center whitespace-nowrap bg-slate-950/20">
                         {(() => {
                           const resp = questionnaireResponses[row.id] || questionnaireResponses[row.voucherNo] || questionnaireResponses[row.sampleId];
-                          const isCompleted = resp?.status === 'Completed' || resp?.status === 'Submitted';
-                          const isDraft = resp?.status === 'Draft';
+                          const st = resp?.status;
+                          const isAccepted = st === 'Accepted';
+                          const isCompleted = st === 'Completed' || st === 'Submitted';
+                          const isClarification = st === 'Clarification Required';
+                          const isRejected = st === 'Rejected';
+                          const isDraft = st === 'Draft';
+
+                          const buttonClass = isAccepted
+                            ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30'
+                            : isRejected
+                            ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40 hover:bg-rose-600/30'
+                            : isClarification
+                            ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40 hover:bg-amber-600/30'
+                            : isCompleted
+                            ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30'
+                            : isDraft
+                            ? 'bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700'
+                            : 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 shadow-indigo-600/20';
+
                           return (
-                            <div className="flex items-center justify-center gap-1.5">
+                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
                               <button
                                 type="button"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setOpenQuestionnaireFor(row);
                                 }}
-                                className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm ${
-                                  isCompleted
-                                    ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30 shadow-emerald-950/40'
-                                    : isDraft
-                                    ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40 hover:bg-amber-600/30 shadow-amber-950/40'
-                                    : 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 shadow-indigo-600/20 hover:shadow-indigo-600/30'
-                                }`}
+                                className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm ${buttonClass}`}
                                 title="Open Required Data Questionnaire"
                               >
                                 <FileText className="h-3.5 w-3.5" />
                                 <span>Questionnaire</span>
                               </button>
-                              {isCompleted ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
-                                  <CheckCircle2 className="h-2.5 w-2.5" />
-                                  Done
+                              {st && (
+                                <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                  st === 'Accepted'
+                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                    : st === 'Clarification Required'
+                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                    : st === 'Rejected'
+                                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                    : st === 'Submitted'
+                                    ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                                }`}>
+                                  {st === 'Clarification Required' ? 'Clarification' : st}
                                 </span>
-                              ) : isDraft ? (
-                                <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20">
-                                  Draft
-                                </span>
-                              ) : null}
+                              )}
                             </div>
                           );
                         })()}

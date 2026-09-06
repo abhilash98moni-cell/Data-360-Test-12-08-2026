@@ -24,12 +24,24 @@ export interface AppNotification {
   id: string;
   title: string;
   message: string;
-  category: 'User Invited' | 'Distributor Assigned' | 'Documents Uploaded' | 'Clarification Requested' | 'Submission Completed' | 'System';
+  category: 'User Invited' | 'Distributor Assigned' | 'Documents Uploaded' | 'Clarification Requested' | 'Submission Completed' | 'Evidence Accepted' | 'Evidence Rejected' | 'Required Data Updated' | 'System' | string;
   timestamp: string;
   isRead: boolean;
   linkTab?: string;
   targetUserRole?: string;
   targetOrganization?: string;
+  targetVoucherNo?: string;
+  targetSampleId?: string;
+  metadata?: {
+    voucherNo?: string;
+    sampleId?: string;
+    linkTab?: string;
+    targetRole?: string;
+    distributorName?: string;
+    action?: string;
+    status?: string;
+    [key: string]: any;
+  };
 }
 
 export interface ConversationSummary {

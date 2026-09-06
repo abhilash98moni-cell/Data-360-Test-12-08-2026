@@ -202,13 +202,19 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Risk Notification Bell */}
           <div className="relative">
             <button 
+              id="header-notification-bell-btn"
               onClick={onOpenNotifications}
-              className="p-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg transition-colors relative cursor-pointer"
+              className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-all relative cursor-pointer flex items-center justify-center"
               title="View In-App Notifications & Alerts"
             >
-              <Bell className="h-4 w-4" />
+              <Bell className="h-4.5 w-4.5" />
               {unreadAlertsCount > 0 && (
-                <span className="absolute top-0.5 right-0.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-slate-900 animate-ping"></span>
+                <>
+                  <span className="absolute top-1 right-1 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-slate-900 animate-ping pointer-events-none"></span>
+                  <span className="absolute -top-1 -right-1 flex h-4.5 min-w-[18px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white shadow-lg ring-2 ring-slate-900 leading-none">
+                    {unreadAlertsCount > 9 ? '9+' : unreadAlertsCount}
+                  </span>
+                </>
               )}
             </button>
           </div>

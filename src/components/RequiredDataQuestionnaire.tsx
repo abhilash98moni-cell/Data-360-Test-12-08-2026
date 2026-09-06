@@ -17,12 +17,19 @@ import {
   Image as ImageIcon, 
   File, 
   HelpCircle,
-  ArrowRight,
   Send,
   Building2,
   Calendar,
   Receipt,
-  DollarSign
+  DollarSign,
+  AlertTriangle,
+  History,
+  Check,
+  XCircle,
+  MessageSquare,
+  ShieldCheck,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { UserSession } from '../types';
 import { CurrencyMode, formatFinancialAmount } from '../utils/currencyFormatter';
@@ -35,9 +42,28 @@ export interface UploadedDocument {
   uploadDate: string;
   googleDriveFileId?: string;
   url?: string;
+  dataUrl?: string;
 }
 
-interface QuestionnaireProps {
+export interface ItemResponseData {
+  remarks?: string;
+  files?: UploadedDocument[];
+  reviewStatus?: 'Pending' | 'Accepted' | 'Clarification Required' | 'Rejected';
+  clarificationMessage?: string;
+  auditorDecisionAt?: string;
+  auditorEmail?: string;
+}
+
+export interface ClarificationHistoryItem {
+  id: string;
+  timestamp: string;
+  by: string;
+  role: 'Auditor' | 'Distributor';
+  message: string;
+  action: 'Clarification Required' | 'Resubmitted' | 'Evidence Accepted' | 'Evidence Rejected' | 'Draft' | 'Submitted';
+}
+
+export interface QuestionnaireProps {
   transaction: any;
   engagementId: string | undefined;
   currentUser: UserSession | null;
@@ -45,6 +71,8 @@ interface QuestionnaireProps {
   isReviewMode?: boolean;
   isDistributorWorkflow?: boolean;
   currencyMode?: CurrencyMode | string;
+  selectedDistributor?: string;
+  selectedClient?: string;
 }
 
 export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
@@ -54,305 +82,452 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
   onClose,
   isReviewMode = false,
   isDistributorWorkflow = false,
-  currencyMode = 'INR'
+  currencyMode = 'INR',
+  selectedDistributor,
+  selectedClient
 }) => {
   const activeCurrency: CurrencyMode = currencyMode === 'USD' ? 'USD' : 'INR';
   const isDistributor = isDistributorWorkflow || currentUser?.role?.includes('Distributor') || currentUser?.role === 'Distributor';
-  
-  // Core Required Data States
-  const [notes, setNotes] = useState<string>('');
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedDocument[]>([]);
-  const [status, setStatus] = useState<string>('Draft');
+  const isAuditor = !isDistributor;
+
+  const targetSampleId = String(transaction?.id || transaction?.sampleId || transaction?.voucherNo || 'TX-1');
+  const targetVoucherNo = String(transaction?.voucherNo || transaction?.id || '');
+  const activeDistributor = selectedDistributor || transaction?.distributor || currentUser?.organization || 'Distributor';
+
+  // State Management
   const [loading, setLoading] = useState<boolean>(true);
   const [saving, setSaving] = useState<boolean>(false);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
-  const [isUploading, setIsUploading] = useState<boolean>(false);
-  const [uploadProgressText, setUploadProgressText] = useState<string>('');
-  const [isDragging, setIsDragging] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // File Inputs Refs
-  const multiFileInputRef = useRef<HTMLInputElement>(null);
-  const replaceFileInputRef = useRef<HTMLInputElement>(null);
-  const replaceTargetIndexRef = useRef<number | null>(null);
+  // Overall status
+  const [status, setStatus] = useState<string>('Draft');
+  const [isPushed, setIsPushed] = useState<boolean>(false);
+  const [pushedAt, setPushedAt] = useState<string | null>(null);
+  const [pushedBy, setPushedBy] = useState<string | null>(null);
+  const [pushedTo, setPushedTo] = useState<string | null>(null);
 
-  // Preview Modal State
+  // Questions created by Auditor
+  const [questions, setQuestions] = useState<any[]>([]);
+  
+  // Per-item response dictionary: key = question.id || question.dbId || question.question_id
+  const [itemResponses, setItemResponses] = useState<Record<string, ItemResponseData>>({});
+
+  // General notes & documents
+  const [generalNotes, setGeneralNotes] = useState<string>('');
+  const [generalFiles, setGeneralFiles] = useState<UploadedDocument[]>([]);
+
+  // Clarification loop
+  const [activeClarificationMessage, setActiveClarificationMessage] = useState<string>('');
+  const [clarificationHistory, setClarificationHistory] = useState<ClarificationHistoryItem[]>([]);
+  const [showClarificationModal, setShowClarificationModal] = useState<boolean>(false);
+  const [clarificationTargetItem, setClarificationTargetItem] = useState<string | null>(null); // null = overall
+  const [clarificationInputText, setClarificationInputText] = useState<string>('');
+  const [showHistoryDrawer, setShowHistoryDrawer] = useState<boolean>(false);
+
+  // Question creation/edit modal
+  const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);
+  const [editingQuestion, setEditingQuestion] = useState<any | null>(null);
+  const [questionTextForm, setQuestionTextForm] = useState<string>('');
+  const [questionHelpForm, setQuestionHelpForm] = useState<string>('');
+  const [questionRequiredForm, setQuestionRequiredForm] = useState<boolean>(true);
+
+  // File Upload handling
+  const [uploadingTarget, setUploadingTarget] = useState<string | null>(null); // 'general' or questionId
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [previewDoc, setPreviewDoc] = useState<UploadedDocument | null>(null);
 
-  // Optional Auditor Questions
-  const [questions, setQuestions] = useState<any[]>([]);
-  const [responses, setResponses] = useState<Record<string, any>>({});
-  const [comments, setComments] = useState<Record<string, string>>({});
-  const [showAddQuestion, setShowAddQuestion] = useState(false);
-  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
-  const [questionForm, setQuestionForm] = useState({
-    text: '',
-    type: 'Yes / No',
-    required: false,
-    allowComment: false,
-    allowFileUpload: false,
-    helpText: '',
-    scope: 'transaction'
-  });
-
-  const classification = transaction?.testingClassification?.[0] || 'General';
-  const targetSampleId = transaction?.id || transaction?.sampleId || transaction?.voucherNo || 'TX-1';
-  const targetVoucherNo = transaction?.voucherNo || transaction?.id || '';
-
+  // Load Questions & Existing Responses from DB on mount
   useEffect(() => {
-    fetchQuestionsAndResponses();
-  }, [transaction?.id, transaction?.voucherNo]);
+    loadData();
+  }, [targetSampleId, targetVoucherNo, engagementId]);
 
-  const fetchQuestionsAndResponses = async () => {
+  const loadData = async () => {
+    setLoading(true);
+    setErrorMessage(null);
     try {
-      setLoading(true);
+      const headers = { 'x-user-email': currentUser?.email || '' };
       
-      // 1. Fetch Questions for this engagement
-      const qRes = await fetch(`/api/sampling/required-data/questions?auditId=${encodeURIComponent(engagementId || '')}`, {
-        headers: { 'x-user-email': currentUser?.email || '' }
-      });
+      // 1. Fetch questions for this sample / voucher
+      const qRes = await fetch(
+        `/api/sampling/required-data/questions?auditId=${encodeURIComponent(engagementId || 'eng-101')}&sampleId=${encodeURIComponent(targetSampleId)}&voucherNo=${encodeURIComponent(targetVoucherNo)}&distributorId=${encodeURIComponent(activeDistributor)}`,
+        { headers }
+      );
       const qData = await qRes.json();
-      
       if (qData.success && Array.isArray(qData.questions)) {
-        const applicable = qData.questions.filter((q: any) => {
-          if (q.scope === 'all') return true;
-          if (q.scope === 'classification' && q.testing_classification === classification) return true;
-          if (q.scope === 'transaction' && (q.sample_id === targetSampleId || q.sample_id === targetVoucherNo)) return true;
-          return false;
-        });
-        setQuestions(applicable);
-      }
-
-      // 2. Fetch Existing Response & Files for this transaction
-      const rRes = await fetch(`/api/sampling/required-data/responses?sampleId=${encodeURIComponent(targetSampleId)}`, {
-        headers: { 'x-user-email': currentUser?.email || '' }
-      });
-      const rData = await rRes.json();
-
-      if (rData.success && Array.isArray(rData.responses) && rData.responses.length > 0) {
-        const respRecord = rData.responses[0];
-        setStatus(respRecord.status || 'Draft');
-        
-        // Notes / explanations
-        const existingNotes = respRecord.notes || 
-                              respRecord.responses?.notes || 
-                              respRecord.responses?.comments?.general || 
-                              '';
-        setNotes(existingNotes);
-
-        // Uploaded files list
-        const existingFiles: UploadedDocument[] = 
-          respRecord.uploadedFiles || 
-          respRecord.responses?.uploadedFiles || 
-          [];
-
-        // Also check if legacy single documents existed per question
-        const legacyDocs = respRecord.responses?.documents || {};
-        const legacyFileEntries: UploadedDocument[] = Object.keys(legacyDocs).map((qId, idx) => ({
-          id: `legacy-${idx}-${Date.now()}`,
-          name: legacyDocs[qId],
-          size: '1.0 MB',
-          type: 'application/octet-stream',
-          uploadDate: respRecord.updated_at || new Date().toISOString()
-        }));
-
-        if (existingFiles.length === 0 && legacyFileEntries.length > 0) {
-          setUploadedFiles(legacyFileEntries);
-        } else {
-          setUploadedFiles(existingFiles);
-        }
-
-        setResponses(respRecord.responses?.answers || {});
-        setComments(respRecord.responses?.comments || {});
+        setQuestions(qData.questions);
       } else {
-        setStatus('Draft');
-        setNotes('');
-        setUploadedFiles([]);
-        setResponses({});
-        setComments({});
+        setQuestions([]);
       }
-    } catch (err) {
-      console.error('Error loading questionnaire data:', err);
+
+      // 2. Fetch existing responses
+      const rRes = await fetch(
+        `/api/sampling/required-data/responses?sampleId=${encodeURIComponent(targetSampleId)}&voucherNo=${encodeURIComponent(targetVoucherNo)}&distributorId=${encodeURIComponent(activeDistributor)}&auditId=${encodeURIComponent(engagementId || 'eng-101')}`,
+        { headers }
+      );
+      const rData = await rRes.json();
+      if (rData.success && Array.isArray(rData.responses) && rData.responses.length > 0) {
+        const resp = rData.responses[0];
+        setStatus(resp.status || 'Draft');
+        setIsPushed(resp.isPushed === true || resp.isPushed === 'true');
+        setPushedAt(resp.pushedAt || null);
+        setPushedBy(resp.pushedBy || null);
+        setPushedTo(resp.pushedTo || null);
+        setGeneralNotes(resp.notes || '');
+        setGeneralFiles(resp.uploadedFiles || []);
+        setItemResponses(resp.itemResponses || {});
+        setActiveClarificationMessage(resp.clarificationMessage || '');
+        setClarificationHistory(resp.clarificationHistory || []);
+      }
+    } catch (err: any) {
+      console.error('Failed to load questionnaire data:', err);
+      setErrorMessage('Could not load questionnaire details. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const formatFileSize = (bytes: number): string => {
-    if (!bytes || bytes === 0) return '0 KB';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  // Helper to get consistent question key
+  const getQuestionKey = (q: any) => String(q.dbId || q.question_id || q.id || '');
+
+  // File Upload Handler
+  const triggerFileUpload = (target: string) => {
+    setUploadingTarget(target);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+      fileInputRef.current.click();
+    }
   };
 
-  const getFileIcon = (fileName: string, mimeType?: string) => {
-    const ext = fileName.split('.').pop()?.toLowerCase() || '';
-    if (ext === 'pdf' || mimeType?.includes('pdf')) {
-      return <FileText className="h-5 w-5 text-rose-400 shrink-0" />;
-    }
-    if (['doc', 'docx', 'rtf'].includes(ext) || mimeType?.includes('word')) {
-      return <FileText className="h-5 w-5 text-blue-400 shrink-0" />;
-    }
-    if (['xls', 'xlsx', 'csv'].includes(ext) || mimeType?.includes('sheet') || mimeType?.includes('csv')) {
-      return <FileSpreadsheet className="h-5 w-5 text-emerald-400 shrink-0" />;
-    }
-    if (['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(ext) || mimeType?.includes('image')) {
-      return <ImageIcon className="h-5 w-5 text-purple-400 shrink-0" />;
-    }
-    return <File className="h-5 w-5 text-amber-400 shrink-0" />;
-  };
+  const handleFilesSelected = async (files: FileList | null) => {
+    if (!files || files.length === 0 || !uploadingTarget) return;
 
-  // Upload handler for multiple files or replacement
-  const handleUploadFiles = async (files: FileList | File[], replaceIndex?: number) => {
-    if (!files || files.length === 0) return;
+    const newDocs: UploadedDocument[] = [];
 
-    setIsUploading(true);
-    const fileArray = Array.from(files);
-    const newlyUploaded: UploadedDocument[] = [];
-
-    for (let i = 0; i < fileArray.length; i++) {
-      const file = fileArray[i];
-      setUploadProgressText(`Uploading ${file.name} (${i + 1}/${fileArray.length})...`);
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const docId = `doc_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       
+      // Read data URL for instant offline/in-memory preview support
+      const dataUrlPromise = new Promise<string>((resolve) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = () => resolve('');
+        reader.readAsDataURL(file);
+      });
+      const dataUrl = await dataUrlPromise;
+
+      let sizeStr = `${(file.size / 1024).toFixed(1)} KB`;
+      if (file.size > 1024 * 1024) {
+        sizeStr = `${(file.size / (1024 * 1024)).toFixed(2)} MB`;
+      }
+
+      // Try uploading to backend storage
+      let uploadedDocUrl = dataUrl;
+      let driveId = undefined;
       try {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('documentType', 'EVIDENCE');
         formData.append('documentUsage', 'REQUIRED_DATA');
         formData.append('requirementId', targetVoucherNo || targetSampleId);
-        formData.append('clientName', 'XYZ');
-        formData.append('distributorName', currentUser?.organization || 'Distributor');
+        formData.append('clientName', selectedClient || 'Apex Electronics Corp');
+        formData.append('distributorName', activeDistributor);
         formData.append('auditName', engagementId || 'XYZ Distributor Audit 2026');
 
-        const res = await fetch('/api/storage/upload', {
+        const uploadRes = await fetch('/api/storage/upload', {
           method: 'POST',
           headers: { 'x-user-email': currentUser?.email || '' },
           body: formData
         });
-
-        const data = await res.json();
-        if (res.ok && data.success) {
-          const docId = data.file?.googleDriveFileId || `doc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-          const docRecord: UploadedDocument = {
-            id: docId,
-            name: data.file?.fileName || file.name,
-            size: data.file?.fileSizeMB ? `${data.file.fileSizeMB} MB` : formatFileSize(file.size),
-            type: file.type || 'application/octet-stream',
-            googleDriveFileId: data.file?.googleDriveFileId,
-            uploadDate: new Date().toISOString(),
-            url: `/api/storage/download/${data.file?.googleDriveFileId || docId}?fileName=${encodeURIComponent(data.file?.fileName || file.name)}`
-          };
-          newlyUploaded.push(docRecord);
-        } else {
-          // Fallback offline mock entry if storage unavailable in demo
-          const fallbackDoc: UploadedDocument = {
-            id: `doc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            name: file.name,
-            size: formatFileSize(file.size),
-            type: file.type || 'application/octet-stream',
-            uploadDate: new Date().toISOString()
-          };
-          newlyUploaded.push(fallbackDoc);
+        const uploadData = await uploadRes.json();
+        if (uploadRes.ok && uploadData.success && uploadData.file) {
+          driveId = uploadData.file.googleDriveFileId;
+          uploadedDocUrl = `/api/storage/download/${driveId}?fileName=${encodeURIComponent(uploadData.file.fileName || file.name)}`;
         }
       } catch (err) {
-        console.error(`Error uploading ${file.name}:`, err);
-        const fallbackDoc: UploadedDocument = {
-          id: `doc-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-          name: file.name,
-          size: formatFileSize(file.size),
-          type: file.type || 'application/octet-stream',
-          uploadDate: new Date().toISOString()
-        };
-        newlyUploaded.push(fallbackDoc);
+        console.warn('Storage upload fallback to dataUrl', err);
       }
-    }
 
-    if (replaceIndex !== undefined && replaceIndex >= 0 && newlyUploaded.length > 0) {
-      // Replace existing file at index
-      setUploadedFiles(prev => {
-        const updated = [...prev];
-        updated[replaceIndex] = newlyUploaded[0];
-        return updated;
+      newDocs.push({
+        id: docId,
+        name: file.name,
+        size: sizeStr,
+        type: file.type || 'application/octet-stream',
+        uploadDate: new Date().toISOString(),
+        googleDriveFileId: driveId,
+        url: uploadedDocUrl,
+        dataUrl: dataUrl
       });
+    }
+
+    if (uploadingTarget === 'general') {
+      setGeneralFiles(prev => [...prev, ...newDocs]);
     } else {
-      // Append new files
-      setUploadedFiles(prev => [...prev, ...newlyUploaded]);
-    }
-
-    setIsUploading(false);
-    setUploadProgressText('');
-  };
-
-  // Trigger file replacement for a specific file index
-  const triggerReplace = (index: number) => {
-    replaceTargetIndexRef.current = index;
-    if (replaceFileInputRef.current) {
-      replaceFileInputRef.current.value = '';
-      replaceFileInputRef.current.click();
-    }
-  };
-
-  // Remove uploaded file
-  const removeFile = (index: number) => {
-    setUploadedFiles(prev => prev.filter((_, i) => i !== index));
-  };
-
-  // View / Open File
-  const handleViewFile = (file: UploadedDocument) => {
-    const ext = file.name.split('.').pop()?.toLowerCase() || '';
-    const isImg = ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext) || file.type.includes('image');
-    
-    if (isImg) {
-      setPreviewDoc(file);
-    } else {
-      const downloadUrl = file.url || `/api/storage/download/${file.googleDriveFileId || file.id}?fileName=${encodeURIComponent(file.name)}`;
-      window.open(downloadUrl, '_blank');
-    }
-  };
-
-  // Download File
-  const handleDownloadFile = (file: UploadedDocument) => {
-    const downloadUrl = file.url || `/api/storage/download/${file.googleDriveFileId || file.id}?fileName=${encodeURIComponent(file.name)}`;
-    const a = document.createElement('a');
-    a.href = downloadUrl;
-    a.download = file.name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-  };
-
-  // Save / Submit required data
-  const handleSave = async (targetStatus: 'Draft' | 'Submitted') => {
-    try {
-      setSaving(true);
-      setSaveSuccessMsg(null);
-
-      if (targetStatus === 'Submitted') {
-        // Optional validation: check if required questions are filled (Auditor only)
-        if (!isDistributor) {
-          const missing = questions.filter(q => q.required && !responses[q.dbId]);
-          if (missing.length > 0) {
-            alert(`Please answer the required question: "${missing[0].question_text}"`);
-            setSaving(false);
-            return;
+      const qKey = uploadingTarget;
+      setItemResponses(prev => {
+        const existing = prev[qKey] || {};
+        const existingFiles = existing.files || [];
+        return {
+          ...prev,
+          [qKey]: {
+            ...existing,
+            files: [...existingFiles, ...newDocs]
           }
+        };
+      });
+    }
+
+    if (isDistributor && newDocs.length > 0) {
+      try {
+        const fileNames = newDocs.map(d => d.name).join(', ');
+        fetch('/api/notifications', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-email': currentUser?.email || ''
+          },
+          body: JSON.stringify({
+            title: `Documents Uploaded: Voucher #${targetVoucherNo}`,
+            message: `Distributor ${activeDistributor} uploaded supporting documents (${fileNames}) for Voucher #${targetVoucherNo}.`,
+            category: 'Documents Uploaded',
+            targetRole: 'Auditor',
+            targetOrganization: activeDistributor,
+            metadata: {
+              voucherNo: targetVoucherNo,
+              sampleId: targetSampleId,
+              distributorName: activeDistributor,
+              linkTab: 'sampling_review',
+              targetRole: 'Auditor'
+            }
+          })
+        }).then(() => {
+          window.dispatchEvent(new CustomEvent('notification-updated'));
+        }).catch(e => console.warn('Upload notification error:', e));
+      } catch (e) {}
+    }
+
+    setUploadingTarget(null);
+  };
+
+  const removeFile = (target: string, fileId: string) => {
+    if (target === 'general') {
+      setGeneralFiles(prev => prev.filter(f => f.id !== fileId));
+    } else {
+      const qKey = target;
+      setItemResponses(prev => {
+        const existing = prev[qKey];
+        if (!existing) return prev;
+        return {
+          ...prev,
+          [qKey]: {
+            ...existing,
+            files: (existing.files || []).filter(f => f.id !== fileId)
+          }
+        };
+      });
+    }
+  };
+
+  const updateItemRemarks = (qKey: string, remarks: string) => {
+    setItemResponses(prev => ({
+      ...prev,
+      [qKey]: {
+        ...(prev[qKey] || {}),
+        remarks
+      }
+    }));
+  };
+
+  // AUDITOR: Add or Edit Question
+  const handleOpenAddQuestion = () => {
+    setEditingQuestion(null);
+    setQuestionTextForm('');
+    setQuestionHelpForm('');
+    setQuestionRequiredForm(true);
+    setShowAddQuestionModal(true);
+  };
+
+  const handleOpenEditQuestion = (q: any) => {
+    setEditingQuestion(q);
+    setQuestionTextForm(q.question_text || '');
+    setQuestionHelpForm(q.help_text || '');
+    setQuestionRequiredForm(q.required !== undefined ? q.required : true);
+    setShowAddQuestionModal(true);
+  };
+
+  const handleSaveQuestion = async () => {
+    if (!questionTextForm.trim()) return;
+
+    setSaving(true);
+    try {
+      if (editingQuestion) {
+        // Update existing question
+        const qId = editingQuestion.dbId || editingQuestion.id;
+        await fetch(`/api/sampling/required-data/questions/${qId}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-email': currentUser?.email || ''
+          },
+          body: JSON.stringify({
+            question_text: questionTextForm.trim(),
+            help_text: questionHelpForm.trim(),
+            required: questionRequiredForm
+          })
+        });
+
+        setQuestions(prev => prev.map(q => {
+          if ((q.dbId || q.id) === qId) {
+            return {
+              ...q,
+              question_text: questionTextForm.trim(),
+              help_text: questionHelpForm.trim(),
+              required: questionRequiredForm
+            };
+          }
+          return q;
+        }));
+      } else {
+        // Create new question for this transaction
+        const payload = {
+          engagement_id: engagementId || 'eng-101',
+          distributor_id: activeDistributor,
+          sample_id: targetSampleId,
+          voucher_no: targetVoucherNo,
+          question_text: questionTextForm.trim(),
+          help_text: questionHelpForm.trim(),
+          required: questionRequiredForm,
+          scope: 'transaction',
+          answer_type: 'Document Upload & Remarks',
+          allow_comment: true,
+          allow_file_upload: true
+        };
+
+        const res = await fetch('/api/sampling/required-data/questions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-user-email': currentUser?.email || ''
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          const newQ = {
+            dbId: data.dbId,
+            ...payload
+          };
+          setQuestions(prev => [...prev, newQ]);
         }
+      }
+      setShowAddQuestionModal(false);
+    } catch (err) {
+      console.error('Error saving question:', err);
+      alert('Failed to save question. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteQuestion = async (q: any) => {
+    if (!confirm('Are you sure you want to remove this required data item?')) return;
+    const qId = q.dbId || q.id;
+    try {
+      await fetch(`/api/sampling/required-data/questions/${qId}`, {
+        method: 'DELETE',
+        headers: { 'x-user-email': currentUser?.email || '' }
+      });
+      setQuestions(prev => prev.filter(item => (item.dbId || item.id) !== qId));
+    } catch (err) {
+      console.error('Error deleting question:', err);
+    }
+  };
+
+  // AUDITOR: Push Questionnaire to Distributor
+  const handlePushQuestionnaire = async () => {
+    if (questions.length === 0) {
+      alert('Please add at least one question / required data item before pushing to the distributor.');
+      return;
+    }
+
+    setSaving(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch('/api/sampling/required-data/push', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': currentUser?.email || ''
+        },
+        body: JSON.stringify({
+          engagementId: engagementId || 'eng-101',
+          sampleId: targetSampleId,
+          voucherNo: targetVoucherNo,
+          distributorId: activeDistributor,
+          distributorName: activeDistributor,
+          questions
+        })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setIsPushed(true);
+        setStatus('Pending Submission');
+        setPushedAt(new Date().toISOString());
+        setPushedBy(currentUser?.email || 'Auditor');
+        setPushedTo(activeDistributor);
+        setSaveSuccessMsg(`Questionnaire successfully pushed to ${activeDistributor}!`);
+        setTimeout(() => setSaveSuccessMsg(null), 4000);
+        window.dispatchEvent(new CustomEvent('notification-updated'));
+      } else {
+        alert(data.error || 'Failed to push questionnaire.');
+      }
+    } catch (err: any) {
+      console.error('Error pushing questionnaire:', err);
+      alert('Failed to push questionnaire. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // DISTRIBUTOR / AUDITOR: Save Responses / Draft / Submit
+  const handleSaveResponses = async (targetStatus: string = status) => {
+    setSaving(true);
+    setErrorMessage(null);
+    try {
+      const isSubmitting = targetStatus === 'Submitted';
+      let updatedHistory = [...clarificationHistory];
+
+      if (isSubmitting) {
+        const isResubmit = status === 'Clarification Required' || status === 'Rejected';
+        updatedHistory.push({
+          id: `hist_${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          by: currentUser?.email || (isDistributor ? 'Distributor' : 'Auditor'),
+          role: isDistributor ? 'Distributor' : 'Auditor',
+          message: isResubmit ? 'Provided updated evidence, remarks, and resubmitted required data.' : 'Submitted required data and documents.',
+          action: isResubmit ? 'Resubmitted' : 'Submitted'
+        });
       }
 
       const payload = {
         engagement_id: engagementId || 'eng-101',
         sample_id: targetSampleId,
         voucher_no: targetVoucherNo,
-        voucherNo: targetVoucherNo,
+        distributor_id: activeDistributor,
+        distributorName: activeDistributor,
         status: targetStatus,
-        notes: notes,
-        uploadedFiles: uploadedFiles,
-        responses: {
-          notes: notes,
-          uploadedFiles: uploadedFiles,
-          answers: responses,
-          comments: comments
-        }
+        notes: generalNotes,
+        uploadedFiles: generalFiles,
+        itemResponses,
+        isPushed,
+        pushedAt,
+        pushedBy,
+        pushedTo,
+        clarificationMessage: targetStatus === 'Submitted' ? '' : activeClarificationMessage,
+        clarificationHistory: updatedHistory,
+        actionRole: isDistributor ? 'Distributor' : 'Auditor',
+        actionType: targetStatus === 'Draft' ? 'DRAFT_SAVED' : (status === 'Clarification Required' || status === 'Rejected' ? 'RESUBMITTED' : 'SUBMITTED')
       };
 
       const res = await fetch('/api/sampling/required-data/responses', {
@@ -367,56 +542,136 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
       const data = await res.json();
       if (data.success) {
         setStatus(targetStatus);
-        setSaveSuccessMsg(targetStatus === 'Submitted' ? 'Required data submitted successfully!' : 'Draft saved successfully!');
-        
+        setClarificationHistory(updatedHistory);
         if (targetStatus === 'Submitted') {
-          setTimeout(() => {
-            onClose();
-          }, 1200);
+          setActiveClarificationMessage('');
+          setSaveSuccessMsg('Required data submitted successfully to the auditor!');
+        } else if (targetStatus === 'Draft') {
+          setSaveSuccessMsg('Draft saved successfully.');
         } else {
-          setTimeout(() => {
-            setSaveSuccessMsg(null);
-          }, 3500);
+          setSaveSuccessMsg('Changes saved.');
         }
+        setTimeout(() => setSaveSuccessMsg(null), 4000);
+        window.dispatchEvent(new CustomEvent('notification-updated'));
       } else {
-        alert('Failed to save data. Please try again.');
+        alert(data.error || 'Failed to save.');
       }
-    } catch (err) {
-      console.error('Save error:', err);
-      alert('An error occurred while saving.');
+    } catch (err: any) {
+      console.error('Failed to save responses:', err);
+      alert('Failed to save data. Please check your network connection.');
     } finally {
       setSaving(false);
     }
   };
 
-  // Auditor question handlers
-  const handleSaveQuestion = async () => {
-    if (!questionForm.text.trim()) return alert("Question text is required");
-    
+  // AUDITOR: Item-level Decision (Accept, Clarification, Reject)
+  const handleItemDecision = async (qKey: string, newReviewStatus: 'Accepted' | 'Clarification Required' | 'Rejected') => {
+    if (newReviewStatus === 'Clarification Required') {
+      setClarificationTargetItem(qKey);
+      setClarificationInputText(itemResponses[qKey]?.clarificationMessage || '');
+      setShowClarificationModal(true);
+      return;
+    }
+
+    const updatedItems = {
+      ...itemResponses,
+      [qKey]: {
+        ...(itemResponses[qKey] || {}),
+        reviewStatus: newReviewStatus,
+        auditorDecisionAt: new Date().toISOString(),
+        auditorEmail: currentUser?.email || 'Auditor'
+      }
+    };
+    setItemResponses(updatedItems);
+
+    // Save immediately so decision persists in DB and triggers notification
     try {
       const payload = {
-        engagement_id: engagementId,
-        testing_classification: classification,
-        question_text: questionForm.text,
-        answer_type: questionForm.type,
-        required: questionForm.required,
-        help_text: questionForm.helpText,
-        scope: questionForm.scope,
-        sample_id: questionForm.scope === 'transaction' ? targetSampleId : null,
-        allow_comment: questionForm.allowComment,
-        allow_file_upload: questionForm.allowFileUpload
+        engagement_id: engagementId || 'eng-101',
+        sample_id: targetSampleId,
+        voucher_no: targetVoucherNo,
+        distributor_id: activeDistributor,
+        distributorName: activeDistributor,
+        status: status === 'Draft' || !status ? 'Pending Submission' : status,
+        notes: generalNotes,
+        uploadedFiles: generalFiles,
+        itemResponses: updatedItems,
+        isPushed: true,
+        actionRole: 'Auditor',
+        actionType: 'ITEM_DECISION',
+        itemKey: qKey,
+        itemDecision: newReviewStatus
+      };
+      await fetch('/api/sampling/required-data/responses', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': currentUser?.email || ''
+        },
+        body: JSON.stringify(payload)
+      });
+      setSaveSuccessMsg(`Item marked as ${newReviewStatus}.`);
+      setTimeout(() => setSaveSuccessMsg(null), 3000);
+      window.dispatchEvent(new CustomEvent('notification-updated'));
+    } catch (e) {
+      console.warn('Auto-save item decision error:', e);
+    }
+  };
+
+  // AUDITOR: Clarification Modal Submit
+  const handleSendClarification = async () => {
+    if (!clarificationInputText.trim()) {
+      alert('Please enter clarification instructions for the distributor.');
+      return;
+    }
+
+    const message = clarificationInputText.trim();
+    const updatedHistory: ClarificationHistoryItem[] = [
+      ...clarificationHistory,
+      {
+        id: `hist_${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        by: currentUser?.email || 'Auditor',
+        role: 'Auditor',
+        message: clarificationTargetItem 
+          ? `[Item Specific] ${message}` 
+          : message,
+        action: 'Clarification Required'
+      }
+    ];
+
+    let updatedItemResponses = { ...itemResponses };
+    if (clarificationTargetItem) {
+      updatedItemResponses[clarificationTargetItem] = {
+        ...(updatedItemResponses[clarificationTargetItem] || {}),
+        reviewStatus: 'Clarification Required',
+        clarificationMessage: message,
+        auditorDecisionAt: new Date().toISOString(),
+        auditorEmail: currentUser?.email || 'Auditor'
+      };
+    }
+
+    setSaving(true);
+    try {
+      const payload = {
+        engagement_id: engagementId || 'eng-101',
+        sample_id: targetSampleId,
+        voucher_no: targetVoucherNo,
+        distributor_id: activeDistributor,
+        distributorName: activeDistributor,
+        status: 'Clarification Required',
+        notes: generalNotes,
+        uploadedFiles: generalFiles,
+        itemResponses: updatedItemResponses,
+        isPushed: true,
+        clarificationMessage: message,
+        clarificationHistory: updatedHistory,
+        actionRole: 'Auditor',
+        actionType: 'CLARIFICATION_REQUESTED'
       };
 
-      let url = '/api/sampling/required-data/questions';
-      let method = 'POST';
-
-      if (editingQuestionId) {
-        url = `/api/sampling/required-data/questions/${editingQuestionId}`;
-        method = 'PUT';
-      }
-
-      const res = await fetch(url, {
-        method,
+      const res = await fetch('/api/sampling/required-data/responses', {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'x-user-email': currentUser?.email || ''
@@ -425,702 +680,1002 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
       });
       const data = await res.json();
       if (data.success) {
-        setShowAddQuestion(false);
-        setEditingQuestionId(null);
-        fetchQuestionsAndResponses();
+        setStatus('Clarification Required');
+        setActiveClarificationMessage(message);
+        setItemResponses(updatedItemResponses);
+        setClarificationHistory(updatedHistory);
+        setShowClarificationModal(false);
+        setClarificationTargetItem(null);
+        setClarificationInputText('');
+        setSaveSuccessMsg('Clarification request sent to distributor.');
+        setTimeout(() => setSaveSuccessMsg(null), 4000);
+        window.dispatchEvent(new CustomEvent('notification-updated'));
       }
     } catch (err) {
-      console.error(err);
-      alert("Failed to save question");
+      console.error('Error sending clarification:', err);
+      alert('Failed to send clarification request.');
+    } finally {
+      setSaving(false);
     }
   };
 
-  const handleDeleteQuestion = async (id: string) => {
-    if (!window.confirm("Are you sure you want to remove this question?")) return;
+  // AUDITOR: Overall Decision (Accept All, Reject)
+  const handleOverallDecision = async (newStatus: 'Accepted' | 'Rejected') => {
+    setSaving(true);
     try {
-      const res = await fetch(`/api/sampling/required-data/questions/${id}`, {
-        method: 'DELETE',
-        headers: { 'x-user-email': currentUser?.email || '' }
+      const updatedHistory: ClarificationHistoryItem[] = [
+        ...clarificationHistory,
+        {
+          id: `hist_${Date.now()}`,
+          timestamp: new Date().toISOString(),
+          by: currentUser?.email || 'Auditor',
+          role: 'Auditor',
+          message: newStatus === 'Accepted' ? 'All submitted evidence accepted.' : 'Submitted evidence rejected.',
+          action: newStatus === 'Accepted' ? 'Evidence Accepted' : 'Evidence Rejected'
+        }
+      ];
+
+      // Also set all item statuses
+      const updatedItems = { ...itemResponses };
+      questions.forEach(q => {
+        const k = getQuestionKey(q);
+        updatedItems[k] = {
+          ...(updatedItems[k] || {}),
+          reviewStatus: newStatus,
+          auditorDecisionAt: new Date().toISOString(),
+          auditorEmail: currentUser?.email || 'Auditor'
+        };
       });
-      if (res.ok) fetchQuestionsAndResponses();
+
+      const payload = {
+        engagement_id: engagementId || 'eng-101',
+        sample_id: targetSampleId,
+        voucher_no: targetVoucherNo,
+        distributor_id: activeDistributor,
+        distributorName: activeDistributor,
+        status: newStatus,
+        notes: generalNotes,
+        uploadedFiles: generalFiles,
+        itemResponses: updatedItems,
+        isPushed: true,
+        clarificationMessage: '',
+        clarificationHistory: updatedHistory,
+        actionRole: 'Auditor',
+        actionType: newStatus === 'Accepted' ? 'EVIDENCE_ACCEPTED' : 'EVIDENCE_REJECTED'
+      };
+
+      const res = await fetch('/api/sampling/required-data/responses', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': currentUser?.email || ''
+        },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setStatus(newStatus);
+        setItemResponses(updatedItems);
+        setClarificationHistory(updatedHistory);
+        setSaveSuccessMsg(`Questionnaire status updated to: ${newStatus}`);
+        setTimeout(() => setSaveSuccessMsg(null), 4000);
+        window.dispatchEvent(new CustomEvent('notification-updated'));
+      }
     } catch (err) {
-      console.error(err);
+      console.error('Error updating status:', err);
+      alert('Failed to update status.');
+    } finally {
+      setSaving(false);
     }
+  };
+
+  // Helper Icon for file types
+  const getFileIcon = (fileName: string) => {
+    const ext = fileName.split('.').pop()?.toLowerCase() || '';
+    if (['xls', 'xlsx', 'csv'].includes(ext)) {
+      return <FileSpreadsheet className="h-5 w-5 text-emerald-400" />;
+    }
+    if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) {
+      return <ImageIcon className="h-5 w-5 text-amber-400" />;
+    }
+    if (['pdf'].includes(ext)) {
+      return <FileText className="h-5 w-5 text-rose-400" />;
+    }
+    return <File className="h-5 w-5 text-indigo-400" />;
+  };
+
+  const handleDownloadFile = (doc: UploadedDocument) => {
+    const link = document.createElement('a');
+    link.href = doc.url || doc.dataUrl || '#';
+    link.download = doc.name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5 bg-slate-950/80 backdrop-blur-md animate-fade-in overflow-y-auto">
-      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col relative overflow-hidden my-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-slate-900 border border-slate-700/80 rounded-2xl w-full max-w-5xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
         
-        {/* Top Header */}
-        <div className="p-5 sm:p-6 border-b border-slate-800 bg-slate-900/90 backdrop-blur-sm flex justify-between items-start shrink-0">
-          <div className="flex-1 pr-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl text-indigo-400">
-                <FileText className="h-6 w-6" />
+        {/* Hidden File Input */}
+        <input 
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.jpg,.jpeg,.png,.webp,.txt,.zip,.rtf"
+          className="hidden"
+          onChange={(e) => handleFilesSelected(e.target.files)}
+        />
+
+        {/* Modal Header */}
+        <div className="px-6 py-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="p-2 bg-indigo-600/20 text-indigo-400 rounded-xl border border-indigo-500/30">
+              <FileText className="h-5 w-5" />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-bold text-white tracking-tight">
+                  Required Data & Questionnaire
+                </h2>
+                <span className="font-mono text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-semibold">
+                  Voucher #{targetVoucherNo}
+                </span>
+                
+                {/* Status Badge */}
+                <span className={`text-[11px] font-bold px-2.5 py-0.5 rounded-full border flex items-center gap-1 ${
+                  status === 'Accepted'
+                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    : status === 'Clarification Required'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
+                    : status === 'Submitted'
+                    ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                    : status === 'Pending Submission'
+                    ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                    : status === 'Rejected'
+                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                    : 'bg-slate-800 text-slate-400 border-slate-700'
+                }`}>
+                  {status === 'Accepted' && <CheckCircle2 className="h-3 w-3" />}
+                  {status === 'Clarification Required' && <AlertTriangle className="h-3 w-3" />}
+                  {status === 'Submitted' && <Clock className="h-3 w-3" />}
+                  {status === 'Pending Submission' && <Send className="h-3 w-3" />}
+                  {status === 'Rejected' && <XCircle className="h-3 w-3" />}
+                  {status}
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-0.5 truncate">
+                Engagement: <span className="text-slate-300 font-medium">{engagementId || 'General Audit'}</span> • Distributor: <span className="text-slate-300 font-medium">{activeDistributor}</span>
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {clarificationHistory.length > 0 && (
+              <button
+                onClick={() => setShowHistoryDrawer(!showHistoryDrawer)}
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors border border-slate-700"
+                title="View History & Clarification Logs"
+              >
+                <History className="h-3.5 w-3.5 text-indigo-400" />
+                <span>History ({clarificationHistory.length})</span>
+              </button>
+            )}
+            <button 
+              onClick={onClose}
+              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Success Toast */}
+        {saveSuccessMsg && (
+          <div className="bg-emerald-500/20 border-b border-emerald-500/30 px-6 py-2.5 flex items-center gap-2 text-xs font-semibold text-emerald-300 animate-in fade-in">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+            <span>{saveSuccessMsg}</span>
+          </div>
+        )}
+
+        {/* Error Toast */}
+        {errorMessage && (
+          <div className="bg-rose-500/20 border-b border-rose-500/30 px-6 py-2.5 flex items-center gap-2 text-xs font-semibold text-rose-300 animate-in fade-in">
+            <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+            <span>{errorMessage}</span>
+          </div>
+        )}
+
+        {/* Modal Scrollable Body */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          
+          {/* 1. Transaction Summary Card */}
+          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+              <div>
+                <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Date</span>
+                <span className="font-mono text-slate-200 font-semibold">{transaction?.date || '—'}</span>
               </div>
               <div>
-                <div className="flex items-center gap-2.5">
-                  <h2 className="text-lg sm:text-xl font-black text-white">
-                    Required Data Submission
-                  </h2>
-                  {status === 'Submitted' || status === 'Completed' ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 shadow-sm shadow-emerald-950/40">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      Submitted
-                    </span>
-                  ) : status === 'Draft' ? (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30">
-                      <Clock className="h-3.5 w-3.5" />
-                      Draft
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-800 text-slate-400 border border-slate-700">
-                      <AlertCircle className="h-3.5 w-3.5" />
-                      Pending Submission
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Provide supporting documents, invoice records, and explanatory notes for this specific audit transaction.
+                <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Account</span>
+                <span className="text-slate-200 font-semibold truncate block" title={transaction?.accountDescription}>
+                  {transaction?.accountDescription || transaction?.accountNumber || '—'}
+                </span>
+              </div>
+              <div>
+                <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Debit</span>
+                <span className="font-mono text-emerald-400 font-bold">
+                  {Number(transaction?.debit) > 0 ? formatFinancialAmount(Number(transaction.debit), activeCurrency) : '—'}
+                </span>
+              </div>
+              <div>
+                <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Credit</span>
+                <span className="font-mono text-indigo-400 font-bold">
+                  {Number(transaction?.credit) > 0 ? formatFinancialAmount(Number(transaction.credit), activeCurrency) : '—'}
+                </span>
+              </div>
+            </div>
+            {transaction?.description && (
+              <div className="mt-2.5 pt-2.5 border-t border-slate-800/60 text-xs text-slate-300">
+                <span className="font-bold text-slate-400 mr-2">Description:</span>
+                <span>{transaction.description}</span>
+                {transaction?.narration && transaction.narration !== transaction.description && (
+                  <span className="text-slate-500 ml-2">({transaction.narration})</span>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* 2. Clarification Active Alert Box */}
+          {status === 'Clarification Required' && activeClarificationMessage && (
+            <div className="bg-amber-500/10 border border-amber-500/40 rounded-xl p-4 space-y-2">
+              <div className="flex items-center gap-2 text-amber-300 text-sm font-bold">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+                <span>Auditor Clarification Request</span>
+              </div>
+              <p className="text-xs text-amber-100 bg-slate-900/60 p-3 rounded-lg border border-amber-500/20 font-medium leading-relaxed">
+                {activeClarificationMessage}
+              </p>
+              <p className="text-[11px] text-amber-400/80">
+                {isDistributor 
+                  ? 'Please review the requested changes, attach any missing documents or updated remarks, and click "Resubmit Required Data" below.'
+                  : 'Clarification has been requested from the distributor. Awaiting updated submission.'}
+              </p>
+            </div>
+          )}
+
+          {/* Rejection Alert Box */}
+          {status === 'Rejected' && (
+            <div className="bg-rose-500/10 border border-rose-500/40 rounded-xl p-4 space-y-2">
+              <div className="flex items-center gap-2 text-rose-300 text-sm font-bold">
+                <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                <span>Auditor Review: Evidence Rejected</span>
+              </div>
+              {activeClarificationMessage && (
+                <p className="text-xs text-rose-100 bg-slate-900/60 p-3 rounded-lg border border-rose-500/20 font-medium leading-relaxed">
+                  {activeClarificationMessage}
+                </p>
+              )}
+              <p className="text-[11px] text-rose-300/80">
+                {isDistributor 
+                  ? 'The submitted documentation for this voucher was rejected by the auditor. Please review comments/discrepancies, attach corrected documents or remarks, and click "Resubmit Required Data" below.'
+                  : 'Submitted evidence has been rejected. The distributor has been notified to provide replacement documentation.'}
+              </p>
+            </div>
+          )}
+
+          {/* Evidence Accepted Alert Box */}
+          {status === 'Accepted' && (
+            <div className="bg-emerald-500/10 border border-emerald-500/40 rounded-xl p-3.5 flex items-center gap-3">
+              <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
+              <div>
+                <span className="text-xs font-bold text-emerald-300">Auditor Review: Evidence Accepted</span>
+                <p className="text-[11px] text-emerald-200/80 mt-0.5">
+                  All submitted documentation and responses for this voucher have been verified and approved by the auditor.
                 </p>
               </div>
             </div>
-          </div>
+          )}
 
-          <button 
-            onClick={onClose} 
-            className="p-2 hover:bg-slate-800 rounded-xl transition-colors text-slate-400 hover:text-white cursor-pointer"
-            title="Close"
-          >
-            <X className="h-5 w-5" />
-          </button>
-        </div>
-
-        {/* Transaction Metadata Banner */}
-        <div className="bg-slate-950/60 border-b border-slate-800/80 px-6 py-3 shrink-0">
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 text-xs font-mono">
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-sans">Transaction / ID</span>
-              <span className="text-indigo-300 font-semibold">{targetSampleId}</span>
-            </div>
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-sans">Voucher No</span>
-              <span className="text-slate-200 font-semibold">{transaction?.voucherNo || '—'}</span>
-            </div>
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-sans">Date</span>
-              <span className="text-slate-300">{transaction?.date || '—'}</span>
-            </div>
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-sans">Account</span>
-              <span className="text-slate-300 truncate block" title={transaction?.accountName || transaction?.accountCode}>
-                {transaction?.accountName || transaction?.accountCode || '—'}
-              </span>
-            </div>
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-sans">Debit / Credit</span>
-              <span className="text-slate-200">
-                {Number(transaction?.debit) > 0 ? `Dr: ${formatFinancialAmount(transaction.debit, activeCurrency)}` : 
-                 Number(transaction?.credit) > 0 ? `Cr: ${formatFinancialAmount(transaction.credit, activeCurrency)}` : '—'}
-              </span>
-            </div>
-            <div>
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block font-sans">Description</span>
-              <span className="text-slate-400 truncate block" title={transaction?.description}>
-                {transaction?.description || '—'}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        {/* Scrollable Form Content */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-6 bg-slate-900/40">
-          
-          {loading ? (
-            <div className="flex flex-col items-center justify-center py-16 text-slate-400 space-y-3">
-              <RefreshCw className="h-6 w-6 animate-spin text-indigo-400" />
-              <p className="text-sm font-medium">Loading transaction questionnaire and responses...</p>
-            </div>
-          ) : (
-            <>
-              {/* SECTION 1: Additional Notes, Explanations & Comments */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Edit2 className="h-4 w-4 text-indigo-400" />
-                    <h3 className="text-sm font-bold text-white tracking-wide">
-                      Additional Notes, Explanations & Comments
-                    </h3>
+          {/* 3. Clarification History Drawer (Collapsible) */}
+          {showHistoryDrawer && clarificationHistory.length > 0 && (
+            <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <div className="flex items-center gap-2 text-xs font-bold text-slate-300">
+                  <History className="h-4 w-4 text-indigo-400" />
+                  <span>Audit Trail & Clarification History</span>
+                </div>
+                <button
+                  onClick={() => setShowHistoryDrawer(false)}
+                  className="text-xs text-slate-500 hover:text-slate-300"
+                >
+                  Close
+                </button>
+              </div>
+              <div className="space-y-2.5 max-h-48 overflow-y-auto pr-1">
+                {clarificationHistory.map((item, idx) => (
+                  <div key={item.id || idx} className="p-2.5 bg-slate-900/80 border border-slate-800/80 rounded-lg text-xs space-y-1">
+                    <div className="flex items-center justify-between text-[10px] text-slate-500">
+                      <span className="font-bold text-slate-400">{item.role} ({item.by})</span>
+                      <span>{new Date(item.timestamp).toLocaleString()}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-indigo-300">
+                        {item.action}
+                      </span>
+                      <p className="text-slate-200">{item.message}</p>
+                    </div>
                   </div>
-                  <span className="text-[11px] text-slate-400">
-                    Provide context, business purpose, or clarifications
-                  </span>
-                </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  disabled={isReviewMode}
-                  placeholder="Enter supporting details, transaction explanations, justification, invoice reference numbers, approvals, or any relevant comments for the audit team..."
-                  rows={4}
-                  className="w-full bg-slate-950 border border-slate-700/80 rounded-xl p-3.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-all resize-y min-h-[100px]"
-                />
-                
-                <div className="flex justify-between items-center text-[11px] text-slate-500">
-                  <span>Formatting: Free text. All explanations are saved with this transaction record.</span>
-                  <span>{notes.length} characters</span>
-                </div>
+          {/* 4. Main Section: Required Data Items / Questions */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-bold text-white tracking-wide flex items-center gap-2">
+                  <FileText className="h-4 w-4 text-indigo-400" />
+                  Required Information & Evidence Items ({questions.length})
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {isAuditor 
+                    ? 'Specify the exact documents, certifications, or explanations required from the distributor for this transaction.'
+                    : 'Provide the requested supporting documents and remarks for each item below.'}
+                </p>
               </div>
 
-              {/* SECTION 2: Supporting Documents & Files Upload */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <Upload className="h-4 w-4 text-emerald-400" />
-                    <h3 className="text-sm font-bold text-white tracking-wide">
-                      Supporting Documents & Evidence Files
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[11px] font-bold text-slate-300 border border-slate-700">
-                      {uploadedFiles.length} {uploadedFiles.length === 1 ? 'file' : 'files'}
-                    </span>
-                  </div>
-                  <div className="text-[11px] text-slate-400 hidden sm:block">
-                    PDF, Word, Excel, CSV, Images (JPG/PNG), TXT, ZIP
-                  </div>
+              {/* Auditor Add Question Button */}
+              {isAuditor && (
+                <button
+                  onClick={handleOpenAddQuestion}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-indigo-600/30 cursor-pointer"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span>Add Item</span>
+                </button>
+              )}
+            </div>
+
+            {/* Questions List */}
+            {loading ? (
+              <div className="py-12 text-center text-xs text-slate-400">
+                <div className="inline-block animate-spin mb-2">⟳</div>
+                <p>Loading required data questionnaire...</p>
+              </div>
+            ) : questions.length === 0 ? (
+              <div className="border border-dashed border-slate-800 rounded-xl p-8 text-center bg-slate-950/30 space-y-3">
+                <div className="w-10 h-10 rounded-full bg-slate-800 text-slate-400 flex items-center justify-center mx-auto">
+                  <FileText className="w-5 h-5" />
                 </div>
-
-                {/* Upload Drag & Drop Zone */}
-                {!isReviewMode && (
-                  <div
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      setIsDragging(true);
-                    }}
-                    onDragLeave={(e) => {
-                      e.preventDefault();
-                      setIsDragging(false);
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      setIsDragging(false);
-                      if (e.dataTransfer.files) {
-                        handleUploadFiles(e.dataTransfer.files);
-                      }
-                    }}
-                    onClick={() => multiFileInputRef.current?.click()}
-                    className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-2.5 transition-all cursor-pointer ${
-                      isDragging 
-                        ? 'border-indigo-500 bg-indigo-500/10' 
-                        : 'border-slate-700/80 hover:border-indigo-500/60 bg-slate-950/40 hover:bg-slate-950/80'
-                    }`}
+                <div className="space-y-1">
+                  <h4 className="text-sm font-bold text-slate-300">No Required Data Items Defined</h4>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    {isAuditor 
+                      ? 'No questions have been configured for this transaction. Click "Add Item" above to specify what evidence the distributor must provide.'
+                      : 'No specific required data items have been requested for this transaction yet. You can attach general supporting documents and notes below.'}
+                  </p>
+                </div>
+                {isAuditor && (
+                  <button
+                    onClick={handleOpenAddQuestion}
+                    className="mt-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5 shadow-md shadow-indigo-600/20"
                   >
-                    <div className="p-3 bg-indigo-500/10 text-indigo-400 rounded-full border border-indigo-500/20">
-                      <Upload className="h-6 w-6" />
-                    </div>
-                    
-                    <div className="text-center">
-                      <p className="text-sm font-bold text-slate-200">
-                        Click to browse or drag and drop supporting files
-                      </p>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Invoices, delivery challans, purchase orders, approval emails, bank vouchers, or calculation sheets
-                      </p>
-                    </div>
-
-                    <div className="flex flex-wrap items-center justify-center gap-2 mt-1">
-                      <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-400">PDF</span>
-                      <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-400">Word (DOC/DOCX)</span>
-                      <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-400">Excel / CSV</span>
-                      <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-400">Images (JPG/PNG)</span>
-                      <span className="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-bold text-slate-400">Max 50MB</span>
-                    </div>
-
-                    {isUploading && (
-                      <div className="flex items-center gap-2 mt-2 px-3 py-1.5 bg-indigo-500/20 border border-indigo-500/40 rounded-lg text-indigo-300 text-xs font-semibold animate-pulse">
-                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                        <span>{uploadProgressText || 'Uploading documents...'}</span>
-                      </div>
-                    )}
-                  </div>
+                    <Plus className="h-3.5 w-3.5" /> Add First Item
+                  </button>
                 )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {questions.map((q, idx) => {
+                  const qKey = getQuestionKey(q);
+                  const itemData = itemResponses[qKey] || {};
+                  const itemFiles = itemData.files || [];
+                  const itemRemarks = itemData.remarks || '';
+                  const itemReviewStatus = itemData.reviewStatus || 'Pending';
 
-                {/* Hidden File Inputs */}
-                <input
-                  ref={multiFileInputRef}
-                  type="file"
-                  multiple
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.webp,.txt,.zip,.rtf"
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files) {
-                      handleUploadFiles(e.target.files);
-                    }
-                  }}
-                />
-
-                <input
-                  ref={replaceFileInputRef}
-                  type="file"
-                  accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.webp,.txt,.zip,.rtf"
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files[0] && replaceTargetIndexRef.current !== null) {
-                      handleUploadFiles([e.target.files[0]], replaceTargetIndexRef.current);
-                      replaceTargetIndexRef.current = null;
-                    }
-                  }}
-                />
-
-                {/* Uploaded Documents List */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between text-xs font-bold text-slate-400 px-1">
-                    <span>Attached Documents ({uploadedFiles.length})</span>
-                    {!isReviewMode && uploadedFiles.length > 0 && (
-                      <button
-                        onClick={() => multiFileInputRef.current?.click()}
-                        className="text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 cursor-pointer"
-                      >
-                        <Plus className="h-3 w-3" /> Add More Files
-                      </button>
-                    )}
-                  </div>
-
-                  {uploadedFiles.length === 0 ? (
-                    <div className="py-6 px-4 border border-slate-800/80 rounded-xl bg-slate-950/20 text-center text-xs text-slate-500">
-                      No supporting documents attached yet. Click or drop files above to attach evidence for this transaction.
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-800/60 border border-slate-800 rounded-xl overflow-hidden bg-slate-950/40">
-                      {uploadedFiles.map((doc, idx) => (
-                        <div key={doc.id || idx} className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-800/30 transition-colors">
-                          <div className="flex items-center gap-3 min-w-0 flex-1">
-                            <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg">
-                              {getFileIcon(doc.name, doc.type)}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="text-sm font-semibold text-slate-200 truncate" title={doc.name}>
-                                {doc.name}
-                              </p>
-                              <div className="flex items-center gap-3 text-[11px] text-slate-400 mt-0.5">
-                                <span>{doc.size || '1.0 MB'}</span>
-                                <span>•</span>
-                                <span>{doc.uploadDate ? new Date(doc.uploadDate).toLocaleDateString() : 'Ready'}</span>
-                                <span className="inline-flex items-center gap-1 text-emerald-400 font-medium">
-                                  <CheckCircle2 className="h-3 w-3" /> Attached
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-
-                          {/* Action Buttons: View, Download, Replace, Remove */}
-                          <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
-                            <button
-                              type="button"
-                              onClick={() => handleViewFile(doc)}
-                              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-                              title="View / Preview Document"
-                            >
-                              <Eye className="h-3.5 w-3.5 text-slate-400" />
-                              <span>View</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadFile(doc)}
-                              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer shadow-sm"
-                              title="Download Document"
-                            >
-                              <Download className="h-3.5 w-3.5 text-slate-400" />
-                              <span>Download</span>
-                            </button>
-
-                            {!isReviewMode && (
-                              <>
-                                <button
-                                  type="button"
-                                  onClick={() => triggerReplace(idx)}
-                                  className="px-2.5 py-1.5 bg-slate-800/80 hover:bg-indigo-600/30 text-slate-300 hover:text-indigo-300 border border-slate-700 hover:border-indigo-500/40 rounded-lg text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer"
-                                  title="Replace with another file"
-                                >
-                                  <RefreshCw className="h-3.5 w-3.5" />
-                                  <span>Replace</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => removeFile(idx)}
-                                  className="p-1.5 bg-slate-800/80 hover:bg-rose-500/20 text-slate-400 hover:text-rose-400 border border-slate-700 hover:border-rose-500/30 rounded-lg transition-colors cursor-pointer"
-                                  title="Remove this document"
-                                >
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              </>
+                  return (
+                    <div 
+                      key={qKey || idx} 
+                      className={`border rounded-xl p-5 bg-slate-950/50 space-y-4 transition-colors ${
+                        itemReviewStatus === 'Accepted'
+                          ? 'border-emerald-500/40 bg-emerald-950/10'
+                          : itemReviewStatus === 'Clarification Required'
+                          ? 'border-amber-500/40 bg-amber-950/10'
+                          : itemReviewStatus === 'Rejected'
+                          ? 'border-rose-500/40 bg-rose-950/10'
+                          : 'border-slate-800'
+                      }`}
+                    >
+                      {/* Item Header */}
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1 flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/60">
+                              Item #{idx + 1}
+                            </span>
+                            {q.required && (
+                              <span className="text-[10px] font-bold text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-900/60">
+                                * Required
+                              </span>
+                            )}
+                            {/* Item Review Status Badge */}
+                            {itemReviewStatus !== 'Pending' && (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                                itemReviewStatus === 'Accepted'
+                                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                  : itemReviewStatus === 'Clarification Required'
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                  : 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                              }`}>
+                                {itemReviewStatus}
+                              </span>
                             )}
                           </div>
+
+                          <h4 className="text-sm font-semibold text-slate-100 leading-snug">
+                            {q.question_text}
+                          </h4>
+
+                          {q.help_text && (
+                            <p className="text-xs text-slate-400 italic">
+                              Guidance: {q.help_text}
+                            </p>
+                          )}
                         </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
 
-              {/* SECTION 3: Auditor Defined Questions (Only shown in Auditor mode; hidden in Distributor workflow) */}
-              {!isDistributor && questions.length > 0 && (
-                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <HelpCircle className="h-4 w-4 text-indigo-400" />
-                      <h3 className="text-sm font-bold text-white tracking-wide">
-                        Audit Questionnaire & Compliance Verification
-                      </h3>
-                      <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[11px] font-bold text-indigo-300 border border-slate-700">
-                        {questions.length} {questions.length === 1 ? 'question' : 'questions'}
-                      </span>
-                    </div>
-
-                    {!isDistributor && !isReviewMode && (
-                      <button 
-                        onClick={() => {
-                          setEditingQuestionId(null);
-                          setQuestionForm({ text: '', type: 'Yes / No', required: false, allowComment: false, allowFileUpload: false, helpText: '', scope: 'transaction' });
-                          setShowAddQuestion(true);
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-1 bg-indigo-600/20 text-indigo-400 hover:bg-indigo-600 hover:text-white rounded-lg transition-colors text-xs font-bold cursor-pointer"
-                      >
-                        <Plus className="h-3.5 w-3.5" />
-                        Add Question
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="space-y-3">
-                    {questions.map((q, idx) => (
-                      <div key={q.dbId || idx} className="p-4 bg-slate-950/40 border border-slate-800 rounded-xl space-y-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex items-start gap-2.5">
-                            <span className="font-bold text-indigo-400 text-xs mt-0.5">{idx + 1}.</span>
-                            <div>
-                              <p className="font-semibold text-slate-200 text-sm">
-                                {q.question_text}
-                                {q.required && <span className="text-rose-500 ml-1" title="Required">*</span>}
-                              </p>
-                              {q.help_text && <p className="text-xs text-slate-500 mt-1">{q.help_text}</p>}
-                            </div>
+                        {/* Auditor Actions on the question itself */}
+                        {isAuditor && (
+                          <div className="flex items-center gap-1 shrink-0">
+                            <button
+                              onClick={() => handleOpenEditQuestion(q)}
+                              className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                              title="Edit Question"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteQuestion(q)}
+                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
+                              title="Delete Question"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
                           </div>
-
-                          {!isDistributor && !isReviewMode && (
-                            <div className="flex items-center gap-1 shrink-0">
-                              <button
-                                onClick={() => {
-                                  setEditingQuestionId(q.dbId);
-                                  setQuestionForm({
-                                    text: q.question_text,
-                                    type: q.answer_type || 'Yes / No',
-                                    required: q.required,
-                                    helpText: q.help_text || '',
-                                    scope: q.scope || 'transaction',
-                                    allowComment: q.allow_comment || false,
-                                    allowFileUpload: q.allow_file_upload || false
-                                  });
-                                  setShowAddQuestion(true);
-                                }}
-                                className="p-1 text-slate-400 hover:text-indigo-400 rounded transition-colors"
-                                title="Edit Question"
-                              >
-                                <Edit2 className="h-3.5 w-3.5" />
-                              </button>
-                              <button
-                                onClick={() => handleDeleteQuestion(q.dbId)}
-                                className="p-1 text-slate-400 hover:text-rose-400 rounded transition-colors"
-                                title="Remove Question"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Answer Input */}
-                        <div className="pt-1">
-                          {q.answer_type === 'Yes / No' && (
-                            <div className="flex items-center gap-6">
-                              {['Yes', 'No'].map(opt => (
-                                <label key={opt} className="flex items-center gap-2 cursor-pointer text-sm text-slate-300">
-                                  <input 
-                                    type="radio" 
-                                    name={`q_${q.dbId}`} 
-                                    value={opt} 
-                                    disabled={isReviewMode}
-                                    checked={responses[q.dbId] === opt} 
-                                    onChange={(e) => setResponses({...responses, [q.dbId]: e.target.value})}
-                                    className="text-indigo-500 focus:ring-indigo-500 h-4 w-4 bg-slate-950 border-slate-700" 
-                                  />
-                                  <span>{opt}</span>
-                                </label>
-                              ))}
-                            </div>
-                          )}
-
-                          {q.answer_type === 'Yes / No / N/A' && (
-                            <div className="flex items-center gap-6">
-                              {['Yes', 'No', 'N/A'].map(opt => (
-                                <label key={opt} className="flex items-center gap-2 cursor-pointer text-sm text-slate-300">
-                                  <input 
-                                    type="radio" 
-                                    name={`q_${q.dbId}`} 
-                                    value={opt} 
-                                    disabled={isReviewMode}
-                                    checked={responses[q.dbId] === opt} 
-                                    onChange={(e) => setResponses({...responses, [q.dbId]: e.target.value})}
-                                    className="text-indigo-500 focus:ring-indigo-500 h-4 w-4 bg-slate-950 border-slate-700" 
-                                  />
-                                  <span>{opt}</span>
-                                </label>
-                              ))}
-                            </div>
-                          )}
-
-                          {(q.answer_type === 'Text' || !q.answer_type) && (
-                            <input
-                              type="text"
-                              disabled={isReviewMode}
-                              placeholder="Enter answer..."
-                              value={responses[q.dbId] || ''}
-                              onChange={(e) => setResponses({...responses, [q.dbId]: e.target.value})}
-                              className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                            />
-                          )}
-
-                          {q.answer_type === 'Number' && (
-                            <input
-                              type="number"
-                              disabled={isReviewMode}
-                              placeholder="Enter numeric value..."
-                              value={responses[q.dbId] || ''}
-                              onChange={(e) => setResponses({...responses, [q.dbId]: e.target.value})}
-                              className="w-full sm:w-64 bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                            />
-                          )}
-
-                          {q.answer_type === 'Date' && (
-                            <input
-                              type="date"
-                              disabled={isReviewMode}
-                              value={responses[q.dbId] || ''}
-                              onChange={(e) => setResponses({...responses, [q.dbId]: e.target.value})}
-                              className="bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-indigo-500"
-                            />
-                          )}
-
-                          {q.answer_type === 'Checkbox' && (
-                            <label className="flex items-center gap-2.5 cursor-pointer text-sm text-slate-300">
-                              <input 
-                                type="checkbox"
-                                disabled={isReviewMode}
-                                checked={responses[q.dbId] === 'true'}
-                                onChange={(e) => setResponses({...responses, [q.dbId]: e.target.checked ? 'true' : 'false'})}
-                                className="w-4 h-4 rounded text-indigo-500 bg-slate-950 border-slate-700 focus:ring-indigo-500"
-                              />
-                              <span>Confirmed / Verified</span>
-                            </label>
-                          )}
-
-                          {/* Specific Question Comment */}
-                          {q.allow_comment && (
-                            <div className="mt-2">
-                              <input
-                                type="text"
-                                disabled={isReviewMode}
-                                placeholder="Add specific clarification for this item..."
-                                value={comments[q.dbId] || ''}
-                                onChange={(e) => setComments({...comments, [q.dbId]: e.target.value})}
-                                className="w-full bg-slate-950/60 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
-                              />
-                            </div>
-                          )}
-                        </div>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </>
-          )}
-        </div>
 
-        {/* Footer Actions */}
-        <div className="p-4 sm:p-5 border-t border-slate-800 bg-slate-900 rounded-b-2xl shrink-0 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2 text-xs text-slate-400 order-2 sm:order-1">
-            {saveSuccessMsg ? (
-              <span className="text-emerald-400 font-bold flex items-center gap-1.5 animate-fade-in">
-                <CheckCircle2 className="h-4 w-4" />
-                {saveSuccessMsg}
-              </span>
-            ) : (
-              <span>
-                Status: <strong className="text-slate-200">{status}</strong>
-                {uploadedFiles.length > 0 && ` • ${uploadedFiles.length} supporting files attached`}
-              </span>
+                      {/* Specific Item Clarification Callout */}
+                      {itemReviewStatus === 'Clarification Required' && itemData.clarificationMessage && (
+                        <div className="bg-amber-500/15 border border-amber-500/30 rounded-lg p-3 text-xs space-y-1">
+                          <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                            <AlertTriangle className="h-3.5 w-3.5 text-amber-400" />
+                            Auditor Clarification Request for Item #{idx + 1}:
+                          </span>
+                          <p className="text-amber-100 font-medium">{itemData.clarificationMessage}</p>
+                        </div>
+                      )}
+
+                      {/* Supporting Documents for this item */}
+                      <div className="space-y-2 pt-1 border-t border-slate-800/60">
+                        <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+                          <span>Attached Documents ({itemFiles.length})</span>
+                          {/* Upload button for Distributor */}
+                          {isDistributor && (
+                            <button
+                              onClick={() => triggerFileUpload(qKey)}
+                              className="text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 cursor-pointer"
+                            >
+                              <Upload className="h-3 w-3" /> Upload Evidence
+                            </button>
+                          )}
+                        </div>
+
+                        {itemFiles.length === 0 ? (
+                          <div className="py-4 px-3 border border-slate-800/80 rounded-lg bg-slate-900/30 text-center text-xs text-slate-500">
+                            {isDistributor 
+                              ? 'No supporting files attached yet for this item. Click "Upload Evidence" to add documents (PDF, Excel, Word, PPT, images, CSV).'
+                              : 'No documents submitted for this item yet.'}
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-slate-800/60 border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
+                            {itemFiles.map((doc) => (
+                              <div key={doc.id} className="p-2.5 flex items-center justify-between gap-3 hover:bg-slate-800/30 transition-colors">
+                                <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                  {getFileIcon(doc.name)}
+                                  <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-medium text-slate-200 truncate" title={doc.name}>
+                                      {doc.name}
+                                    </p>
+                                    <span className="text-[10px] text-slate-500">
+                                      {doc.size} • {new Date(doc.uploadDate).toLocaleDateString()}
+                                    </span>
+                                  </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-1.5 shrink-0">
+                                  <button
+                                    onClick={() => setPreviewDoc(doc)}
+                                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-medium flex items-center gap-1"
+                                    title="View / Preview"
+                                  >
+                                    <Eye className="h-3 w-3" />
+                                    <span>View</span>
+                                  </button>
+                                  <button
+                                    onClick={() => handleDownloadFile(doc)}
+                                    className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-medium flex items-center gap-1"
+                                    title="Download"
+                                  >
+                                    <Download className="h-3 w-3" />
+                                    <span>Download</span>
+                                  </button>
+                                  {isDistributor && (
+                                    <button
+                                      onClick={() => removeFile(qKey, doc.id)}
+                                      className="p-1 text-slate-400 hover:text-rose-400 transition-colors"
+                                      title="Remove"
+                                    >
+                                      <Trash2 className="h-3 w-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Remarks / Notes for this item */}
+                      <div className="space-y-1.5 pt-1">
+                        <label className="text-xs font-bold text-slate-400">
+                          {isDistributor ? 'Distributor Notes / Remarks for this item:' : 'Distributor Remarks:'}
+                        </label>
+                        {isDistributor ? (
+                          <textarea
+                            value={itemRemarks}
+                            onChange={(e) => updateItemRemarks(qKey, e.target.value)}
+                            placeholder="Provide any explanations, voucher references, or context for this item..."
+                            rows={2}
+                            className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                          />
+                        ) : (
+                          <div className="p-2.5 bg-slate-900/60 border border-slate-800 rounded-lg text-xs text-slate-300 min-h-[38px]">
+                            {itemRemarks || <span className="text-slate-500 italic">No remarks entered by distributor.</span>}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Auditor Review Controls for this Item */}
+                      {isAuditor && (
+                        <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-3 flex-wrap bg-slate-900/30 -mx-5 -mb-5 p-3 rounded-b-xl">
+                          <span className="text-xs font-bold text-slate-400">
+                            Auditor Review:
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => handleItemDecision(qKey, 'Accepted')}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                                itemReviewStatus === 'Accepted'
+                                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/30'
+                                  : 'bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600 hover:text-white'
+                              }`}
+                            >
+                              <Check className="h-3.5 w-3.5" /> Accept Evidence
+                            </button>
+
+                            <button
+                              onClick={() => handleItemDecision(qKey, 'Clarification Required')}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                                itemReviewStatus === 'Clarification Required'
+                                  ? 'bg-amber-600 text-white shadow-sm shadow-amber-600/30'
+                                  : 'bg-amber-600/20 text-amber-300 hover:bg-amber-600 hover:text-white'
+                              }`}
+                            >
+                              <HelpCircle className="h-3.5 w-3.5" /> Require Clarification
+                            </button>
+
+                            <button
+                              onClick={() => handleItemDecision(qKey, 'Rejected')}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                                itemReviewStatus === 'Rejected'
+                                  ? 'bg-rose-600 text-white shadow-sm shadow-rose-600/30'
+                                  : 'bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white'
+                              }`}
+                            >
+                              <XCircle className="h-3.5 w-3.5" /> Reject
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto justify-end order-1 sm:order-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors cursor-pointer"
-            >
-              Cancel
-            </button>
+          {/* 5. General Supporting Documents & Overall Remarks */}
+          <div className="bg-slate-950/40 border border-slate-800 rounded-xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="text-sm font-bold text-slate-200">
+                  General Supporting Documents & Remarks
+                </h4>
+                <p className="text-xs text-slate-400">
+                  Additional transaction-level files, authorization memos, or general distributor remarks.
+                </p>
+              </div>
+              {isDistributor && (
+                <button
+                  onClick={() => triggerFileUpload('general')}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-700"
+                >
+                  <Upload className="h-3 w-3 text-indigo-400" />
+                  <span>Attach General File</span>
+                </button>
+              )}
+            </div>
 
-            {!isReviewMode && (
+            {/* General Files List */}
+            {generalFiles.length > 0 && (
+              <div className="divide-y divide-slate-800/60 border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
+                {generalFiles.map((doc) => (
+                  <div key={doc.id} className="p-2.5 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                      {getFileIcon(doc.name)}
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-medium text-slate-200 truncate" title={doc.name}>{doc.name}</p>
+                        <span className="text-[10px] text-slate-500">{doc.size} • {new Date(doc.uploadDate).toLocaleDateString()}</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => setPreviewDoc(doc)}
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-medium flex items-center gap-1"
+                      >
+                        <Eye className="h-3 w-3" /> View
+                      </button>
+                      <button
+                        onClick={() => handleDownloadFile(doc)}
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-medium flex items-center gap-1"
+                      >
+                        <Download className="h-3 w-3" /> Download
+                      </button>
+                      {isDistributor && (
+                        <button
+                          onClick={() => removeFile('general', doc.id)}
+                          className="p-1 text-slate-400 hover:text-rose-400 transition-colors"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* General Notes Textarea */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-400">Overall Remarks:</label>
+              {isDistributor ? (
+                <textarea
+                  value={generalNotes}
+                  onChange={(e) => setGeneralNotes(e.target.value)}
+                  placeholder="Enter any overall explanation or notes for the audit team..."
+                  rows={2}
+                  className="w-full bg-slate-900/80 border border-slate-700/80 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              ) : (
+                <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-lg text-xs text-slate-300 min-h-[38px]">
+                  {generalNotes || <span className="text-slate-500 italic">No overall remarks entered.</span>}
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+
+        {/* Modal Footer Controls */}
+        <div className="px-6 py-4 border-t border-slate-800 bg-slate-950/90 flex items-center justify-between gap-4 shrink-0 flex-wrap">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-500">
+              {isPushed ? `Pushed to ${activeDistributor}` : 'Not pushed to distributor yet'}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2.5">
+            {/* DISTRIBUTOR ACTIONS */}
+            {isDistributor && (
               <>
                 <button
                   type="button"
-                  disabled={saving || isUploading}
-                  onClick={() => handleSave('Draft')}
-                  className="px-4 py-2 bg-slate-800/90 hover:bg-slate-700 text-amber-300 border border-amber-500/30 hover:border-amber-500/50 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-sm"
+                  onClick={() => handleSaveResponses('Draft')}
+                  disabled={saving}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-700 disabled:opacity-50"
                 >
                   <Save className="h-3.5 w-3.5" />
-                  <span>{saving ? 'Saving...' : 'Save Draft'}</span>
+                  <span>Save Draft</span>
                 </button>
 
                 <button
                   type="button"
-                  disabled={saving || isUploading}
-                  onClick={() => handleSave('Submitted')}
-                  className="px-5 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-md shadow-indigo-600/30"
+                  onClick={() => handleSaveResponses('Submitted')}
+                  disabled={saving}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/30 disabled:opacity-50"
                 >
                   <Send className="h-3.5 w-3.5" />
-                  <span>{saving ? 'Submitting...' : 'Submit Required Data'}</span>
+                  <span>{status === 'Clarification Required' || status === 'Rejected' ? 'Resubmit Required Data' : 'Submit Required Data'}</span>
                 </button>
               </>
             )}
+
+            {/* AUDITOR ACTIONS */}
+            {isAuditor && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => handleSaveResponses(status)}
+                  disabled={saving}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-700 disabled:opacity-50"
+                >
+                  <Save className="h-3.5 w-3.5" />
+                  <span>Save Changes</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePushQuestionnaire}
+                  disabled={saving || questions.length === 0}
+                  className="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <Send className="h-3.5 w-3.5" />
+                  <span>Push to Distributor</span>
+                </button>
+
+                {/* Clarification Button for Auditor */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClarificationTargetItem(null);
+                    setClarificationInputText(activeClarificationMessage || '');
+                    setShowClarificationModal(true);
+                  }}
+                  disabled={saving}
+                  className="px-4 py-2 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <HelpCircle className="h-3.5 w-3.5" />
+                  <span>Require Clarification</span>
+                </button>
+
+                {/* Overall Reject Button */}
+                <button
+                  type="button"
+                  onClick={() => handleOverallDecision('Rejected')}
+                  disabled={saving}
+                  className="px-4 py-2 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <XCircle className="h-3.5 w-3.5" />
+                  <span>Reject Evidence</span>
+                </button>
+
+                {/* Overall Accept Button */}
+                <button
+                  type="button"
+                  onClick={() => handleOverallDecision('Accepted')}
+                  disabled={saving}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-600/20 disabled:opacity-50"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5" />
+                  <span>Accept Evidence</span>
+                </button>
+              </>
+            )}
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+            >
+              Close
+            </button>
           </div>
         </div>
 
-        {/* Inline Image Preview Modal */}
-        {previewDoc && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/90 backdrop-blur-md animate-fade-in">
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl max-w-3xl w-full p-5 space-y-4 max-h-[90vh] flex flex-col">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <ImageIcon className="h-5 w-5 text-purple-400" />
-                  <span className="font-bold text-white text-sm truncate max-w-md">{previewDoc.name}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => handleDownloadFile(previewDoc)}
-                    className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs transition-colors flex items-center gap-1"
-                  >
-                    <Download className="h-4 w-4" /> Download
-                  </button>
-                  <button
-                    onClick={() => setPreviewDoc(null)}
-                    className="p-1.5 hover:bg-slate-800 text-slate-400 hover:text-white rounded-lg transition-colors"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
+      </div>
 
-              <div className="flex-1 overflow-auto flex items-center justify-center bg-black/50 rounded-xl p-4 min-h-[300px]">
-                <img
-                  src={previewDoc.url || `/api/storage/download/${previewDoc.googleDriveFileId || previewDoc.id}?fileName=${encodeURIComponent(previewDoc.name)}`}
-                  alt={previewDoc.name}
-                  className="max-h-[65vh] max-w-full object-contain rounded"
-                  onError={(e) => {
-                    (e.target as HTMLElement).style.display = 'none';
-                  }}
+      {/* Add / Edit Question Modal (AUDITOR ONLY) */}
+      {showAddQuestionModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl p-6 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <FileText className="h-4 w-4 text-indigo-400" />
+                {editingQuestion ? 'Edit Required Item' : 'Add Required Item'}
+              </h3>
+              <button onClick={() => setShowAddQuestionModal(false)} className="text-slate-400 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">
+                  Item Description / Question <span className="text-rose-400">*</span>
+                </label>
+                <textarea
+                  value={questionTextForm}
+                  onChange={(e) => setQuestionTextForm(e.target.value)}
+                  placeholder="Enter the specific required data or document (e.g. Provide stamped tax invoice and signed delivery receipt)..."
+                  rows={3}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
               </div>
-            </div>
-          </div>
-        )}
 
-        {/* Auditor Add Question Modal */}
-        {showAddQuestion && (
-          <div className="absolute inset-0 z-50 flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-sm">
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl w-full max-w-xl p-6 space-y-4">
-              <h3 className="text-lg font-bold text-white">
-                {editingQuestionId ? 'Edit Audit Question' : 'Add Audit Question'}
-              </h3>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Question Text *</label>
-                  <textarea 
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none"
-                    value={questionForm.text}
-                    onChange={(e) => setQuestionForm({...questionForm, text: e.target.value})}
-                    placeholder="e.g. Confirm availability of stamped invoice and delivery receipt..."
-                    rows={3}
-                  />
-                </div>
-                
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Answer Type</label>
-                    <select 
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl p-2.5 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none"
-                      value={questionForm.type}
-                      onChange={(e) => setQuestionForm({...questionForm, type: e.target.value})}
-                    >
-                      {['Yes / No', 'Yes / No / N/A', 'Text', 'Number', 'Date', 'Checkbox'].map(t => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Required?</label>
-                    <div 
-                      className="flex items-center h-10 px-3 bg-slate-950 border border-slate-700 rounded-xl cursor-pointer" 
-                      onClick={() => setQuestionForm({...questionForm, required: !questionForm.required})}
-                    >
-                      <input 
-                        type="checkbox" 
-                        checked={questionForm.required} 
-                        onChange={() => {}}
-                        className="w-4 h-4 bg-slate-900 border-slate-700 text-indigo-500 rounded focus:ring-indigo-500"
-                      />
-                      <span className="ml-2 text-xs text-slate-300 font-medium">Answer is required</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <label className="flex items-center gap-2 cursor-pointer text-xs text-slate-300">
-                    <input 
-                      type="checkbox"
-                      checked={questionForm.allowComment}
-                      onChange={(e) => setQuestionForm({...questionForm, allowComment: e.target.checked})}
-                      className="w-4 h-4 rounded text-indigo-500 bg-slate-950 border-slate-700"
-                    />
-                    <span>Allow Distributor Comment</span>
-                  </label>
-                </div>
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-300">
+                  Guidance / Instructions (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={questionHelpForm}
+                  onChange={(e) => setQuestionHelpForm(e.target.value)}
+                  placeholder="e.g. Must show official storekeeper stamp and date"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
               </div>
 
-              <div className="pt-4 flex justify-end gap-3 border-t border-slate-800">
-                <button 
-                  onClick={() => setShowAddQuestion(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-semibold transition-colors"
+              <div className="flex items-center gap-2 pt-1">
+                <input
+                  type="checkbox"
+                  id="req_checkbox"
+                  checked={questionRequiredForm}
+                  onChange={(e) => setQuestionRequiredForm(e.target.checked)}
+                  className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-950 h-4 w-4"
+                />
+                <label htmlFor="req_checkbox" className="text-xs text-slate-300 font-semibold cursor-pointer">
+                  Mandatory item for distributor submission
+                </label>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setShowAddQuestionModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveQuestion}
+                disabled={!questionTextForm.trim() || saving}
+                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Save className="h-3.5 w-3.5" />
+                <span>{editingQuestion ? 'Update Item' : 'Add Item'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Clarification Instructions Modal (AUDITOR ONLY) */}
+      {showClarificationModal && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-amber-500/40 rounded-2xl w-full max-w-lg shadow-2xl p-6 space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-1.5 bg-amber-500/20 text-amber-400 rounded-lg">
+                  <AlertTriangle className="h-4 w-4" />
+                </div>
+                <h3 className="text-base font-bold text-white">
+                  {clarificationTargetItem ? 'Require Item Clarification' : 'Require Overall Clarification'}
+                </h3>
+              </div>
+              <button onClick={() => setShowClarificationModal(false)} className="text-slate-400 hover:text-white">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Enter your specific clarification instructions for the distributor. The distributor will be notified and will be able to upload missing evidence or revised remarks.
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-amber-300">
+                Clarification Message / Instructions:
+              </label>
+              <textarea
+                value={clarificationInputText}
+                onChange={(e) => setClarificationInputText(e.target.value)}
+                placeholder="e.g. The uploaded invoice is missing Page 2 showing the manager signature. Please upload the complete tax invoice and debit note..."
+                rows={4}
+                className="w-full bg-slate-950 border border-amber-500/40 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              />
+            </div>
+
+            <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">
+              <button
+                onClick={() => setShowClarificationModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendClarification}
+                disabled={!clarificationInputText.trim() || saving}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Send className="h-3.5 w-3.5" />
+                <span>Send Clarification Request</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Document Preview Modal */}
+      {previewDoc && (
+        <div className="fixed inset-0 z-70 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+            <div className="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {getFileIcon(previewDoc.name)}
+                <span className="text-sm font-bold text-white truncate max-w-md">{previewDoc.name}</span>
+                <span className="text-xs text-slate-500">({previewDoc.size})</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDownloadFile(previewDoc)}
+                  className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-bold flex items-center gap-1"
                 >
-                  Cancel
+                  <Download className="h-3 w-3" /> Download
                 </button>
-                <button 
-                  onClick={handleSaveQuestion}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-colors shadow-lg"
-                >
-                  Save Question
+                <button onClick={() => setPreviewDoc(null)} className="text-slate-400 hover:text-white p-1">
+                  <X className="h-5 w-5" />
                 </button>
               </div>
             </div>
-          </div>
-        )}
 
-      </div>
+            <div className="flex-1 p-4 bg-slate-950 flex items-center justify-center overflow-auto min-h-[300px]">
+              {previewDoc.type.includes('image') || previewDoc.name.match(/\.(jpg|jpeg|png|webp|gif)$/i) ? (
+                <img 
+                  src={previewDoc.dataUrl || previewDoc.url} 
+                  alt={previewDoc.name} 
+                  className="max-h-[60vh] max-w-full object-contain rounded"
+                  referrerPolicy="no-referrer"
+                />
+              ) : previewDoc.type.includes('pdf') || previewDoc.name.endsWith('.pdf') ? (
+                <iframe 
+                  src={previewDoc.dataUrl || previewDoc.url} 
+                  title={previewDoc.name}
+                  className="w-full h-[60vh] rounded border border-slate-800"
+                />
+              ) : (
+                <div className="text-center space-y-3 p-8">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto">
+                    {getFileIcon(previewDoc.name)}
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-200">{previewDoc.name}</h4>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    Direct browser preview is not supported for this file type ({previewDoc.type || 'binary'}). You can download and open it on your device.
+                  </p>
+                  <button
+                    onClick={() => handleDownloadFile(previewDoc)}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+                  >
+                    <Download className="h-4 w-4" /> Download File
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

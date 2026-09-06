@@ -16,6 +16,7 @@ interface SamplingViewProps {
   currentUser: UserSession | null;
   onFindingCreated?: (finding: any) => void;
   onNavigateToUpload?: () => void;
+  targetVoucherNo?: string | null;
 }
 
 const formatCurrency = (val: number | null | undefined, mode: string = 'INR') => {
@@ -102,19 +103,38 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   selectedAuditFilter,
   currentUser,
   currencyMode = 'INR',
-  onNavigateToUpload
+  onNavigateToUpload,
+  targetVoucherNo
 }) => {
   const isDistributor = currentUser?.role === 'Distributor';
   const [openClassificationId, setOpenClassificationId] = useState<string | null>(null);
   const [openQuestionnaireFor, setOpenQuestionnaireFor] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState<'GL' | '3PD' | 'EMP' | 'SALES'>('GL');
-  
+
   const [availablePopulations, setAvailablePopulations] = useState<any[]>([]);
   const [selectedPopulation, setSelectedPopulation] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   
   const [populationRecords, setPopulationRecords] = useState<any[]>([]);
   const [assignedSamples, setAssignedSamples] = useState<any[]>([]);
+
+  useEffect(() => {
+    if (targetVoucherNo) {
+      const found = assignedSamples.find(s => s.voucherNo === targetVoucherNo || s.sampleId === targetVoucherNo || s.id === targetVoucherNo);
+      if (found) {
+        setOpenQuestionnaireFor(found);
+      } else {
+        setOpenQuestionnaireFor({
+          id: targetVoucherNo,
+          sampleId: targetVoucherNo,
+          voucherNo: targetVoucherNo,
+          accountDescription: 'Sampling Transaction Required Data',
+          testingClassification: ['3rd Party Disbursement'],
+          status: 'Under Review'
+        });
+      }
+    }
+  }, [targetVoucherNo, assignedSamples]);
   const [classificationChanges, setClassificationChanges] = useState<Record<string, string[]>>({});
   const [isSavingClassifications, setIsSavingClassifications] = useState(false);
   const [classificationSaveSuccess, setClassificationSaveSuccess] = useState(false);
@@ -140,6 +160,29 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
     conditionalRules: [] as any[]
   });
   
+  const [questionnaireResponses, setQuestionnaireResponses] = useState<Record<string, any>>({});
+
+  const fetchQuestionnaireResponses = async () => {
+    try {
+      const res = await fetch(`/api/sampling/required-data/responses?auditId=${encodeURIComponent(selectedAuditFilter || 'eng-101')}&distributorId=${encodeURIComponent(selectedDistributor)}`, {
+        headers: { 'x-user-email': currentUser?.email || '' }
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.responses)) {
+        const map: Record<string, any> = {};
+        data.responses.forEach((r: any) => {
+          const sId = String(r.sample_id || '').toLowerCase();
+          const vNo = String(r.voucher_no || r.voucherNo || '').toLowerCase();
+          if (sId) map[sId] = r;
+          if (vNo) map[vNo] = r;
+        });
+        setQuestionnaireResponses(map);
+      }
+    } catch (err) {
+      console.warn('Failed to fetch questionnaire responses', err);
+    }
+  };
+
   const fetchCustomQuestions = async () => {
       try {
         const params = new URLSearchParams({
@@ -580,6 +623,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
 
       // 3. Fetch assigned sample transactions and review states
       await fetchAssignedSamples();
+      await fetchQuestionnaireResponses();
     } catch (err) {
       console.error("Failed to fetch sampling workspace", err);
     } finally {
@@ -1297,17 +1341,41 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                 </td>
                 )}
                 <td className="py-2.5 px-4 bg-slate-900/40">
-                  <div className="flex justify-center">
+                  <div className="flex flex-col items-center justify-center gap-1">
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         setOpenQuestionnaireFor(rec);
                       }}
-                      className="flex items-center justify-center gap-1.5 w-full max-w-[140px] bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 rounded px-3 py-1.5 hover:bg-indigo-600 hover:text-white transition-colors text-xs font-semibold"
+                      className="flex items-center justify-center gap-1.5 w-full max-w-[140px] bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 rounded px-3 py-1.5 hover:bg-indigo-600 hover:text-white transition-colors text-xs font-semibold cursor-pointer"
                     >
                       <FileText className="h-3.5 w-3.5" />
                       Questionnaire
                     </button>
+                    {(() => {
+                      const cleanKey1 = String(rec.id || '').toLowerCase();
+                      const cleanKey2 = String(rec.voucherNo || '').toLowerCase();
+                      const resp = questionnaireResponses[cleanKey1] || questionnaireResponses[cleanKey2];
+                      if (!resp?.status) return null;
+                      const st = resp.status;
+                      const badgeClass =
+                        st === 'Accepted'
+                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                          : st === 'Clarification Required'
+                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                          : st === 'Submitted'
+                          ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                          : st === 'Pending Submission'
+                          ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
+                          : st === 'Rejected'
+                          ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                          : 'bg-slate-800 text-slate-400 border-slate-700';
+                      return (
+                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badgeClass}`}>
+                          {st}
+                        </span>
+                      );
+                    })()}
                   </div>
                 </td>
               </tr>
@@ -1778,7 +1846,13 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
           engagementId={selectedAuditFilter || 'eng-101'}
           currentUser={currentUser}
           currencyMode={currencyMode as CurrencyMode}
-          onClose={() => setOpenQuestionnaireFor(null)}
+          selectedDistributor={selectedDistributor}
+          selectedClient={selectedClient}
+          onClose={() => {
+            setOpenQuestionnaireFor(null);
+            fetchQuestionnaireResponses();
+            fetchAssignedSamples();
+          }}
         />
       )}
     </div>

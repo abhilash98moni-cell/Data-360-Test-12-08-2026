@@ -1148,8 +1148,108 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   });
 
   // ====================================================================
-  
-  
+  // NOTIFICATIONS & TWO-WAY SYNCHRONIZATION INFRASTRUCTURE
+  // ====================================================================
+
+  interface NotificationPayload {
+    id?: string;
+    target_user_email?: string | null;
+    target_organization?: string;
+    target_role?: 'Auditor' | 'Distributor' | 'All';
+    category: string;
+    title: string;
+    message: string;
+    is_read?: boolean;
+    metadata?: Record<string, any>;
+    link_tab?: string;
+    created_at?: string;
+  }
+
+  const inMemoryNotifications: any[] = [];
+  const readNotificationIds = new Set<string>();
+  const deletedNotificationIds = new Set<string>();
+  const NOTIFS_FILE_PATH = path.join(process.cwd(), 'data', 'app_notifications.json');
+
+  function getLocalNotifications(): any[] {
+    try {
+      if (fs.existsSync(NOTIFS_FILE_PATH)) {
+        const raw = fs.readFileSync(NOTIFS_FILE_PATH, 'utf-8');
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  }
+
+  function saveLocalNotifications(list: any[]) {
+    try {
+      const dir = path.dirname(NOTIFS_FILE_PATH);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(NOTIFS_FILE_PATH, JSON.stringify(list.slice(0, 300), null, 2), 'utf-8');
+    } catch (e) {}
+  }
+
+  async function dispatchNotification(payload: NotificationPayload) {
+    const notifId = payload.id || `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const nowIso = payload.created_at || new Date().toISOString();
+    const targetRole = payload.target_role || 'All';
+    const targetOrg = payload.target_organization || 'All';
+
+    const meta: Record<string, any> = {
+      ...(payload.metadata || {}),
+      targetRole,
+      targetOrganization: targetOrg,
+      voucherNo: payload.metadata?.voucherNo || payload.metadata?.voucher_no,
+      sampleId: payload.metadata?.sampleId || payload.metadata?.sample_id,
+      linkTab: payload.link_tab || payload.metadata?.linkTab || (targetRole === 'Auditor' ? 'sampling_review' : 'engagement_workspace'),
+    };
+
+    // Structured message embeds metadata safely for standard DB schema compatibility
+    const dbMessage = `${payload.message}\n[METADATA:${JSON.stringify(meta)}]`;
+
+    const item = {
+      id: notifId,
+      target_user_email: payload.target_user_email || null,
+      target_organization: targetOrg,
+      target_role: targetRole,
+      category: payload.category,
+      title: payload.title,
+      message: payload.message,
+      is_read: payload.is_read || false,
+      created_at: nowIso,
+      link_tab: meta.linkTab,
+      metadata: meta,
+      target_voucher_no: meta.voucherNo || meta.voucher_no || '',
+      target_sample_id: meta.sampleId || meta.sample_id || '',
+    };
+
+    // 1. Maintain in-memory buffer
+    inMemoryNotifications.unshift(item);
+    if (inMemoryNotifications.length > 200) inMemoryNotifications.pop();
+
+    // 2. Persist to local disk file
+    try {
+      const diskList = getLocalNotifications().filter(n => n.id !== notifId);
+      diskList.unshift(item);
+      saveLocalNotifications(diskList);
+    } catch (e) {}
+
+    // 3. Persist to Supabase system_audit_logs for cross-session/cross-container durable database persistence
+    try {
+      const supabase = getSupabaseServerClient();
+      await supabase.from('system_audit_logs').insert({
+        event_type: 'APP_NOTIFICATION',
+        target_user_email: payload.target_user_email || 'all',
+        ip_address: '127.0.0.1',
+        details: JSON.stringify(item)
+      });
+    } catch (err) {
+      console.warn('Supabase audit log notification note:', err);
+    }
+
+    return item;
+  }
+
   // ====================================================================
   // REQUIRED DATA QUESTIONNAIRE ENDPOINTS
   // ====================================================================
@@ -1157,7 +1257,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   // GET /api/sampling/required-data/questions
   app.get('/api/sampling/required-data/questions', authenticateRequest, async (req: any, res: any) => {
     try {
-      const { auditId } = req.query;
+      const { auditId, sampleId, voucherNo, distributorId } = req.query;
       const supabase = getSupabaseServerClient();
       const { data, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_QUESTION_DEF');
       if (error) throw error;
@@ -1173,49 +1273,23 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         })
         .filter(q => {
           if (q.active === false) return false;
-          if (!auditId || auditId === 'All Audits') return true;
-          return cleanStr(q.engagement_id) === cleanStr(auditId) || q.scope === 'all';
+          if (auditId && auditId !== 'All Audits' && cleanStr(q.engagement_id) !== cleanStr(auditId) && q.scope !== 'all') {
+            return false;
+          }
+          if (distributorId && distributorId !== 'All Distributors' && q.distributor_id && cleanStr(q.distributor_id) !== cleanStr(distributorId)) {
+            return false;
+          }
+          if (sampleId || voucherNo) {
+            const target = cleanStr(sampleId || voucherNo);
+            const qSample = cleanStr(q.sample_id);
+            const qVoucher = cleanStr(q.voucher_no || q.voucherNo);
+            if (q.scope === 'transaction' || qSample || qVoucher) {
+              return qSample === target || qVoucher === target;
+            }
+          }
+          return true;
         });
 
-      if (questions.length === 0) {
-        const defaultQuestions = [
-          {
-            dbId: 'def-q1',
-            question_id: 'Q-CONFIRM-INVOICE',
-            engagement_id: auditId || 'eng-101',
-            question_text: 'Confirm availability of official invoice, delivery challan, or voucher for this entry.',
-            answer_type: 'Yes / No',
-            required: true,
-            scope: 'all',
-            allow_comment: true,
-            allow_file_upload: true
-          },
-          {
-            dbId: 'def-q2',
-            question_id: 'Q-BIZ-PURPOSE',
-            engagement_id: auditId || 'eng-101',
-            question_text: 'Provide business justification and description of services/goods represented by this transaction.',
-            answer_type: 'Text',
-            required: true,
-            scope: 'all',
-            allow_comment: true,
-            allow_file_upload: false
-          },
-          {
-            dbId: 'def-q3',
-            question_id: 'Q-APPROVAL',
-            engagement_id: auditId || 'eng-101',
-            question_text: 'Was this transaction authorized and approved as per standard financial delegation limits?',
-            answer_type: 'Yes / No',
-            required: false,
-            scope: 'all',
-            allow_comment: true,
-            allow_file_upload: true
-          }
-        ];
-        return res.json({ success: true, questions: defaultQuestions });
-      }
-        
       res.json({ success: true, questions });
     } catch (err: any) {
       console.error(err);
@@ -1234,21 +1308,23 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         target_user_email: req.user?.email || 'unknown',
         ip_address: req.ip || '127.0.0.1',
         details: JSON.stringify({
-          question_id: payload.question_id || 'RDQ' + Date.now(),
+          question_id: payload.question_id || 'RDQ_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
           engagement_id: payload.engagement_id,
+          distributor_id: payload.distributor_id || payload.distributorName,
           testing_classification: payload.testing_classification,
           question_text: payload.question_text,
-          answer_type: payload.answer_type,
-          required: payload.required || false,
+          answer_type: payload.answer_type || 'Document Upload & Remarks',
+          required: payload.required !== undefined ? payload.required : true,
           help_text: payload.help_text || '',
           scope: payload.scope || 'transaction',
           sample_id: payload.sample_id || null,
-          allow_comment: payload.allow_comment || false,
-          allow_file_upload: payload.allow_file_upload || false,
+          voucher_no: payload.voucher_no || payload.voucherNo || null,
+          allow_comment: payload.allow_comment !== undefined ? payload.allow_comment : true,
+          allow_file_upload: payload.allow_file_upload !== undefined ? payload.allow_file_upload : true,
           created_by: req.user?.email || 'unknown',
           created_at: new Date().toISOString(),
           active: true,
-          options: payload.options || [] // For dropdown/checkbox
+          options: payload.options || []
         })
       }).select().single();
 
@@ -1313,7 +1389,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   // GET /api/sampling/required-data/responses
   app.get('/api/sampling/required-data/responses', authenticateRequest, async (req: any, res: any) => {
     try {
-      const { sampleId } = req.query;
+      const { sampleId, voucherNo, distributorId, auditId } = req.query;
       const supabase = getSupabaseServerClient();
       const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
       
@@ -1331,9 +1407,17 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
            return { dbId: d.id, ...parsed };
         })
         .filter(r => {
-           if (!sampleId) return true;
-           const s = cleanStr(sampleId);
-           return cleanStr(r.sample_id) === s || cleanStr(r.voucher_no) === s || cleanStr(r.voucherNo) === s;
+           if (auditId && auditId !== 'All Audits' && cleanStr(r.engagement_id) !== cleanStr(auditId)) {
+             return false;
+           }
+           if (distributorId && distributorId !== 'All Distributors' && r.distributor_id && cleanStr(r.distributor_id) !== cleanStr(distributorId)) {
+             return false;
+           }
+           if (sampleId || voucherNo) {
+             const s = cleanStr(sampleId || voucherNo);
+             return cleanStr(r.sample_id) === s || cleanStr(r.voucher_no) === s || cleanStr(r.voucherNo) === s;
+           }
+           return true;
         });
         
       res.json({ success: true, responses });
@@ -1362,7 +1446,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         }
         const sId = cleanStr(parsed?.sample_id);
         const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo);
-        return (targetSampleId && sId === targetSampleId) || 
+        return (targetSampleId && (sId === targetSampleId || vNo === targetSampleId)) || 
                (targetVoucherNo && (vNo === targetVoucherNo || sId === targetVoucherNo));
       });
 
@@ -1373,16 +1457,130 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
          }
          const newDetails = {
            ...parsedDetails,
+           engagement_id: payload.engagement_id || parsedDetails.engagement_id,
+           distributor_id: payload.distributor_id || payload.distributorName || parsedDetails.distributor_id,
+           sample_id: payload.sample_id || parsedDetails.sample_id,
            voucher_no: payload.voucher_no || payload.voucherNo || parsedDetails.voucher_no,
-           responses: payload.responses,
-           status: payload.status,
-           notes: payload.notes || payload.responses?.notes,
-           uploadedFiles: payload.uploadedFiles || payload.responses?.uploadedFiles,
+           voucherNo: payload.voucher_no || payload.voucherNo || parsedDetails.voucherNo,
+           responses: payload.responses || parsedDetails.responses,
+           itemResponses: payload.itemResponses !== undefined ? payload.itemResponses : (parsedDetails.itemResponses || {}),
+           status: payload.status || parsedDetails.status,
+           notes: payload.notes !== undefined ? payload.notes : parsedDetails.notes,
+           uploadedFiles: payload.uploadedFiles !== undefined ? payload.uploadedFiles : parsedDetails.uploadedFiles,
+           isPushed: payload.isPushed !== undefined ? payload.isPushed : parsedDetails.isPushed,
+           pushedAt: payload.pushedAt || parsedDetails.pushedAt,
+           pushedBy: payload.pushedBy || parsedDetails.pushedBy,
+           pushedTo: payload.pushedTo || parsedDetails.pushedTo,
+           clarificationMessage: payload.clarificationMessage !== undefined ? payload.clarificationMessage : parsedDetails.clarificationMessage,
+           clarificationHistory: payload.clarificationHistory || parsedDetails.clarificationHistory || [],
+           auditorReviewNotes: payload.auditorReviewNotes !== undefined ? payload.auditorReviewNotes : parsedDetails.auditorReviewNotes,
            updated_at: new Date().toISOString()
          };
          const { error: updateErr } = await supabase.from('system_audit_logs').update({ details: JSON.stringify(newDetails) }).eq('id', existingRecord.id);
          if (updateErr) throw updateErr;
-         res.json({ success: true, dbId: existingRecord.id, status: payload.status });
+
+         // DISPATCH NOTIFICATIONS BASED ON ROLE & ACTION
+         try {
+           const vNo = payload.voucher_no || payload.voucherNo || payload.sample_id || 'Unknown';
+           const sId = payload.sample_id || vNo;
+           const distName = payload.distributor_id || payload.distributorName || newDetails.distributor_id || 'Midwest Trading Co.';
+           const targetStatus = payload.status || newDetails.status || 'Draft';
+           const isDistributorAction = payload.actionRole === 'Distributor' || 
+             (req.user?.role && req.user.role.includes('Distributor')) ||
+             (req.auth?.role && req.auth.role.includes('Distributor'));
+
+           if (isDistributorAction) {
+             const isResubmission = targetStatus === 'Submitted' && (payload.actionType === 'RESUBMITTED' || (newDetails.clarificationHistory && newDetails.clarificationHistory.length > 1));
+             const isDraft = targetStatus === 'Draft';
+             let notifTitle = '';
+             let notifMsg = '';
+             let notifCat = 'Documents Uploaded';
+
+             if (isResubmission) {
+               notifTitle = `Required Data Resubmitted: Voucher #${vNo}`;
+               notifMsg = `Distributor ${distName} resubmitted required data and updated evidence for Voucher #${vNo} after clarification.`;
+               notifCat = 'Required Data Resubmitted';
+             } else if (targetStatus === 'Submitted') {
+               notifTitle = `Required Data Submitted: Voucher #${vNo}`;
+               notifMsg = `Distributor ${distName} submitted required data and supporting documents for Voucher #${vNo}.`;
+               notifCat = 'Required Data Submitted';
+             } else if (isDraft) {
+               notifTitle = `Required Data Draft Updated: Voucher #${vNo}`;
+               notifMsg = `Distributor ${distName} updated required data draft / uploaded documents for Voucher #${vNo}.`;
+               notifCat = 'Documents Uploaded';
+             }
+
+             if (notifTitle) {
+               await dispatchNotification({
+                 target_organization: distName,
+                 target_role: 'Auditor',
+                 category: notifCat,
+                 title: notifTitle,
+                 message: notifMsg,
+                 metadata: {
+                   voucherNo: vNo,
+                   sampleId: sId,
+                   engagementId: payload.engagement_id || newDetails.engagement_id || 'eng-101',
+                   distributorName: distName,
+                   linkTab: 'sampling_review',
+                   targetRole: 'Auditor',
+                   status: targetStatus,
+                   action: isResubmission ? 'Resubmitted' : targetStatus
+                 }
+               });
+             }
+           } else {
+             let notifTitle = '';
+             let notifMsg = '';
+             let notifCat = 'System';
+
+             if (targetStatus === 'Clarification Required') {
+               notifTitle = `Clarification Requested: Voucher #${vNo}`;
+               notifMsg = `Auditor requested clarification on Voucher #${vNo}: "${payload.clarificationMessage || newDetails.clarificationMessage || 'Please review requested items.'}"`;
+               notifCat = 'Clarification Requested';
+             } else if (targetStatus === 'Accepted') {
+               notifTitle = `Evidence Accepted: Voucher #${vNo}`;
+               notifMsg = `Auditor accepted all submitted required data and evidence for Voucher #${vNo}.`;
+               notifCat = 'Evidence Accepted';
+             } else if (targetStatus === 'Rejected') {
+               notifTitle = `Evidence Rejected: Voucher #${vNo}`;
+               notifMsg = `Auditor rejected the submitted evidence for Voucher #${vNo}. Please review remarks and provide required documentation.`;
+               notifCat = 'Evidence Rejected';
+             } else if (payload.actionType === 'ITEM_DECISION') {
+               notifTitle = `Item Review Decision: Voucher #${vNo}`;
+               notifMsg = `Auditor set item decision to "${payload.itemDecision || 'Reviewed'}" for Voucher #${vNo}.`;
+               notifCat = payload.itemDecision === 'Accepted' ? 'Evidence Accepted' : payload.itemDecision === 'Rejected' ? 'Evidence Rejected' : 'Clarification Requested';
+             } else if (payload.auditorReviewNotes) {
+               notifTitle = `Auditor Review Remarks: Voucher #${vNo}`;
+               notifMsg = `Auditor added review comments on Voucher #${vNo}: "${payload.auditorReviewNotes}"`;
+               notifCat = 'Required Data Updated';
+             }
+
+             if (notifTitle) {
+               await dispatchNotification({
+                 target_organization: distName,
+                 target_role: 'Distributor',
+                 category: notifCat,
+                 title: notifTitle,
+                 message: notifMsg,
+                 metadata: {
+                   voucherNo: vNo,
+                   sampleId: sId,
+                   engagementId: payload.engagement_id || newDetails.engagement_id || 'eng-101',
+                   distributorName: distName,
+                   linkTab: 'engagement_workspace',
+                   targetRole: 'Distributor',
+                   status: targetStatus,
+                   action: targetStatus
+                 }
+               });
+             }
+           }
+         } catch (notifErr) {
+           console.warn('Error dispatching update response notification:', notifErr);
+         }
+
+         res.json({ success: true, dbId: existingRecord.id, status: newDetails.status });
       } else {
          const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
           event_type: 'REQUIRED_DATA_RESP',
@@ -1390,12 +1588,22 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           ip_address: req.ip || '127.0.0.1',
           details: JSON.stringify({
             engagement_id: payload.engagement_id,
+            distributor_id: payload.distributor_id || payload.distributorName || '',
             sample_id: payload.sample_id,
             voucher_no: payload.voucher_no || payload.voucherNo || '',
-            responses: payload.responses,
+            voucherNo: payload.voucher_no || payload.voucherNo || '',
+            responses: payload.responses || {},
+            itemResponses: payload.itemResponses || {},
             status: payload.status || 'Draft',
-            notes: payload.notes || payload.responses?.notes,
-            uploadedFiles: payload.uploadedFiles || payload.responses?.uploadedFiles,
+            notes: payload.notes || '',
+            uploadedFiles: payload.uploadedFiles || [],
+            isPushed: payload.isPushed || false,
+            pushedAt: payload.pushedAt || null,
+            pushedBy: payload.pushedBy || null,
+            pushedTo: payload.pushedTo || null,
+            clarificationMessage: payload.clarificationMessage || '',
+            clarificationHistory: payload.clarificationHistory || [],
+            auditorReviewNotes: payload.auditorReviewNotes || '',
             created_by: req.user?.email || 'unknown',
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
@@ -1403,10 +1611,454 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         }).select().single();
 
         if (error) throw error;
-        res.json({ success: true, dbId: insertedData.id, status: payload.status });
+
+        // DISPATCH NOTIFICATIONS FOR INSERT
+        try {
+          const vNo = payload.voucher_no || payload.voucherNo || payload.sample_id || 'Unknown';
+          const sId = payload.sample_id || vNo;
+          const distName = payload.distributor_id || payload.distributorName || 'Midwest Trading Co.';
+          const targetStatus = payload.status || 'Draft';
+          const isDistributorAction = payload.actionRole === 'Distributor' || (req.user?.role && req.user.role.includes('Distributor'));
+
+          if (isDistributorAction) {
+            const isResubmission = targetStatus === 'Submitted' && (payload.actionType === 'RESUBMITTED' || (payload.clarificationHistory && payload.clarificationHistory.length > 1));
+            let notifTitle = targetStatus === 'Submitted' ? (isResubmission ? `Required Data Resubmitted: Voucher #${vNo}` : `Required Data Submitted: Voucher #${vNo}`) : `Required Data Draft Created: Voucher #${vNo}`;
+            let notifMsg = targetStatus === 'Submitted' ? `Distributor ${distName} submitted required data and supporting documents for Voucher #${vNo}.` : `Distributor ${distName} saved draft responses for Voucher #${vNo}.`;
+            await dispatchNotification({
+              target_organization: distName,
+              target_role: 'Auditor',
+              category: targetStatus === 'Submitted' ? 'Submission Completed' : 'Documents Uploaded',
+              title: notifTitle,
+              message: notifMsg,
+              metadata: {
+                voucherNo: vNo,
+                sampleId: sId,
+                engagementId: payload.engagement_id || 'eng-101',
+                distributorName: distName,
+                linkTab: 'sampling_review',
+                targetRole: 'Auditor',
+                status: targetStatus,
+                action: targetStatus
+              }
+            });
+          } else {
+            if (targetStatus === 'Accepted' || targetStatus === 'Rejected' || targetStatus === 'Clarification Required') {
+              await dispatchNotification({
+                target_organization: distName,
+                target_role: 'Distributor',
+                category: targetStatus === 'Clarification Required' ? 'Clarification Requested' : targetStatus === 'Accepted' ? 'Evidence Accepted' : 'Evidence Rejected',
+                title: `${targetStatus === 'Clarification Required' ? 'Clarification Requested' : targetStatus === 'Accepted' ? 'Evidence Accepted' : 'Evidence Rejected'}: Voucher #${vNo}`,
+                message: `Auditor updated review status to ${targetStatus} for Voucher #${vNo}.`,
+                metadata: {
+                  voucherNo: vNo,
+                  sampleId: sId,
+                  engagementId: payload.engagement_id || 'eng-101',
+                  distributorName: distName,
+                  linkTab: 'engagement_workspace',
+                  targetRole: 'Distributor',
+                  status: targetStatus,
+                  action: targetStatus
+                }
+              });
+            }
+          }
+        } catch(e) {
+          console.warn('Error dispatching insert notification:', e);
+        }
+
+        res.json({ success: true, dbId: insertedData.id, status: payload.status || 'Draft' });
       }
     } catch (err: any) {
       console.error(err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/sampling/required-data/push - Push questionnaire to distributor
+  app.post('/api/sampling/required-data/push', express.json(), authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { engagementId, sampleId, voucherNo, distributorId, distributorName, questions } = req.body;
+      const supabase = getSupabaseServerClient();
+      const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
+      const targetSampleId = cleanStr(sampleId);
+      const targetVoucherNo = cleanStr(voucherNo);
+
+      const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
+      let existingRecord = existing?.find(d => {
+        let parsed = d.details;
+        if (typeof parsed === 'string') {
+           try { parsed = JSON.parse(parsed); } catch(e) {}
+        }
+        const sId = cleanStr(parsed?.sample_id);
+        const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo);
+        return (targetSampleId && (sId === targetSampleId || vNo === targetSampleId)) || 
+               (targetVoucherNo && (vNo === targetVoucherNo || sId === targetVoucherNo));
+      });
+
+      const pushDetails = {
+        engagement_id: engagementId || 'eng-101',
+        sample_id: sampleId,
+        voucher_no: voucherNo || '',
+        voucherNo: voucherNo || '',
+        distributor_id: distributorId || distributorName || '',
+        isPushed: true,
+        pushedAt: new Date().toISOString(),
+        pushedBy: req.user?.email || 'Auditor',
+        pushedTo: distributorName || distributorId || 'Distributor',
+        status: 'Pending Submission',
+        updated_at: new Date().toISOString()
+      };
+
+      if (existingRecord) {
+        let parsed = existingRecord.details;
+        if (typeof parsed === 'string') {
+          try { parsed = JSON.parse(parsed); } catch(e) {}
+        }
+        const updated = {
+          ...parsed,
+          ...pushDetails,
+          status: parsed.status === 'Draft' || !parsed.status ? 'Pending Submission' : parsed.status
+        };
+        await supabase.from('system_audit_logs').update({ details: JSON.stringify(updated) }).eq('id', existingRecord.id);
+      } else {
+        await supabase.from('system_audit_logs').insert({
+          event_type: 'REQUIRED_DATA_RESP',
+          target_user_email: req.user?.email || 'unknown',
+          ip_address: req.ip || '127.0.0.1',
+          details: JSON.stringify({
+            ...pushDetails,
+            notes: '',
+            uploadedFiles: [],
+            itemResponses: {},
+            clarificationHistory: [],
+            created_by: req.user?.email || 'unknown',
+            created_at: new Date().toISOString(),
+          })
+        });
+      }
+
+      // Also create an audit log event
+      await supabase.from('system_audit_logs').insert({
+        event_type: 'SAMPLING_QUESTIONNAIRE_PUSHED',
+        target_user_email: req.user?.email || 'unknown',
+        ip_address: req.ip || '127.0.0.1',
+        details: JSON.stringify({
+          engagementId,
+          sampleId,
+          voucherNo,
+          distributor: distributorName || distributorId,
+          questionCount: Array.isArray(questions) ? questions.length : 0,
+          pushedBy: req.user?.email,
+          timestamp: new Date().toISOString()
+        })
+      });
+
+      // Dispatch notification to Distributor
+      try {
+        await dispatchNotification({
+          target_organization: distributorName || distributorId || 'Distributor',
+          target_role: 'Distributor',
+          category: 'System',
+          title: `New Required Data Questionnaire: Voucher #${voucherNo || sampleId}`,
+          message: `Auditor has prepared and pushed the required data questionnaire for Voucher #${voucherNo || sampleId}. Please review the questions and provide required documentation.`,
+          metadata: {
+            voucherNo,
+            sampleId,
+            engagementId: engagementId || 'eng-101',
+            distributorName: distributorName || distributorId,
+            linkTab: 'engagement_workspace',
+            targetRole: 'Distributor',
+            action: 'Pushed'
+          }
+        });
+      } catch (notifPushErr) {
+        console.warn('Error sending push notification:', notifPushErr);
+      }
+
+      res.json({ success: true, message: 'Questionnaire pushed to distributor successfully' });
+    } catch (err: any) {
+      console.error('Error pushing questionnaire:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // ====================================================================
+  // NOTIFICATIONS REST APIS
+  // ====================================================================
+
+  // GET /api/notifications
+  app.get('/api/notifications', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { role, distributor } = req.query;
+      const supabase = getSupabaseServerClient();
+      const clean = (s: any) => String(s || '').trim().toLowerCase();
+
+      const readIdsFromDb = new Set<string>();
+      const deletedIdsFromDb = new Set<string>();
+      let dbNotifs: any[] = [];
+
+      // 1. Fetch all notifications, reads, and deletes from Supabase system_audit_logs
+      try {
+        const { data: auditLogs, error: auditErr } = await supabase
+          .from('system_audit_logs')
+          .select('*')
+          .in('event_type', ['APP_NOTIFICATION', 'APP_NOTIFICATION_READ', 'APP_NOTIFICATION_DELETED'])
+          .order('created_at', { ascending: false })
+          .limit(300);
+
+        if (!auditErr && Array.isArray(auditLogs)) {
+          auditLogs.forEach(log => {
+            try {
+              let parsed = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
+              if (log.event_type === 'APP_NOTIFICATION_READ') {
+                if (parsed?.notificationId === 'ALL' && Array.isArray(parsed?.notificationIds)) {
+                  parsed.notificationIds.forEach((id: string) => readIdsFromDb.add(id));
+                } else {
+                  const rId = parsed?.notificationId || parsed?.id;
+                  if (rId) readIdsFromDb.add(rId);
+                }
+              } else if (log.event_type === 'APP_NOTIFICATION_DELETED') {
+                const dId = parsed?.notificationId || parsed?.id;
+                if (dId) deletedIdsFromDb.add(dId);
+              } else if (log.event_type === 'APP_NOTIFICATION' && parsed) {
+                const notifId = parsed.id || log.id;
+                if (!dbNotifs.some(n => n.id === notifId)) {
+                  dbNotifs.push({
+                    id: notifId,
+                    target_user_email: parsed.target_user_email,
+                    target_organization: parsed.target_organization || parsed.metadata?.targetOrganization,
+                    target_role: parsed.target_role || parsed.metadata?.targetRole,
+                    category: parsed.category,
+                    title: parsed.title,
+                    message: parsed.message,
+                    is_read: Boolean(parsed.is_read),
+                    created_at: parsed.created_at || log.created_at,
+                    link_tab: parsed.link_tab || parsed.metadata?.linkTab,
+                    target_voucher_no: parsed.target_voucher_no || parsed.metadata?.voucherNo || '',
+                    target_sample_id: parsed.target_sample_id || parsed.metadata?.sampleId || '',
+                    metadata: parsed.metadata || {}
+                  });
+                }
+              }
+            } catch (e) {}
+          });
+        }
+      } catch (e) {
+        console.warn('System audit logs notification fetch note:', e);
+      }
+
+      // 2. Merge local disk notifications
+      const diskList = getLocalNotifications();
+      diskList.forEach(item => {
+        if (!dbNotifs.some(n => n.id === item.id)) {
+          dbNotifs.push(item);
+        }
+      });
+
+      // 3. Merge in-memory notifications
+      inMemoryNotifications.forEach(imn => {
+        if (!dbNotifs.some(n => n.id === imn.id)) {
+          dbNotifs.push(imn);
+        }
+      });
+
+      // 4. Parse and normalize notifications
+      const normalized = dbNotifs
+        .filter(n => !deletedNotificationIds.has(n.id) && !deletedIdsFromDb.has(n.id))
+        .map(n => {
+          let rawMsg = n.message || '';
+          let cleanMsg = rawMsg;
+          let meta: any = n.metadata || {};
+          const metaMatch = rawMsg.match(/\[METADATA:([\s\S]*?)\]/);
+          if (metaMatch) {
+            try {
+              meta = { ...meta, ...JSON.parse(metaMatch[1]) };
+              cleanMsg = rawMsg.replace(/\[METADATA:[\s\S]*?\]/, '').trim();
+            } catch (e) {}
+          }
+
+          const targetRole = n.target_role || meta.targetRole || 'All';
+          const targetOrg = n.target_organization || meta.targetOrganization || 'All';
+          const isRead = Boolean(n.is_read) || readNotificationIds.has(n.id) || readIdsFromDb.has(n.id);
+
+          const createdDate = new Date(n.created_at || Date.now());
+          const diffMs = Date.now() - createdDate.getTime();
+          const diffMins = Math.floor(diffMs / 60000);
+          const diffHours = Math.floor(diffMins / 60);
+          const diffDays = Math.floor(diffHours / 24);
+          let timeStr = 'Just now';
+          if (diffMins > 0 && diffMins < 60) timeStr = `${diffMins} min${diffMins === 1 ? '' : 's'} ago`;
+          else if (diffHours >= 1 && diffHours < 24) timeStr = `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+          else if (diffDays === 1) timeStr = 'Yesterday';
+          else if (diffDays > 1) timeStr = `${diffDays} days ago`;
+
+          return {
+            id: n.id,
+            title: n.title,
+            message: cleanMsg,
+            category: n.category,
+            timestamp: timeStr,
+            createdAt: n.created_at || new Date().toISOString(),
+            isRead: isRead,
+            linkTab: n.link_tab || meta.linkTab || (targetRole.toLowerCase().includes('auditor') ? 'sampling_review' : 'engagement_workspace'),
+            targetUserRole: targetRole,
+            targetOrganization: targetOrg,
+            targetVoucherNo: n.target_voucher_no || meta.voucherNo || meta.voucher_no || '',
+            targetSampleId: n.target_sample_id || meta.sampleId || meta.sample_id || '',
+            metadata: meta
+          };
+        });
+
+      // 5. Role and Organization filtering
+      const userRoleStr = clean(role || req.user?.role);
+      const userDistStr = clean(distributor || req.user?.organization);
+
+      const filtered = normalized.filter(n => {
+        const targetRole = clean(n.targetUserRole);
+        const targetOrg = clean(n.targetOrganization);
+
+        if (userRoleStr.includes('distributor')) {
+          // Distributors must NOT see notifications targeted specifically at Auditors
+          if (targetRole === 'auditor') return false;
+
+          // If targetOrganization is specified and not 'all', match with distributor organization
+          if (targetOrg && targetOrg !== 'all') {
+            if (userDistStr && userDistStr !== 'all' && !userDistStr.includes('distributor partner') && !userDistStr.includes('distributor entity')) {
+              const matches = targetOrg.includes(userDistStr) || userDistStr.includes(targetOrg);
+              if (!matches) return false;
+            }
+          }
+          return true;
+        } else if (userRoleStr.includes('auditor') || userRoleStr.includes('admin') || userRoleStr.includes('lead')) {
+          // Auditors must NOT see notifications targeted specifically at Distributors
+          if (targetRole === 'distributor') return false;
+          return true;
+        }
+        return true;
+      });
+
+      // Sort newest first
+      filtered.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+      res.json({ success: true, notifications: filtered });
+    } catch (err: any) {
+      console.error('Error fetching notifications:', err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/notifications
+  app.post('/api/notifications', express.json(), authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { title, message, category, targetRole, targetOrganization, metadata } = req.body;
+      const created = await dispatchNotification({
+        title,
+        message,
+        category: category || 'System',
+        target_role: targetRole || 'All',
+        target_organization: targetOrganization || 'All',
+        metadata: metadata || {}
+      });
+      res.json({ success: true, notification: created });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // PUT /api/notifications/:id/read
+  app.put('/api/notifications/:id/read', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      readNotificationIds.add(id);
+
+      // 1. Update in-memory
+      const inMem = inMemoryNotifications.find(n => n.id === id);
+      if (inMem) inMem.is_read = true;
+
+      // 2. Update local disk file
+      const diskList = getLocalNotifications();
+      const onDisk = diskList.find(n => n.id === id);
+      if (onDisk) onDisk.is_read = true;
+      saveLocalNotifications(diskList);
+
+      // 3. Persist read status into database (system_audit_logs)
+      try {
+        const supabase = getSupabaseServerClient();
+        await supabase.from('system_audit_logs').insert({
+          event_type: 'APP_NOTIFICATION_READ',
+          target_user_email: req.user?.email || 'user',
+          ip_address: '127.0.0.1',
+          details: JSON.stringify({ notificationId: id, readAt: new Date().toISOString() })
+        });
+      } catch (e) {
+        console.warn('DB notification read persist note:', e);
+      }
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // PUT /api/notifications/read-all
+  app.put('/api/notifications/read-all', authenticateRequest, async (req: any, res: any) => {
+    try {
+      inMemoryNotifications.forEach(n => {
+        n.is_read = true;
+        readNotificationIds.add(n.id);
+      });
+
+      const diskList = getLocalNotifications();
+      diskList.forEach(n => {
+        n.is_read = true;
+        readNotificationIds.add(n.id);
+      });
+      saveLocalNotifications(diskList);
+
+      try {
+        const supabase = getSupabaseServerClient();
+        await supabase.from('system_audit_logs').insert({
+          event_type: 'APP_NOTIFICATION_READ',
+          target_user_email: req.user?.email || 'user',
+          ip_address: '127.0.0.1',
+          details: JSON.stringify({
+            notificationId: 'ALL',
+            notificationIds: Array.from(readNotificationIds),
+            readAt: new Date().toISOString()
+          })
+        });
+      } catch (e) {}
+
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // DELETE /api/notifications/:id
+  app.delete('/api/notifications/:id', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { id } = req.params;
+      deletedNotificationIds.add(id);
+
+      const idx = inMemoryNotifications.findIndex(n => n.id === id);
+      if (idx !== -1) inMemoryNotifications.splice(idx, 1);
+
+      const diskList = getLocalNotifications().filter(n => n.id !== id);
+      saveLocalNotifications(diskList);
+
+      try {
+        const supabase = getSupabaseServerClient();
+        await supabase.from('system_audit_logs').insert({
+          event_type: 'APP_NOTIFICATION_DELETED',
+          target_user_email: req.user?.email || 'user',
+          ip_address: '127.0.0.1',
+          details: JSON.stringify({ notificationId: id, deletedAt: new Date().toISOString() })
+        });
+      } catch (e) {}
+
+      res.json({ success: true });
+    } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
   });
