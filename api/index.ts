@@ -22,7 +22,10 @@ import {
   getAuthoritativeQuestionnaireState,
   saveAuthoritativeQuestionnaireAnswers,
   submitAuthoritativeQuestionnaire,
-  saveAuthoritativeQuestionnaireAuditorNotes
+  saveAuthoritativeQuestionnaireAuditorNotes,
+  requestAuthoritativeQuestionnaireEditAccess,
+  reviewAuthoritativeQuestionnaireEditAccess,
+  customizeAuthoritativeQuestionnaire
 } from '../src/services/questionnaireService.js';
 
 dotenv.config();
@@ -913,6 +916,716 @@ app.get('/api/sampling/questions', async (req: any, res: any) => {
       .filter(q => (!auditId || q.engagement_id === auditId) && q.active !== false);
       
     res.json({ success: true, questions });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/sampling/questions
+app.post('/api/sampling/questions', async (req: any, res: any) => {
+  try {
+    const payload = req.body;
+    const session = authenticateRequestSession(req);
+    const userEmail = session.email || (req.headers['x-user-email'] as string) || 'auditor@data360.io';
+    const userOrg = session.org || (req.headers['x-user-organization'] as string) || 'Internal';
+    const supabase = getSupabaseServerClient();
+
+    // Calculate the next attribute code if not provided
+    let finalAttributeCode = payload.attribute_code;
+    if (!finalAttributeCode) {
+      let existingCustomQuestions: any[] = [];
+      try {
+        const { data: existingQuestionsData } = await supabase
+          .from('system_audit_logs')
+          .select('details')
+          .eq('event_type', 'CREATED_CUSTOM_QUESTION');
+          
+        existingCustomQuestions = (existingQuestionsData || [])
+          .map(row => {
+             let parsed = row.details;
+             if (typeof parsed === 'string') {
+                 try { parsed = JSON.parse(parsed); } catch(e) {}
+             }
+             return parsed;
+          })
+          .filter(q => q.testing_classification === payload.testing_classification && q.engagement_id === payload.engagement_id);
+      } catch (e) {
+        const logs = await dbStore.getAuditLogs('CREATED_CUSTOM_QUESTION');
+        existingCustomQuestions = logs.map(l => l.details).filter(q => q && q.testing_classification === payload.testing_classification);
+      }
+        
+      let highestCharCode = 64 + 12; // Base templates go up to L (which is 12th letter)
+      for (const q of existingCustomQuestions) {
+        if (q.attribute_code && q.attribute_code.length === 1) {
+           const code = q.attribute_code.charCodeAt(0);
+           if (code > highestCharCode) highestCharCode = code;
+        }
+      }
+      
+      if (payload.attribute_code && payload.attribute_code.length === 1) {
+         const clientCode = payload.attribute_code.charCodeAt(0);
+         if (highestCharCode < clientCode - 1) {
+            highestCharCode = clientCode - 1;
+         }
+      }
+      
+      finalAttributeCode = String.fromCharCode(highestCharCode + 1);
+    }
+
+    const candidateUuid = req.headers['x-user-id'] || req.body?.userId;
+    const isUuid = typeof candidateUuid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidateUuid);
+
+    const questionDetails = {
+      question_id: payload.question_id || 'CQ' + Date.now(),
+      engagement_id: payload.engagement_id || 'eng-101',
+      testing_classification: payload.testing_classification,
+      sample_id: payload.sample_id || null,
+      scope: payload.scope || 'classification',
+      attribute_code: finalAttributeCode,
+      question_text: payload.question_text,
+      question_type: payload.question_type,
+      required: payload.required || false,
+      options: payload.options || [],
+      conditional_rules: payload.conditional_rules || {},
+      display_order: payload.display_order || 0,
+      created_by: userEmail,
+      created_at: new Date().toISOString(),
+      active: true
+    };
+
+    const logRecord: any = {
+      event_type: 'CREATED_CUSTOM_QUESTION',
+      target_user_email: userOrg,
+      ip_address: req.ip || '127.0.0.1',
+      details: questionDetails
+    };
+    if (isUuid) {
+      logRecord.performed_by = candidateUuid;
+    }
+
+    let insertedId: string | null = null;
+    try {
+      const { data: insertedData, error } = await supabase.from('system_audit_logs').insert(logRecord).select().single();
+      if (!error && insertedData) {
+        insertedId = insertedData.id;
+      }
+    } catch (dbErr) {
+      console.warn('Supabase insert note:', dbErr);
+    }
+
+    const savedLog = await dbStore.insertAuditLog({
+      id: insertedId || undefined,
+      event_type: 'CREATED_CUSTOM_QUESTION',
+      user_email: userEmail,
+      organization: userOrg,
+      details: questionDetails
+    });
+
+    res.json({ success: true, attribute_code: finalAttributeCode, dbId: insertedId || savedLog.id });
+  } catch (err: any) {
+    console.error('Error saving custom sampling question:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/sampling/questions/:id
+app.delete('/api/sampling/questions/:id', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const supabase = getSupabaseServerClient();
+    try {
+      const { data: row } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      if (row) {
+        let parsedDetails = row.details;
+        if (typeof parsedDetails === 'string') {
+          try { parsedDetails = JSON.parse(parsedDetails); } catch(e) {}
+        }
+        const newDetails = { ...parsedDetails, active: false };
+        await supabase.from('system_audit_logs').update({ details: newDetails }).eq('id', id);
+      }
+    } catch(e) {}
+    try {
+      await dbStore.updateAuditLog(id, { details: { active: false } });
+    } catch (e) {}
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/distributors
+app.get('/api/distributors', async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    let query = supabase.from('distributors').select('*');
+    if (req.query.name) {
+      query = query.eq('entity_name', req.query.name);
+    }
+    const { data, error } = await query;
+    if (error || !data || data.length === 0) {
+      return res.json({
+        success: true,
+        distributors: [
+          { id: 'dist-01', entity_name: 'Midwest Trading Co.', status: 'Active' },
+          { id: 'dist-02', entity_name: 'Pacific Coast Distribution', status: 'Active' },
+          { id: 'dist-03', entity_name: 'Southern Logistics LLC', status: 'Active' }
+        ]
+      });
+    }
+    res.json({ success: true, distributors: data });
+  } catch (err: any) {
+    res.json({
+      success: true,
+      distributors: [
+        { id: 'dist-01', entity_name: 'Midwest Trading Co.', status: 'Active' },
+        { id: 'dist-02', entity_name: 'Pacific Coast Distribution', status: 'Active' },
+        { id: 'dist-03', entity_name: 'Southern Logistics LLC', status: 'Active' }
+      ]
+    });
+  }
+});
+
+// GET /api/sampling/required-data/questions
+app.get('/api/sampling/required-data/questions', async (req: any, res: any) => {
+  try {
+    const { auditId, sampleId, voucherNo, distributorId } = req.query;
+    const supabase = getSupabaseServerClient();
+    let data: any[] = [];
+    try {
+      const { data: sbData, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_QUESTION_DEF');
+      if (!error && sbData) data = sbData;
+    } catch(e) {}
+
+    if (!data || data.length === 0) {
+      const logs = await dbStore.getAuditLogs('REQUIRED_DATA_QUESTION_DEF');
+      data = logs;
+    }
+
+    const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const questions = (data || [])
+      .map(d => {
+         let parsed = d.details;
+         if (typeof parsed === 'string') {
+             try { parsed = JSON.parse(parsed); } catch(e) {}
+         }
+         return { dbId: d.id, ...parsed };
+      })
+      .filter(q => {
+        if (q.active === false) return false;
+        if (auditId && auditId !== 'All Audits' && cleanStr(q.engagement_id) !== cleanStr(auditId) && q.scope !== 'all') {
+          return false;
+        }
+        if (distributorId && distributorId !== 'All Distributors' && q.distributor_id && cleanStr(q.distributor_id) !== cleanStr(distributorId)) {
+          return false;
+        }
+        if (sampleId || voucherNo) {
+          const target = cleanStr(sampleId || voucherNo);
+          const qSample = cleanStr(q.sample_id);
+          const qVoucher = cleanStr(q.voucher_no || q.voucherNo);
+          if (q.scope === 'transaction' || qSample || qVoucher) {
+            return qSample === target || qVoucher === target;
+          }
+        }
+        return true;
+      });
+
+    res.json({ success: true, questions });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/sampling/required-data/questions
+app.post('/api/sampling/required-data/questions', async (req: any, res: any) => {
+  try {
+    const payload = req.body;
+    const session = authenticateRequestSession(req);
+    const userEmail = session.email || (req.headers['x-user-email'] as string) || 'unknown';
+    const userOrg = session.org || (req.headers['x-user-organization'] as string) || 'Internal';
+    const supabase = getSupabaseServerClient();
+    
+    const questionDetails = {
+      question_id: payload.question_id || 'RDQ_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+      engagement_id: payload.engagement_id || 'eng-101',
+      distributor_id: payload.distributor_id || payload.distributorName,
+      testing_classification: payload.testing_classification,
+      question_text: payload.question_text,
+      answer_type: payload.answer_type || 'Document Upload & Remarks',
+      required: payload.required !== undefined ? payload.required : true,
+      help_text: payload.help_text || '',
+      scope: payload.scope || 'transaction',
+      sample_id: payload.sample_id || null,
+      voucher_no: payload.voucher_no || payload.voucherNo || null,
+      allow_comment: payload.allow_comment !== undefined ? payload.allow_comment : true,
+      allow_file_upload: payload.allow_file_upload !== undefined ? payload.allow_file_upload : true,
+      created_by: userEmail,
+      created_at: new Date().toISOString(),
+      active: true,
+      options: payload.options || []
+    };
+
+    let insertedId: string | null = null;
+    try {
+      const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
+        event_type: 'REQUIRED_DATA_QUESTION_DEF',
+        target_user_email: userEmail,
+        ip_address: req.ip || '127.0.0.1',
+        details: questionDetails
+      }).select().single();
+      if (!error && insertedData) {
+        insertedId = insertedData.id;
+      }
+    } catch(e) {}
+
+    const savedLog = await dbStore.insertAuditLog({
+      id: insertedId || undefined,
+      event_type: 'REQUIRED_DATA_QUESTION_DEF',
+      user_email: userEmail,
+      organization: userOrg,
+      details: questionDetails
+    });
+
+    res.json({ success: true, dbId: insertedId || savedLog.id });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// PUT /api/sampling/required-data/questions/:id
+app.put('/api/sampling/required-data/questions/:id', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const payload = req.body;
+    const supabase = getSupabaseServerClient();
+    try {
+      const { data: row } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      if (row) {
+        let parsedDetails = row.details;
+        if (typeof parsedDetails === 'string') {
+          try { parsedDetails = JSON.parse(parsedDetails); } catch(e) {}
+        }
+        const newDetails = { ...parsedDetails, ...payload };
+        await supabase.from('system_audit_logs').update({ details: newDetails }).eq('id', id);
+      }
+    } catch(e) {}
+    try {
+      await dbStore.updateAuditLog(id, { details: payload });
+    } catch(e) {}
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// DELETE /api/sampling/required-data/questions/:id
+app.delete('/api/sampling/required-data/questions/:id', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const supabase = getSupabaseServerClient();
+    try {
+      const { data: row } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      if (row) {
+        let parsedDetails = row.details;
+        if (typeof parsedDetails === 'string') {
+          try { parsedDetails = JSON.parse(parsedDetails); } catch(e) {}
+        }
+        const newDetails = { ...parsedDetails, active: false };
+        await supabase.from('system_audit_logs').update({ details: newDetails }).eq('id', id);
+      }
+    } catch(e) {}
+    try {
+      await dbStore.updateAuditLog(id, { details: { active: false } });
+    } catch(e) {}
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/sampling/required-data/responses
+app.get('/api/sampling/required-data/responses', async (req: any, res: any) => {
+  try {
+    const { sampleId, voucherNo, distributorId, auditId } = req.query;
+    const supabase = getSupabaseServerClient();
+    const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
+    
+    let data: any[] = [];
+    try {
+      const { data: sbData, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
+      if (!error && sbData) data = sbData;
+    } catch(e) {}
+
+    if (!data || data.length === 0) {
+      const logs = await dbStore.getAuditLogs('REQUIRED_DATA_RESP');
+      data = logs;
+    }
+    
+    const responses = (data || [])
+      .map(d => {
+         let parsed = d.details;
+         if (typeof parsed === 'string') {
+             try { parsed = JSON.parse(parsed); } catch(e) {}
+         }
+         return { dbId: d.id, ...parsed };
+      })
+      .filter(r => {
+         if (auditId && auditId !== 'All Audits' && cleanStr(r.engagement_id) !== cleanStr(auditId)) {
+           return false;
+         }
+         if (distributorId && distributorId !== 'All Distributors' && r.distributor_id && cleanStr(r.distributor_id) !== cleanStr(distributorId)) {
+           return false;
+         }
+         if (sampleId || voucherNo) {
+           const s = cleanStr(sampleId || voucherNo);
+           return cleanStr(r.sample_id) === s || cleanStr(r.voucher_no) === s || cleanStr(r.voucherNo) === s;
+         }
+         return true;
+      });
+      
+    res.json({ success: true, responses });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/sampling/required-data/responses
+app.post('/api/sampling/required-data/responses', async (req: any, res: any) => {
+  try {
+    const payload = req.body;
+    const session = authenticateRequestSession(req);
+    const supabase = getSupabaseServerClient();
+    const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
+    const targetSampleId = cleanStr(payload.sample_id);
+    const targetVoucherNo = cleanStr(payload.voucher_no || payload.voucherNo);
+    
+    let existing: any[] = [];
+    try {
+      const { data } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
+      if (data) existing = data;
+    } catch(e) {}
+    if (existing.length === 0) {
+      existing = await dbStore.getAuditLogs('REQUIRED_DATA_RESP');
+    }
+    
+    let existingRecord = existing?.find(d => {
+      let parsed = d.details;
+      if (typeof parsed === 'string') {
+         try { parsed = JSON.parse(parsed); } catch(e) {}
+      }
+      const sId = cleanStr(parsed?.sample_id);
+      const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo);
+      return (targetSampleId && (sId === targetSampleId || vNo === targetSampleId)) || 
+             (targetVoucherNo && (vNo === targetVoucherNo || sId === targetVoucherNo));
+    });
+
+    if (existingRecord) {
+       let parsedDetails = existingRecord.details;
+       if (typeof parsedDetails === 'string') {
+          try { parsedDetails = JSON.parse(parsedDetails); } catch(e) {}
+       }
+       const newDetails = {
+         ...parsedDetails,
+         engagement_id: payload.engagement_id || parsedDetails.engagement_id,
+         distributor_id: payload.distributor_id || payload.distributorName || parsedDetails.distributor_id,
+         sample_id: payload.sample_id || parsedDetails.sample_id,
+         voucher_no: payload.voucher_no || payload.voucherNo || parsedDetails.voucher_no,
+         voucherNo: payload.voucher_no || payload.voucherNo || parsedDetails.voucherNo,
+         responses: payload.responses || parsedDetails.responses,
+         itemResponses: payload.itemResponses !== undefined ? payload.itemResponses : (parsedDetails.itemResponses || {}),
+         status: payload.status || parsedDetails.status,
+         notes: payload.notes !== undefined ? payload.notes : parsedDetails.notes,
+         uploadedFiles: payload.uploadedFiles !== undefined ? payload.uploadedFiles : parsedDetails.uploadedFiles,
+         isPushed: payload.isPushed !== undefined ? payload.isPushed : parsedDetails.isPushed,
+         pushedAt: payload.pushedAt || parsedDetails.pushedAt,
+         pushedBy: payload.pushedBy || parsedDetails.pushedBy,
+         pushedTo: payload.pushedTo || parsedDetails.pushedTo,
+         clarificationMessage: payload.clarificationMessage !== undefined ? payload.clarificationMessage : parsedDetails.clarificationMessage,
+         clarificationHistory: payload.clarificationHistory || parsedDetails.clarificationHistory || [],
+         auditorReviewNotes: payload.auditorReviewNotes !== undefined ? payload.auditorReviewNotes : parsedDetails.auditorReviewNotes,
+         updated_at: new Date().toISOString()
+       };
+       try {
+         await supabase.from('system_audit_logs').update({ details: newDetails }).eq('id', existingRecord.id);
+       } catch(e) {}
+       try {
+         await dbStore.updateAuditLog(existingRecord.id, { details: newDetails });
+       } catch(e) {}
+
+       res.json({ success: true, dbId: existingRecord.id, status: newDetails.status });
+    } else {
+       const newDetails = {
+         engagement_id: payload.engagement_id,
+         distributor_id: payload.distributor_id || payload.distributorName || '',
+         sample_id: payload.sample_id,
+         voucher_no: payload.voucher_no || payload.voucherNo || '',
+         voucherNo: payload.voucher_no || payload.voucherNo || '',
+         responses: payload.responses || {},
+         itemResponses: payload.itemResponses || {},
+         status: payload.status || 'Draft',
+         notes: payload.notes || '',
+         uploadedFiles: payload.uploadedFiles || [],
+         isPushed: payload.isPushed || false,
+         pushedAt: payload.pushedAt || null,
+         pushedBy: payload.pushedBy || null,
+         pushedTo: payload.pushedTo || null,
+         clarificationMessage: payload.clarificationMessage || '',
+         clarificationHistory: payload.clarificationHistory || [],
+         auditorReviewNotes: payload.auditorReviewNotes || '',
+         created_by: session.email || 'unknown',
+         created_at: new Date().toISOString(),
+         updated_at: new Date().toISOString(),
+       };
+
+       let insertedId: string | null = null;
+       try {
+         const { data: insertedData } = await supabase.from('system_audit_logs').insert({
+           event_type: 'REQUIRED_DATA_RESP',
+           target_user_email: session.email || 'unknown',
+           ip_address: req.ip || '127.0.0.1',
+           details: newDetails
+         }).select().single();
+         if (insertedData) insertedId = insertedData.id;
+       } catch(e) {}
+
+       const savedLog = await dbStore.insertAuditLog({
+         id: insertedId || undefined,
+         event_type: 'REQUIRED_DATA_RESP',
+         user_email: session.email || 'unknown',
+         organization: session.org || 'Internal',
+         details: newDetails
+       });
+
+       res.json({ success: true, dbId: insertedId || savedLog.id, status: payload.status || 'Draft' });
+    }
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/sampling/required-data/push - Push questionnaire to distributor
+app.post('/api/sampling/required-data/push', async (req: any, res: any) => {
+  try {
+    const { engagementId, sampleId, voucherNo, distributorId, distributorName, questions } = req.body;
+    const session = authenticateRequestSession(req);
+    const supabase = getSupabaseServerClient();
+    const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
+    const targetSampleId = cleanStr(sampleId);
+    const targetVoucherNo = cleanStr(voucherNo);
+
+    let existing: any[] = [];
+    try {
+      const { data } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
+      if (data) existing = data;
+    } catch(e) {}
+    if (existing.length === 0) {
+      existing = await dbStore.getAuditLogs('REQUIRED_DATA_RESP');
+    }
+
+    let existingRecord = existing?.find(d => {
+      let parsed = d.details;
+      if (typeof parsed === 'string') {
+         try { parsed = JSON.parse(parsed); } catch(e) {}
+      }
+      const sId = cleanStr(parsed?.sample_id);
+      const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo);
+      return (targetSampleId && (sId === targetSampleId || vNo === targetSampleId)) || 
+             (targetVoucherNo && (vNo === targetVoucherNo || sId === targetVoucherNo));
+    });
+
+    const pushDetails = {
+      engagement_id: engagementId || 'eng-101',
+      sample_id: sampleId,
+      voucher_no: voucherNo || '',
+      voucherNo: voucherNo || '',
+      distributor_id: distributorId || distributorName || '',
+      isPushed: true,
+      pushedAt: new Date().toISOString(),
+      pushedBy: session.email || 'Auditor',
+      pushedTo: distributorName || distributorId || 'Distributor',
+      status: 'Pending Submission',
+      updated_at: new Date().toISOString()
+    };
+
+    if (existingRecord) {
+      let parsed = existingRecord.details;
+      if (typeof parsed === 'string') {
+        try { parsed = JSON.parse(parsed); } catch(e) {}
+      }
+      const updated = {
+        ...parsed,
+        ...pushDetails,
+        status: parsed.status === 'Draft' || !parsed.status ? 'Pending Submission' : parsed.status
+      };
+      try {
+        await supabase.from('system_audit_logs').update({ details: updated }).eq('id', existingRecord.id);
+      } catch(e) {}
+      try {
+        await dbStore.updateAuditLog(existingRecord.id, { details: updated });
+      } catch(e) {}
+    } else {
+      const newDetails = {
+        ...pushDetails,
+        notes: '',
+        uploadedFiles: [],
+        itemResponses: {},
+        clarificationHistory: [],
+        created_by: session.email || 'unknown',
+        created_at: new Date().toISOString(),
+      };
+      let insertedId: string | null = null;
+      try {
+        const { data: ins } = await supabase.from('system_audit_logs').insert({
+          event_type: 'REQUIRED_DATA_RESP',
+          target_user_email: session.email || 'unknown',
+          ip_address: req.ip || '127.0.0.1',
+          details: newDetails
+        }).select().single();
+        if (ins) insertedId = ins.id;
+      } catch(e) {}
+      await dbStore.insertAuditLog({
+        id: insertedId || undefined,
+        event_type: 'REQUIRED_DATA_RESP',
+        user_email: session.email || 'unknown',
+        organization: session.org || 'Internal',
+        details: newDetails
+      });
+    }
+
+    res.json({ success: true, message: 'Questionnaire successfully pushed to distributor!' });
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Notifications endpoints
+app.get('/api/notifications', async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    let notifications: any[] = [];
+    try {
+      const { data, error } = await supabase
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'APP_NOTIFICATION')
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (!error && data) {
+        notifications = data.map(d => {
+          let parsed = d.details;
+          if (typeof parsed === 'string') {
+            try { parsed = JSON.parse(parsed); } catch(e) {}
+          }
+          return { dbId: d.id, ...(parsed || {}) };
+        });
+      }
+    } catch(e) {}
+
+    if (notifications.length === 0) {
+      const logs = await dbStore.getAuditLogs('APP_NOTIFICATION');
+      notifications = logs.map(d => {
+        let parsed = d.details;
+        if (typeof parsed === 'string') {
+          try { parsed = JSON.parse(parsed); } catch(e) {}
+        }
+        return { dbId: d.id, ...(parsed || {}) };
+      });
+    }
+
+    res.json({ success: true, notifications });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/notifications', async (req: any, res: any) => {
+  try {
+    const payload = req.body;
+    const session = authenticateRequestSession(req);
+    const item = {
+      id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      target_user_email: payload.target_user_email || null,
+      target_organization: payload.target_organization || 'All',
+      target_role: payload.target_role || 'All',
+      category: payload.category || 'System',
+      title: payload.title || 'Notification',
+      message: payload.message || '',
+      is_read: false,
+      created_at: new Date().toISOString(),
+      metadata: payload.metadata || {}
+    };
+
+    const supabase = getSupabaseServerClient();
+    try {
+      await supabase.from('system_audit_logs').insert({
+        event_type: 'APP_NOTIFICATION',
+        target_user_email: item.target_user_email || 'all',
+        ip_address: req.ip || '127.0.0.1',
+        details: item
+      });
+    } catch(e) {}
+
+    await dbStore.insertAuditLog({
+      event_type: 'APP_NOTIFICATION',
+      user_email: session.email || 'system',
+      organization: session.org || 'Internal',
+      details: item
+    });
+
+    res.json({ success: true, notification: item });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/notifications/:id/read', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const supabase = getSupabaseServerClient();
+    try {
+      const { data: row } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      if (row) {
+        let parsed = row.details;
+        if (typeof parsed === 'string') {
+          try { parsed = JSON.parse(parsed); } catch(e) {}
+        }
+        const updated = { ...parsed, is_read: true };
+        await supabase.from('system_audit_logs').update({ details: updated }).eq('id', id);
+      }
+    } catch(e) {}
+    try {
+      await dbStore.updateAuditLog(id, { details: { is_read: true } });
+    } catch(e) {}
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/notifications/read-all', async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    try {
+      const { data } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'APP_NOTIFICATION');
+      if (data) {
+        for (const row of data) {
+          let parsed = row.details;
+          if (typeof parsed === 'string') {
+            try { parsed = JSON.parse(parsed); } catch(e) {}
+          }
+          if (parsed && !parsed.is_read) {
+            await supabase.from('system_audit_logs').update({ details: { ...parsed, is_read: true } }).eq('id', row.id);
+          }
+        }
+      }
+    } catch(e) {}
+    res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -2441,6 +3154,39 @@ app.post('/api/questionnaire/submit', async (req, res) => {
   } catch (err: any) {
     console.error('Error in POST /api/questionnaire/submit:', err);
     return res.status(500).json({ success: false, error: err.message || 'Failed to submit questionnaire' });
+  }
+});
+
+// Request Edit Access
+app.post('/api/questionnaire/edit-access-request', async (req, res) => {
+  try {
+    const { client, distributor, auditId, userEmail, userName } = req.body;
+    const result = await requestAuthoritativeQuestionnaireEditAccess(client, distributor, auditId || 'eng-101', userEmail, userName);
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Review Edit Access (Auditor)
+app.post('/api/questionnaire/edit-access-review', async (req, res) => {
+  try {
+    const { client, distributor, auditId, action, userEmail, userName } = req.body;
+    const result = await reviewAuthoritativeQuestionnaireEditAccess(client, distributor, auditId || 'eng-101', action, userEmail, userName);
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Customize Questionnaire (Auditor)
+app.post('/api/questionnaire/customize', async (req, res) => {
+  try {
+    const { client, distributor, auditId, customSections, userEmail, userName } = req.body;
+    const result = await customizeAuthoritativeQuestionnaire(client, distributor, auditId || 'eng-101', customSections, userEmail, userName);
+    return res.json({ success: true, ...result });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

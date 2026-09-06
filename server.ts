@@ -28,6 +28,7 @@ import {
   reviewAuthoritativeQuestionnaireEditAccess,
   customizeAuthoritativeQuestionnaire
 } from './src/services/questionnaireService.js';
+import { dbStore } from './src/services/dbStore.js';
 
 dotenv.config();
 
@@ -919,6 +920,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         });
       }
       req.auth = userAuth;
+      req.user = userAuth;
       next();
     } catch (err) {
       return res.status(401).json({
@@ -1301,34 +1303,48 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   app.post('/api/sampling/required-data/questions', express.json(), authenticateRequest, async (req: any, res: any) => {
     try {
       const payload = req.body;
+      const userEmail = req.user?.email || req.auth?.email || (req.headers['x-user-email'] as string) || 'unknown';
+      const userOrg = req.user?.organization || req.auth?.organization || (req.headers['x-user-organization'] as string) || 'Internal';
       const supabase = getSupabaseServerClient();
       
+      const questionDetails = {
+        question_id: payload.question_id || 'RDQ_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
+        engagement_id: payload.engagement_id,
+        distributor_id: payload.distributor_id || payload.distributorName,
+        testing_classification: payload.testing_classification,
+        question_text: payload.question_text,
+        answer_type: payload.answer_type || 'Document Upload & Remarks',
+        required: payload.required !== undefined ? payload.required : true,
+        help_text: payload.help_text || '',
+        scope: payload.scope || 'transaction',
+        sample_id: payload.sample_id || null,
+        voucher_no: payload.voucher_no || payload.voucherNo || null,
+        allow_comment: payload.allow_comment !== undefined ? payload.allow_comment : true,
+        allow_file_upload: payload.allow_file_upload !== undefined ? payload.allow_file_upload : true,
+        created_by: userEmail,
+        created_at: new Date().toISOString(),
+        active: true,
+        options: payload.options || []
+      };
+
       const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
         event_type: 'REQUIRED_DATA_QUESTION_DEF',
-        target_user_email: req.user?.email || 'unknown',
+        target_user_email: userEmail,
         ip_address: req.ip || '127.0.0.1',
-        details: JSON.stringify({
-          question_id: payload.question_id || 'RDQ_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-          engagement_id: payload.engagement_id,
-          distributor_id: payload.distributor_id || payload.distributorName,
-          testing_classification: payload.testing_classification,
-          question_text: payload.question_text,
-          answer_type: payload.answer_type || 'Document Upload & Remarks',
-          required: payload.required !== undefined ? payload.required : true,
-          help_text: payload.help_text || '',
-          scope: payload.scope || 'transaction',
-          sample_id: payload.sample_id || null,
-          voucher_no: payload.voucher_no || payload.voucherNo || null,
-          allow_comment: payload.allow_comment !== undefined ? payload.allow_comment : true,
-          allow_file_upload: payload.allow_file_upload !== undefined ? payload.allow_file_upload : true,
-          created_by: req.user?.email || 'unknown',
-          created_at: new Date().toISOString(),
-          active: true,
-          options: payload.options || []
-        })
+        details: questionDetails
       }).select().single();
 
       if (error) throw error;
+
+      try {
+        await dbStore.insertAuditLog({
+          id: insertedData?.id,
+          event_type: 'REQUIRED_DATA_QUESTION_DEF',
+          user_email: userEmail,
+          organization: userOrg,
+          details: questionDetails
+        });
+      } catch (e) {}
 
       res.json({ success: true, dbId: insertedData.id });
     } catch (err: any) {
@@ -2146,30 +2162,54 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         finalAttributeCode = String.fromCharCode(highestCharCode + 1);
       }
       
-      const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
+      const userEmail = req.user?.email || req.auth?.email || (req.headers['x-user-email'] as string) || 'auditor@data360.io';
+      const userOrg = (req.headers['x-user-organization'] as string) || req.user?.organization || req.auth?.organization || 'Internal';
+
+      // Check if performed_by can be a valid UUID
+      const candidateUuid = req.auth?.id || req.user?.id;
+      const isUuid = typeof candidateUuid === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidateUuid);
+
+      const questionDetails = {
+        question_id: payload.question_id || 'CQ' + Date.now(),
+        engagement_id: payload.engagement_id || 'eng-101',
+        testing_classification: payload.testing_classification,
+        sample_id: payload.sample_id || null, // NULL for 'classification' scope, specific ID for 'sample' scope
+        scope: payload.scope || 'classification', // 'classification' or 'sample'
+        attribute_code: finalAttributeCode, // E.g., 'M'
+        question_text: payload.question_text,
+        question_type: payload.question_type,
+        required: payload.required || false,
+        options: payload.options || [],
+        conditional_rules: payload.conditional_rules || {},
+        display_order: payload.display_order || 0,
+        created_by: userEmail,
+        created_at: new Date().toISOString(),
+        active: true
+      };
+
+      const logRecord: any = {
         event_type: 'CREATED_CUSTOM_QUESTION',
-        performed_by: req.user?.email || 'unknown',
-        target_user_email: req.headers['x-user-organization'] || 'Internal',
+        target_user_email: userOrg,
         ip_address: req.ip || '127.0.0.1',
-        details: JSON.stringify({
-          question_id: payload.question_id || 'CQ' + Date.now(),
-          engagement_id: payload.engagement_id,
-          testing_classification: payload.testing_classification,
-          sample_id: payload.sample_id || null, // NULL for 'classification' scope, specific ID for 'sample' scope
-          scope: payload.scope || 'classification', // 'classification' or 'sample'
-          attribute_code: finalAttributeCode, // E.g., 'M'
-          question_text: payload.question_text,
-          question_type: payload.question_type,
-          required: payload.required || false,
-          options: payload.options || [],
-          conditional_rules: payload.conditional_rules || {},
-          display_order: payload.display_order || 0,
-          created_by: req.user?.email || 'unknown',
-          created_at: new Date().toISOString(),
-          active: true
-        })
-      }).select().single();
+        details: questionDetails
+      };
+      if (isUuid) {
+        logRecord.performed_by = candidateUuid;
+      }
+
+      const { data: insertedData, error } = await supabase.from('system_audit_logs').insert(logRecord).select().single();
       if (error) throw error;
+
+      try {
+        await dbStore.insertAuditLog({
+          id: insertedData?.id,
+          event_type: 'CREATED_CUSTOM_QUESTION',
+          user_email: userEmail,
+          organization: userOrg,
+          details: questionDetails
+        });
+      } catch (e) {}
+
       res.json({ success: true, attribute_code: finalAttributeCode, dbId: insertedData?.id });
     } catch (err: any) {
       console.error(err);
@@ -2194,6 +2234,9 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
          const { error: updateErr } = await supabase.from('system_audit_logs').update({ details: JSON.stringify(newDetails) }).eq('id', id);
          if (updateErr) throw updateErr;
       }
+      try {
+        await dbStore.updateAuditLog(id, { details: { active: false } });
+      } catch (e) {}
       res.json({ success: true });
     } catch (err: any) {
       console.error(err);

@@ -1,0 +1,302 @@
+[
+  {
+    "id": "ca9b5211-a9ff-4bfb-8cec-debe6e31fc2b",
+    "event_type": "CREATED_CUSTOM_QUESTION",
+    "target_user_email": "",
+    "user_name": "System User",
+    "user_email": "auditor@data360.io",
+    "user_role": "Auditor",
+    "organization": "Apex Audit Practice (AA)",
+    "action": "Log Entry",
+    "ip_address": "127.0.0.1",
+    "details": {
+      "question_id": "CQ1788700725237",
+      "engagement_id": "eng-101",
+      "testing_classification": "Rebates",
+      "sample_id": null,
+      "scope": "classification",
+      "attribute_code": "N",
+      "question_text": "Final verification question",
+      "question_type": "Yes / No",
+      "required": true,
+      "options": [],
+      "conditional_rules": {},
+      "display_order": 0,
+      "created_by": "auditor@data360.io",
+      "created_at": "2026-09-06T13:18:45.237Z",
+      "active": true
+    },
+    "created_at": "2026-09-06T13:18:45.409Z"
+  },
+  {
+    "id": "drive_gl_midwest_2026_canonical",
+    "event_type": "EVIDENCE_FILE",
+    "target_user_email": "Apex Electronics Corp::Midwest Trading Co.",
+    "user_name": "Lead Auditor Sarah Jenkins",
+    "user_email": "sarah.jenkins@apex.com",
+    "user_role": "Auditor",
+    "organization": "Apex Electronics Corp",
+    "action": "Uploaded General Ledger Population",
+    "ip_address": "127.0.0.1",
+    "created_at": "2026-04-01T10:00:00.000Z",
+    "details": {
+      "client_name": "Apex Electronics Corp",
+      "audit_id": "eng-101",
+      "audit_code": "AUD-2026-001",
+      "distributor_name": "Midwest Trading Co.",
+      "requirement_ref": "SAMPLING",
+      "requirement_title": "FY2026 General Ledger Full Population",
+      "section": "Sampling",
+      "file_name": "Midwest_Trading_GL_FY2026_Full.xlsx",
+      "file_size_mb": 2.4,
+      "file_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "google_drive_file_id": "drive_gl_midwest_2026_canonical",
+      "google_drive_folder_id": "folder_gl_sampling_01",
+      "storage_path": "Apex/eng-101/Midwest Trading Co./Sampling",
+      "version": 1,
+      "uploaded_by": "Lead Auditor Sarah Jenkins",
+      "uploaded_at": "2026-04-01T10:00:00.000Z",
+      "status": "AVAILABLE",
+      "review_status": "ACCEPTED",
+      "uploader_role": "Auditor",
+      "audit_period": "FY 2025-26",
+      "document_type": "SAMPLING_POPULATION",
+      "document_usage": [
+        "SAMPLING_POPULATION"
+      ],
+      "samplingEnabled": true,
+      "samplingStatus": "ADDED",
+      "glMapping": {
+        "date": "Date",
+        "voucherNo": "VoucherNo",
+        "accountNumber": "AccountNumber",
+        "accountDescription": "AccountDescription",
+        "description": "Description",
+        "narration": "Narration",
+        "debit": "Debit",
+        "credit": "Credit",
+        "balance": "Balance"
+      },
+      "records_count": 8,
+      "parsed_records": [
+        {
+          "id": "TX-8041",
+          "originalRow": 2,
+          "date": "2026-04-03",
+          "voucherNo": "TX-8041",
+          "accountNumber": "GL-6100",
+          "accountDescription": "Professional & Legal Fees",
+          "description": "Quarterly compliance audit advisory - Baker & McKenzie LLP",
+          "narration": "Legal and compliance retainer payment for Midwest distribution network",
+          "debit": 48500,
+          "credit": 0,
+          "balance": 48500,
+          "testingClassification": [
+            "3rd Party Disbursement"
+          ],
+          "testingStatus": "Tested - Pass",
+          "testingReference": "REF-3PD-001",
+          "attributeResults": {
+            "Authorized approval signature present": "Pass",
+            "Contract / Engagement agreement verified": "Pass",
+            "Invoice mathematically verified": "Pass",
+            "Proof of payment matched bank statement": "Pass"
+          },
+          "evidenceFields": {
+            "Vendor Invoice": "INV-2026-9812.pdf",
+            "Bank Statement Reference": "WIRE-9920192",
+            "Approval Email": "sarah.jenkins@apex.com (Approved Apr 4)"
+          },
+          "exceptions": ""
+        },
+        {
+          "id": "TX-8042",
+          "originalRow": 3,
+          "date": "2026-04-12",
+          "voucherNo": "TX-8042",
+          "accountNumber": "GL-6250",
+          "accountDescription": "Staff Travel & Reimbursements",
+          "description": "Executive travel reimbursement - Regional Operations Lead - John Davis",
+          "narration": "Flight tickets, hotel lodging, and per diem for Midwest supplier visits",
+          "debit": 3420.5,
+          "credit": 0,
+          "balance": 51920.5,
+          "testingClassification": [
+            "Employee Disbursement & Reimbursement"
+          ],
+          "testingStatus": "Tested - Pass",
+          "testingReference": "REF-EMP-001",
+          "attributeResults": {
+            "Expense report itemized receipts attached": "Pass",
+            "Manager authorization obtained prior to travel": "Pass",
+            "Per diem rates compliant with corporate travel policy": "Pass",
+            "Expense reimbursement paid to correct employee bank account": "Pass"
+          },
+          "evidenceFields": {
+            "Expense Report ID": "EXP-2026-04-JD",
+            "Receipts Bundle": "JD_Travel_Receipts_April.pdf",
+            "Manager Sign-off": "Signed by Marcus Vance (Director)"
+          },
+          "exceptions": ""
+        },
+        {
+          "id": "TX-8043",
+          "originalRow": 4,
+          "date": "2026-04-18",
+          "voucherNo": "TX-8043",
+          "accountNumber": "GL-4010",
+          "accountDescription": "Commercial Product Revenue",
+          "description": "Bulk electronics shipment order - Apex Order #ORD-99120",
+          "narration": "Commercial distribution invoice for 450 units smart sensor displays",
+          "debit": 0,
+          "credit": 128450,
+          "balance": -76529.5,
+          "testingClassification": [
+            "Sales Testing"
+          ],
+          "testingStatus": "Tested - Pass",
+          "testingReference": "REF-SALES-001",
+          "attributeResults": {
+            "Customer Purchase Order verified": "Pass",
+            "Sales Invoice matches PO pricing": "Pass",
+            "Shipping Bill of Lading (BOL) confirmed delivered": "Pass",
+            "Payment received and cleared within credit terms": "Pass"
+          },
+          "evidenceFields": {
+            "Purchase Order #": "PO-MDT-2026-091",
+            "Sales Invoice": "INV-APEX-88219.pdf",
+            "Bill of Lading": "BOL-FEDEX-992109"
+          },
+          "exceptions": ""
+        },
+        {
+          "id": "TX-8044",
+          "originalRow": 5,
+          "date": "2026-05-02",
+          "voucherNo": "TX-8044",
+          "accountNumber": "GL-6150",
+          "accountDescription": "Third Party Logistics & Freight",
+          "description": "Expedited freight services - FastTrack Logistics Inc",
+          "narration": "Intermodal freight transfer from Detroit warehouse to Chicago terminal",
+          "debit": 19800,
+          "credit": 0,
+          "balance": -56729.5,
+          "testingClassification": [
+            "3rd Party Disbursement"
+          ],
+          "testingStatus": "Pending Classification",
+          "testingReference": "",
+          "attributeResults": {},
+          "evidenceFields": {},
+          "exceptions": ""
+        },
+        {
+          "id": "TX-8045",
+          "originalRow": 6,
+          "date": "2026-05-15",
+          "voucherNo": "TX-8045",
+          "accountNumber": "GL-6250",
+          "accountDescription": "Staff Travel & Reimbursements",
+          "description": "Field engineer accommodation & client training meals - Elena Rostova",
+          "narration": "Technical training session on-site at Midwest distributor facility",
+          "debit": 1845,
+          "credit": 0,
+          "balance": -54884.5,
+          "testingClassification": [
+            "Employee Disbursement & Reimbursement"
+          ],
+          "testingStatus": "Pending Classification",
+          "testingReference": "",
+          "attributeResults": {},
+          "evidenceFields": {},
+          "exceptions": ""
+        },
+        {
+          "id": "TX-8046",
+          "originalRow": 7,
+          "date": "2026-05-22",
+          "voucherNo": "TX-8046",
+          "accountNumber": "GL-4010",
+          "accountDescription": "Commercial Product Revenue",
+          "description": "Wholesale component distribution - Midwest Trading Co. PO #8812",
+          "narration": "Scheduled monthly batch order fulfillment",
+          "debit": 0,
+          "credit": 87600,
+          "balance": -142484.5,
+          "testingClassification": [
+            "Sales Testing"
+          ],
+          "testingStatus": "Pending Classification",
+          "testingReference": "",
+          "attributeResults": {},
+          "evidenceFields": {},
+          "exceptions": ""
+        },
+        {
+          "id": "TX-8047",
+          "originalRow": 8,
+          "date": "2026-06-05",
+          "voucherNo": "TX-8047",
+          "accountNumber": "GL-6300",
+          "accountDescription": "Marketing & Promotional Allowances",
+          "description": "Co-op distributor marketing campaign rebate - Midwest Trading",
+          "narration": "Q1 promotional catalog co-sponsorship rebate credit",
+          "debit": 12500,
+          "credit": 0,
+          "balance": -129984.5,
+          "testingClassification": [
+            "3rd Party Disbursement"
+          ],
+          "testingStatus": "Pending Classification",
+          "testingReference": "",
+          "attributeResults": {},
+          "evidenceFields": {},
+          "exceptions": ""
+        },
+        {
+          "id": "TX-8048",
+          "originalRow": 9,
+          "date": "2026-06-18",
+          "voucherNo": "TX-8048",
+          "accountNumber": "GL-5010",
+          "accountDescription": "Cost of Goods Sold - Finished Goods",
+          "description": "Component inventory transfer adjustment",
+          "narration": "Standard inventory cost allocation",
+          "debit": 34100,
+          "credit": 0,
+          "balance": -95884.5,
+          "testingClassification": [
+            "N/A"
+          ],
+          "testingStatus": "Tested - Pass",
+          "testingReference": "REF-NA-001",
+          "attributeResults": {},
+          "evidenceFields": {},
+          "exceptions": ""
+        }
+      ],
+      "source": "Auditor Upload"
+    }
+  },
+  {
+    "id": "state_sampling_midwest_eng101",
+    "event_type": "SAMPLING_STATE",
+    "target_user_email": "Apex Electronics Corp::Midwest Trading Co.",
+    "user_name": "System",
+    "user_email": "system@data360.com",
+    "user_role": "System",
+    "organization": "Apex Electronics Corp",
+    "action": "Active Sampling Population State",
+    "ip_address": "127.0.0.1",
+    "created_at": "2026-04-01T10:00:00.000Z",
+    "details": {
+      "distributorId": "Midwest Trading Co.",
+      "auditId": "eng-101",
+      "clientName": "Apex Electronics Corp",
+      "activePopulationId": "drive_gl_midwest_2026_canonical",
+      "activePopulationName": "Midwest_Trading_GL_FY2026_Full.xlsx",
+      "activeTab": "GL",
+      "updatedAt": "2026-04-01T10:00:00.000Z"
+    }
+  }
+]

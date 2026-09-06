@@ -396,7 +396,18 @@ class ResilientDbStore {
     if (isSupabaseServerConfigured()) {
       try {
         const client = getSupabaseServerClient();
-        await client.from('system_audit_logs').insert(fullEntry);
+        const supabaseRow: any = {
+          event_type: fullEntry.event_type || 'SYSTEM_EVENT',
+          target_user_email: fullEntry.target_user_email || fullEntry.organization || 'Internal',
+          ip_address: fullEntry.ip_address || '127.0.0.1',
+          details: typeof fullEntry.details === 'object' ? fullEntry.details : { details: fullEntry.details },
+          created_at: fullEntry.created_at || new Date().toISOString()
+        };
+        // Only pass id if it is a valid UUID to match PostgreSQL uuid column
+        if (fullEntry.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(fullEntry.id)) {
+          supabaseRow.id = fullEntry.id;
+        }
+        await client.from('system_audit_logs').insert(supabaseRow);
       } catch (err) {
         console.warn('Supabase insert skipped or failed:', err);
       }
@@ -423,7 +434,9 @@ class ResilientDbStore {
       if (isSupabaseServerConfigured()) {
         try {
           const client = getSupabaseServerClient();
-          await client.from('system_audit_logs').update(this.inMemoryLogs[idx]).eq('id', id);
+          await client.from('system_audit_logs').update({
+            details: this.inMemoryLogs[idx].details
+          }).eq('id', id);
         } catch (err) {
           console.warn('Supabase update failed:', err);
         }
