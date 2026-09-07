@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus,  
   ArrowLeft, Search, Filter, CheckCircle2, AlertTriangle, 
-  FileText, Info, Save, X, Edit, ExternalLink, Database, ShieldCheck
+  FileText, Info, Save, X, Edit, ExternalLink, Database, ShieldCheck,
+  ChevronDown, ChevronUp, Eye, Download, FileSpreadsheet, ImageIcon,
+  Paperclip, MessageSquare, HelpCircle, CheckCircle, Clock, File, Send,
+  FileCheck
  } from 'lucide-react';
 import { UserSession } from '../types';
 import { CurrencyMode, formatFinancialAmount } from '../utils/currencyFormatter';
+import { RequiredDataQuestionnaire } from './RequiredDataQuestionnaire';
 
 interface SamplingViewProps {
   isEvidenceManagementMode?: boolean;
@@ -129,25 +133,73 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [customQuestions, setCustomQuestions] = useState<any[]>([]);
   const [questionnaireResponses, setQuestionnaireResponses] = useState<Record<string, any>>({});
+  const [questionnaireQuestions, setQuestionnaireQuestions] = useState<any[]>([]);
+  const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(new Set());
+  const [fullModalRecord, setFullModalRecord] = useState<any | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<any | null>(null);
+
+  const toggleRowExpand = (id: string) => {
+    setExpandedRowIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const getFileIcon = (fileName: string) => {
+    const ext = fileName?.split('.').pop()?.toLowerCase() || '';
+    if (['xls', 'xlsx', 'csv'].includes(ext)) {
+      return <FileSpreadsheet className="h-4 w-4 text-emerald-400" />;
+    }
+    if (['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(ext)) {
+      return <ImageIcon className="h-4 w-4 text-amber-400" />;
+    }
+    if (['pdf'].includes(ext)) {
+      return <FileText className="h-4 w-4 text-rose-400" />;
+    }
+    return <File className="h-4 w-4 text-indigo-400" />;
+  };
+
+  const handleDownloadDoc = (doc: any) => {
+    const link = document.createElement('a');
+    link.href = doc.url || doc.dataUrl || '#';
+    link.download = doc.name || 'document';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const fetchQuestionnaireResponses = async () => {
     try {
-      const res = await fetch(`/api/sampling/required-data/responses?auditId=${encodeURIComponent(selectedAuditFilter || 'eng-101')}&distributorId=${encodeURIComponent(selectedDistributor)}`, {
-        headers: { 'x-user-email': currentUser?.email || '' }
-      });
-      const data = await res.json();
-      if (data.success && Array.isArray(data.responses)) {
-        const map: Record<string, any> = {};
-        data.responses.forEach((r: any) => {
-          const sId = String(r.sample_id || '').toLowerCase();
-          const vNo = String(r.voucher_no || r.voucherNo || '').toLowerCase();
-          if (sId) map[sId] = r;
-          if (vNo) map[vNo] = r;
-        });
-        setQuestionnaireResponses(map);
+      const headers = { 'x-user-email': currentUser?.email || '' };
+      const [resResp, resQuestions] = await Promise.all([
+        fetch(`/api/sampling/required-data/responses?auditId=${encodeURIComponent(selectedAuditFilter || 'eng-101')}&distributorId=${encodeURIComponent(selectedDistributor)}`, { headers }),
+        fetch(`/api/sampling/required-data/questions?auditId=${encodeURIComponent(selectedAuditFilter || 'eng-101')}&distributorId=${encodeURIComponent(selectedDistributor)}`, { headers })
+      ]);
+
+      if (resResp.ok) {
+        const data = await resResp.json();
+        if (data.success && Array.isArray(data.responses)) {
+          const map: Record<string, any> = {};
+          data.responses.forEach((r: any) => {
+            const sId = String(r.sample_id || '').toLowerCase();
+            const vNo = String(r.voucher_no || r.voucherNo || '').toLowerCase();
+            if (sId) map[sId] = r;
+            if (vNo) map[vNo] = r;
+          });
+          setQuestionnaireResponses(map);
+        }
+      }
+
+      if (resQuestions.ok) {
+        const qData = await resQuestions.json();
+        if (qData.success && Array.isArray(qData.questions)) {
+          setQuestionnaireQuestions(qData.questions);
+        }
       }
     } catch (err) {
-      console.warn('Failed to fetch questionnaire responses', err);
+      console.warn('Failed to fetch questionnaire responses & questions', err);
     }
   };
 
@@ -714,7 +766,8 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         testingReference,
         isAssigned,
         isAccepted,
-        questionnaireStatus: qStatus || 'Accepted'
+        questionnaireStatus: qStatus || 'Accepted',
+        questionnaireResponse: qResp
       };
     }).filter(rec => rec.isAccepted).filter(rec => {
         if (!searchQuery) return true;
@@ -796,6 +849,339 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const getQuestionsForRecord = (rec: any) => {
+    const sId = String(rec.sampleId || rec.id || '').toLowerCase();
+    const vNo = String(rec.voucherNo || '').toLowerCase();
+    const classifications: string[] = Array.isArray(rec.testingClassification)
+      ? rec.testingClassification
+      : [rec.testingClassification].filter(Boolean);
+
+    // Filter questions that match this sample
+    let matched = questionnaireQuestions.filter((q: any) => {
+      const qSample = String(q.sample_id || '').toLowerCase();
+      const qVoucher = String(q.voucher_no || '').toLowerCase();
+      if (qSample && (qSample === sId || qSample === vNo)) return true;
+      if (qVoucher && (qVoucher === vNo || qVoucher === sId)) return true;
+      if (q.scope === 'sample' && !qSample && !qVoucher) return false;
+      if (q.scope === 'classification' && q.contextClass && classifications.includes(q.contextClass)) return true;
+      if (q.scope === 'all' || !q.scope) return true;
+      return false;
+    });
+
+    // Also include any questions that have responses recorded
+    const itemResponses = rec.questionnaireResponse?.itemResponses || {};
+    Object.keys(itemResponses).forEach((qKey) => {
+      const alreadyHas = matched.some(m => String(m.id || m.question_id) === String(qKey) || String(m.question_text) === String(qKey));
+      if (!alreadyHas) {
+        matched.push({
+          id: qKey,
+          question_id: qKey,
+          question_text: qKey,
+          scope: 'sample',
+          required: true
+        });
+      }
+    });
+
+    return matched;
+  };
+
+  const renderAcceptedQuestionnaireDetails = (rec: any) => {
+    const qResp = rec.questionnaireResponse;
+    const questions = getQuestionsForRecord(rec);
+    const itemResponses = qResp?.itemResponses || {};
+    const generalFiles: any[] = Array.isArray(qResp?.uploadedFiles) ? qResp.uploadedFiles : [];
+    const generalRemarks = qResp?.notes || qResp?.distributorRemarks || '';
+    const history: any[] = Array.isArray(qResp?.clarificationHistory) ? qResp.clarificationHistory : [];
+    const auditorEmail = qResp?.auditorEmail || 'auditor@data360.io';
+    const decisionDate = qResp?.auditorDecisionAt || qResp?.updated_at;
+
+    let totalDocsCount = generalFiles.length;
+    Object.values(itemResponses).forEach((item: any) => {
+      if (Array.isArray(item?.files)) totalDocsCount += item.files.length;
+    });
+
+    return (
+      <div className="bg-slate-900/95 border border-indigo-500/30 rounded-2xl p-6 shadow-2xl space-y-6 text-left">
+        {/* Header bar */}
+        <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-slate-800">
+          <div className="space-y-1">
+            <div className="flex items-center gap-3">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                Accepted Evidence
+              </span>
+              <span className="px-2.5 py-0.5 text-[11px] font-bold bg-slate-800 text-slate-300 rounded border border-slate-700">
+                Final Review Only • Read-Only
+              </span>
+              <span className="font-mono text-xs text-indigo-400 font-semibold">
+                {rec.testingReference || rec.voucherNo || rec.id}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400">
+              Reviewed &amp; accepted by <strong className="text-slate-200">{auditorEmail}</strong>
+              {decisionDate && <span> • {new Date(decisionDate).toLocaleString()}</span>}
+              {totalDocsCount > 0 && (
+                <span className="ml-2 px-2 py-0.5 bg-slate-800 text-slate-300 rounded text-[10px] font-mono">
+                  {totalDocsCount} document{totalDocsCount === 1 ? '' : 's'} attached
+                </span>
+              )}
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setFullModalRecord(rec)}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/30 flex items-center gap-1.5 cursor-pointer"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Full Questionnaire Modal</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => toggleRowExpand(rec.id)}
+              className="px-3 py-2 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded-xl text-xs font-bold transition-colors cursor-pointer border border-slate-700"
+            >
+              Close Details
+            </button>
+          </div>
+        </div>
+
+        {/* Persisted Questions & Distributor Responses */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <FileText className="w-4 h-4 text-indigo-400" />
+              Persisted Questionnaire &amp; Distributor Responses ({questions.length})
+            </h4>
+          </div>
+
+          {questions.length === 0 ? (
+            <div className="p-4 bg-slate-950/60 rounded-xl border border-slate-800 text-xs text-slate-400 text-center">
+              No specific questionnaire items recorded for this sample.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {questions.map((q: any, idx: number) => {
+                const qKey = String(q.id || q.question_id || q.question_text);
+                const resp = itemResponses[qKey] || itemResponses[q.question_text] || itemResponses[q.id];
+                const itemDocs: any[] = Array.isArray(resp?.files) ? resp.files : [];
+                const itemRemarks = resp?.remarks;
+                const itemDecision = resp?.reviewStatus || 'Accepted';
+                const itemAuditor = resp?.auditorEmail || auditorEmail;
+                const itemDecisionDate = resp?.auditorDecisionAt || decisionDate;
+
+                return (
+                  <div key={qKey + idx} className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4 space-y-3 hover:border-slate-700 transition-colors">
+                    {/* Question Header */}
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                        <span className="w-5 h-5 rounded bg-indigo-950/80 border border-indigo-800 text-indigo-300 text-xs font-mono font-bold flex items-center justify-center shrink-0 mt-0.5">
+                          {idx + 1}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-bold text-slate-100 leading-snug">
+                            {q.question_text || q.text || qKey}
+                            {q.required && <span className="text-rose-400 ml-1 font-bold">*</span>}
+                          </p>
+                          {q.help_text && (
+                            <p className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 italic">
+                              <Info className="w-3 h-3 text-slate-500 shrink-0" />
+                              <span>{q.help_text}</span>
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Auditor Item Decision Badge */}
+                      <div className="shrink-0 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        <span>{itemDecision}</span>
+                      </div>
+                    </div>
+
+                    {/* Distributor Response Block */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                          <MessageSquare className="w-3 h-3 text-indigo-400" /> Distributor Response:
+                        </label>
+                        <div className="p-3 bg-slate-900/90 border border-slate-700/80 rounded-lg text-xs text-slate-200 min-h-[38px] leading-relaxed">
+                          {resp?.answer ? (
+                            <span className="font-medium text-slate-100">{resp.answer}</span>
+                          ) : (
+                            <span className="text-slate-500 italic">No answer provided.</span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Distributor Remarks */}
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                          <span>Distributor Remarks / Clarifications:</span>
+                        </label>
+                        <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-lg text-xs text-slate-300 min-h-[38px] leading-relaxed">
+                          {itemRemarks ? (
+                            <span>{itemRemarks}</span>
+                          ) : (
+                            <span className="text-slate-500 italic">No item remarks.</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Uploaded Documents for this item */}
+                    <div className="space-y-1.5 pt-1">
+                      <label className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-1">
+                        <Paperclip className="w-3 h-3 text-emerald-400" />
+                        Uploaded Documents ({itemDocs.length}):
+                      </label>
+                      {itemDocs.length === 0 ? (
+                        <div className="p-2.5 bg-slate-900/40 border border-slate-800/60 rounded-lg text-xs text-slate-500 italic">
+                          No evidence files attached to this question.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {itemDocs.map((doc: any) => (
+                            <div key={doc.id || doc.name} className="p-2.5 bg-slate-900 border border-slate-700/80 rounded-lg flex items-center justify-between gap-2.5">
+                              <div className="flex items-center gap-2 min-w-0 flex-1">
+                                {getFileIcon(doc.name)}
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-xs font-semibold text-slate-200 truncate" title={doc.name}>
+                                    {doc.name}
+                                  </p>
+                                  <p className="text-[10px] text-slate-500">{doc.size || 'Attached'}</p>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => setPreviewDoc(doc)}
+                                  className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                                >
+                                  <Eye className="w-3 h-3" /> View
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDownloadDoc(doc)}
+                                  className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                                >
+                                  <Download className="w-3 h-3" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Review Decision Info */}
+                    <div className="p-2 bg-emerald-950/30 border border-emerald-900/40 rounded-lg flex items-center justify-between text-[11px] text-slate-400 flex-wrap gap-2">
+                      <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Accepted by {itemAuditor}</span>
+                      </div>
+                      {itemDecisionDate && (
+                        <span className="text-slate-500 font-mono">
+                          {new Date(itemDecisionDate).toLocaleString()}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* General Supporting Files & Overall Remarks */}
+        {(generalRemarks || generalFiles.length > 0) && (
+          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4 space-y-3">
+            <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <FileCheck className="w-4 h-4 text-indigo-400" />
+              General Supporting Documents &amp; Overall Remarks
+            </h4>
+
+            {generalRemarks && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold text-slate-400">Distributor Overall Remarks:</label>
+                <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-lg text-xs text-slate-300 leading-relaxed">
+                  {generalRemarks}
+                </div>
+              </div>
+            )}
+
+            {generalFiles.length > 0 && (
+              <div className="space-y-1.5">
+                <label className="text-[10px] font-bold text-slate-400">General Documents ({generalFiles.length}):</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {generalFiles.map((doc: any) => (
+                    <div key={doc.id || doc.name} className="p-2.5 bg-slate-900 border border-slate-700/80 rounded-lg flex items-center justify-between gap-2.5">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        {getFileIcon(doc.name)}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-semibold text-slate-200 truncate" title={doc.name}>{doc.name}</p>
+                          <p className="text-[10px] text-slate-500">{doc.size || 'Attached'}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setPreviewDoc(doc)}
+                          className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                        >
+                          <Eye className="w-3 h-3" /> View
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadDoc(doc)}
+                          className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                        >
+                          <Download className="w-3 h-3" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Clarification & Review History Trail */}
+        {history.length > 0 && (
+          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4 space-y-3">
+            <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <Clock className="w-4 h-4 text-amber-400" />
+              Clarification &amp; Audit Review History Trail ({history.length})
+            </h4>
+            <div className="divide-y divide-slate-800/60 border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
+              {history.map((h: any, i: number) => (
+                <div key={i} className="p-3 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        h.role === 'Auditor' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-emerald-500/20 text-emerald-300'
+                      }`}>
+                        {h.role || 'User'}
+                      </span>
+                      <strong className="text-slate-200">{h.action || 'Updated'}</strong>
+                    </div>
+                    {h.message && <p className="text-slate-400 mt-1 italic">&ldquo;{h.message}&rdquo;</p>}
+                  </div>
+                  <div className="text-[10px] text-slate-500 font-mono shrink-0">
+                    {h.timestamp ? new Date(h.timestamp).toLocaleString() : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   // Sub-Tab Rendering logic
@@ -913,7 +1299,8 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             </tr>
           ) : (
             mergedRecords.map((rec, i) => (
-              <tr key={rec.id + i} className="hover:bg-slate-800/30 transition-colors group">
+              <React.Fragment key={rec.id + i}>
+                <tr className="hover:bg-slate-800/30 transition-colors group">
                 <td className="py-2.5 px-4 text-slate-300 font-mono text-xs">{rec.date}</td>
                 <td className="py-2.5 px-4 font-mono font-medium text-slate-200 text-xs">{rec.voucherNo}</td>
                 <td className="py-2.5 px-4 text-slate-400 font-mono text-xs">{rec.accountNumber || '—'}</td>
@@ -1005,13 +1392,49 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                 </td>
                 )}
                 <td className="py-2.5 px-4 bg-slate-900/40 text-center">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                    Accepted
-                  </span>
+                  <div className="flex flex-col items-center gap-1.5 min-w-[170px]">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      Accepted
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => toggleRowExpand(rec.id)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all border ${
+                          expandedRowIds.has(rec.id)
+                            ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
+                            : 'bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border-slate-700'
+                        }`}
+                        title="View full accepted questionnaire details, distributor responses, uploaded evidence, and audit decision"
+                      >
+                        <FileText className="w-3 h-3 text-indigo-400" />
+                        <span>{expandedRowIds.has(rec.id) ? 'Hide Details' : 'View Details'}</span>
+                        {expandedRowIds.has(rec.id) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setFullModalRecord(rec)}
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700"
+                        title="Open complete read-only questionnaire modal"
+                      >
+                        <ExternalLink className="w-3 h-3 text-indigo-400" />
+                        <span>Modal</span>
+                      </button>
+                    </div>
+                  </div>
                 </td>
               </tr>
-            ))
+              {expandedRowIds.has(rec.id) && (
+                <tr key={`${rec.id}-details`} className="bg-slate-950/80 border-b border-indigo-950/60">
+                  <td colSpan={isDistributor ? 9 : 10} className="p-4 md:p-6">
+                    {renderAcceptedQuestionnaireDetails(rec)}
+                  </td>
+                </tr>
+              )}
+            </React.Fragment>
+          ))
           )}
         </tbody>
       </table>
@@ -1142,6 +1565,23 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                 <div><div className="text-[10px] text-slate-500 uppercase tracking-wider">Balance</div><div className="text-sm font-medium text-slate-300 font-mono">{formatCurrency(reviewRecord.balance, currencyMode)}</div></div>
                 <div className="col-span-2 md:col-span-4"><div className="text-[10px] text-slate-500 uppercase tracking-wider">Description / Narration</div><div className="text-sm text-slate-300">{reviewRecord.description} {reviewRecord.narration && reviewRecord.narration !== '—' && reviewRecord.narration !== reviewRecord.description ? `- ${reviewRecord.narration}` : ''}</div></div>
               </div>
+            </div>
+
+            {/* Accepted Questionnaire & Evidence Details */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400" /> Accepted Questionnaire &amp; Distributor Evidence
+                </h3>
+                <button
+                  type="button"
+                  onClick={() => setFullModalRecord(reviewRecord)}
+                  className="px-3 py-1 bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/40 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" /> Full Modal
+                </button>
+              </div>
+              {renderAcceptedQuestionnaireDetails(reviewRecord)}
             </div>
 
             {/* Evidence & Supporting Documents */}
@@ -1469,6 +1909,95 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       </div>
 
       {!isDistributor && renderReviewModal()}
+
+      {/* Full Questionnaire Read-Only Modal */}
+      {fullModalRecord && (
+        <RequiredDataQuestionnaire
+          isOpen={true}
+          onClose={() => setFullModalRecord(null)}
+          targetSampleId={fullModalRecord.sampleId || fullModalRecord.id}
+          targetVoucherNo={fullModalRecord.voucherNo && fullModalRecord.voucherNo !== '—' ? fullModalRecord.voucherNo : (fullModalRecord.sampleId || fullModalRecord.id)}
+          targetClassification={Array.isArray(fullModalRecord.testingClassification) ? fullModalRecord.testingClassification[0] : fullModalRecord.testingClassification}
+          selectedClient={selectedClient}
+          distributorName={selectedDistributor}
+          engagementId={selectedAuditFilter || 'eng-101'}
+          isDistributor={false}
+          isAuditor={true}
+          isReviewMode={true}
+        />
+      )}
+
+      {/* Supporting Evidence File Preview Modal */}
+      {previewDoc && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/60">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2 bg-slate-800 rounded-lg">
+                  {getFileIcon(previewDoc.name)}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate max-w-md" title={previewDoc.name}>
+                    {previewDoc.name}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {previewDoc.size || 'Supporting Evidence Document'}
+                    {previewDoc.uploadDate && ` • Uploaded ${new Date(previewDoc.uploadDate).toLocaleString()}`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadDoc(previewDoc)}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewDoc(null)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 p-6 overflow-y-auto flex items-center justify-center bg-slate-950/40 min-h-[360px]">
+              {previewDoc.type?.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)$/i.test(previewDoc.name) ? (
+                <img
+                  src={previewDoc.url || previewDoc.dataUrl}
+                  alt={previewDoc.name}
+                  className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg border border-slate-800"
+                />
+              ) : previewDoc.type === 'application/pdf' || previewDoc.name?.toLowerCase().endsWith('.pdf') ? (
+                <iframe
+                  src={previewDoc.url || previewDoc.dataUrl}
+                  title={previewDoc.name}
+                  className="w-full h-[70vh] rounded-lg border border-slate-800 bg-white"
+                />
+              ) : (
+                <div className="text-center p-8 space-y-3">
+                  <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mx-auto text-indigo-400 shadow-inner">
+                    {getFileIcon(previewDoc.name)}
+                  </div>
+                  <p className="text-sm font-bold text-slate-200">{previewDoc.name}</p>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    This file format is best previewed locally or in an external application.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadDoc(previewDoc)}
+                    className="mt-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer shadow-lg shadow-indigo-600/20"
+                  >
+                    <Download className="w-4 h-4" /> Download File ({previewDoc.size || 'Attachment'})
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

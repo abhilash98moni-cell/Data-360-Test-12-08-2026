@@ -89,6 +89,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
   const activeCurrency: CurrencyMode = currencyMode === 'USD' ? 'USD' : 'INR';
   const isDistributor = isDistributorWorkflow || currentUser?.role?.includes('Distributor') || currentUser?.role === 'Distributor';
   const isAuditor = !isDistributor;
+  const isReadOnly = Boolean(isReviewMode);
 
   const targetSampleId = String(transaction?.id || transaction?.sampleId || transaction?.voucherNo || 'TX-1');
   const targetVoucherNo = String(transaction?.voucherNo || transaction?.id || '');
@@ -843,6 +844,12 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
                   {status === 'Rejected' && <XCircle className="h-3 w-3" />}
                   {status}
                 </span>
+
+                {isReadOnly && (
+                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 uppercase tracking-wider">
+                    Final Review Only • Read-Only
+                  </span>
+                )}
               </div>
               <p className="text-xs text-slate-400 mt-0.5 truncate">
                 Engagement: <span className="text-slate-300 font-medium">{engagementId || 'General Audit'}</span> • Distributor: <span className="text-slate-300 font-medium">{activeDistributor}</span>
@@ -889,6 +896,19 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
         {/* Modal Scrollable Body */}
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           
+          {/* Read-Only Notice for Final Review */}
+          {isReadOnly && (
+            <div className="bg-emerald-950/30 border border-emerald-500/40 rounded-xl p-3.5 flex items-center justify-between text-xs text-emerald-200">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                <div>
+                  <span className="font-bold text-white block">Final Review Only — Read-Only Mode</span>
+                  <span className="text-emerald-300/90">This questionnaire and its submitted evidence have been accepted. All questions, responses, documents, remarks, and auditor review decisions are displayed in read-only format.</span>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* 1. Transaction Summary Card */}
           <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4">
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
@@ -1027,7 +1047,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
               </div>
 
               {/* Auditor Add Question Button */}
-              {isAuditor && (
+              {isAuditor && !isReadOnly && (
                 <button
                   onClick={handleOpenAddQuestion}
                   className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow-sm shadow-indigo-600/30 cursor-pointer"
@@ -1053,11 +1073,11 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
                   <h4 className="text-sm font-bold text-slate-300">No Required Data Items Defined</h4>
                   <p className="text-xs text-slate-500 max-w-md mx-auto">
                     {isAuditor 
-                      ? 'No questions have been configured for this transaction. Click "Add Item" above to specify what evidence the distributor must provide.'
+                      ? 'No questions have been configured for this transaction.'
                       : 'No specific required data items have been requested for this transaction yet. You can attach general supporting documents and notes below.'}
                   </p>
                 </div>
-                {isAuditor && (
+                {isAuditor && !isReadOnly && (
                   <button
                     onClick={handleOpenAddQuestion}
                     className="mt-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-colors inline-flex items-center gap-1.5 shadow-md shadow-indigo-600/20"
@@ -1126,7 +1146,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
                         </div>
 
                         {/* Auditor Actions on the question itself */}
-                        {isAuditor && (
+                        {isAuditor && !isReadOnly && (
                           <div className="flex items-center gap-1 shrink-0">
                             <button
                               onClick={() => handleOpenEditQuestion(q)}
@@ -1162,7 +1182,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
                         <div className="flex items-center justify-between text-xs font-bold text-slate-400">
                           <span>Attached Documents ({itemFiles.length})</span>
                           {/* Upload button for Distributor */}
-                          {isDistributor && (
+                          {isDistributor && !isReadOnly && (
                             <button
                               onClick={() => triggerFileUpload(qKey)}
                               className="text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 cursor-pointer"
@@ -1175,7 +1195,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
                         {itemFiles.length === 0 ? (
                           <div className="py-4 px-3 border border-slate-800/80 rounded-lg bg-slate-900/30 text-center text-xs text-slate-500">
                             {isDistributor 
-                              ? 'No supporting files attached yet for this item. Click "Upload Evidence" to add documents (PDF, Excel, Word, PPT, images, CSV).'
+                              ? 'No supporting files attached yet for this item.'
                               : 'No documents submitted for this item yet.'}
                           </div>
                         ) : (
@@ -1211,7 +1231,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
                                     <Download className="h-3 w-3" />
                                     <span>Download</span>
                                   </button>
-                                  {isDistributor && (
+                                  {isDistributor && !isReadOnly && (
                                     <button
                                       onClick={() => removeFile(qKey, doc.id)}
                                       className="p-1 text-slate-400 hover:text-rose-400 transition-colors"
@@ -1230,9 +1250,9 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
                       {/* Remarks / Notes for this item */}
                       <div className="space-y-1.5 pt-1">
                         <label className="text-xs font-bold text-slate-400">
-                          {isDistributor ? 'Distributor Notes / Remarks for this item:' : 'Distributor Remarks:'}
+                          {isDistributor && !isReadOnly ? 'Distributor Notes / Remarks for this item:' : 'Distributor Remarks:'}
                         </label>
-                        {isDistributor ? (
+                        {isDistributor && !isReadOnly ? (
                           <textarea
                             value={itemRemarks}
                             onChange={(e) => updateItemRemarks(qKey, e.target.value)}
@@ -1251,42 +1271,61 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
                       {isAuditor && (
                         <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-3 flex-wrap bg-slate-900/30 -mx-5 -mb-5 p-3 rounded-b-xl">
                           <span className="text-xs font-bold text-slate-400">
-                            Auditor Review:
+                            Auditor Review & Decision:
                           </span>
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() => handleItemDecision(qKey, 'Accepted')}
-                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
-                                itemReviewStatus === 'Accepted'
-                                  ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/30'
-                                  : 'bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600 hover:text-white'
-                              }`}
-                            >
-                              <Check className="h-3.5 w-3.5" /> Accept Evidence
-                            </button>
+                          {isReadOnly ? (
+                            <div className="flex items-center gap-2 text-xs flex-wrap">
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                                <Check className="h-3.5 w-3.5 text-emerald-400" />
+                                {itemReviewStatus === 'Pending' ? 'Accepted' : itemReviewStatus}
+                              </span>
+                              {itemData.auditorEmail && (
+                                <span className="text-slate-400 text-[11px]">
+                                  Reviewed by: <strong className="text-slate-200">{itemData.auditorEmail}</strong>
+                                </span>
+                              )}
+                              {itemData.auditorDecisionAt && (
+                                <span className="text-slate-500 text-[11px]">
+                                  ({new Date(itemData.auditorDecisionAt).toLocaleString()})
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <button
+                                onClick={() => handleItemDecision(qKey, 'Accepted')}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                                  itemReviewStatus === 'Accepted'
+                                    ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/30'
+                                    : 'bg-emerald-600/20 text-emerald-300 hover:bg-emerald-600 hover:text-white'
+                                }`}
+                              >
+                                <Check className="h-3.5 w-3.5" /> Accept Evidence
+                              </button>
 
-                            <button
-                              onClick={() => handleItemDecision(qKey, 'Clarification Required')}
-                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
-                                itemReviewStatus === 'Clarification Required'
-                                  ? 'bg-amber-600 text-white shadow-sm shadow-amber-600/30'
-                                  : 'bg-amber-600/20 text-amber-300 hover:bg-amber-600 hover:text-white'
-                              }`}
-                            >
-                              <HelpCircle className="h-3.5 w-3.5" /> Require Clarification
-                            </button>
+                              <button
+                                onClick={() => handleItemDecision(qKey, 'Clarification Required')}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                                  itemReviewStatus === 'Clarification Required'
+                                    ? 'bg-amber-600 text-white shadow-sm shadow-amber-600/30'
+                                    : 'bg-amber-600/20 text-amber-300 hover:bg-amber-600 hover:text-white'
+                                }`}
+                              >
+                                <HelpCircle className="h-3.5 w-3.5" /> Require Clarification
+                              </button>
 
-                            <button
-                              onClick={() => handleItemDecision(qKey, 'Rejected')}
-                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
-                                itemReviewStatus === 'Rejected'
-                                  ? 'bg-rose-600 text-white shadow-sm shadow-rose-600/30'
-                                  : 'bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white'
-                              }`}
-                            >
-                              <XCircle className="h-3.5 w-3.5" /> Reject
-                            </button>
-                          </div>
+                              <button
+                                onClick={() => handleItemDecision(qKey, 'Rejected')}
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1 transition-all ${
+                                  itemReviewStatus === 'Rejected'
+                                    ? 'bg-rose-600 text-white shadow-sm shadow-rose-600/30'
+                                    : 'bg-rose-600/20 text-rose-300 hover:bg-rose-600 hover:text-white'
+                                }`}
+                              >
+                                <XCircle className="h-3.5 w-3.5" /> Reject
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
 
@@ -1308,7 +1347,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
                   Additional transaction-level files, authorization memos, or general distributor remarks.
                 </p>
               </div>
-              {isDistributor && (
+              {isDistributor && !isReadOnly && (
                 <button
                   onClick={() => triggerFileUpload('general')}
                   className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer border border-slate-700"
@@ -1344,7 +1383,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
                       >
                         <Download className="h-3 w-3" /> Download
                       </button>
-                      {isDistributor && (
+                      {isDistributor && !isReadOnly && (
                         <button
                           onClick={() => removeFile('general', doc.id)}
                           className="p-1 text-slate-400 hover:text-rose-400 transition-colors"
@@ -1361,7 +1400,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
             {/* General Notes Textarea */}
             <div className="space-y-1">
               <label className="text-xs font-bold text-slate-400">Overall Remarks:</label>
-              {isDistributor ? (
+              {isDistributor && !isReadOnly ? (
                 <textarea
                   value={generalNotes}
                   onChange={(e) => setGeneralNotes(e.target.value)}
@@ -1388,100 +1427,119 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
           </div>
 
           <div className="flex items-center gap-2.5">
-            {/* DISTRIBUTOR ACTIONS */}
-            {isDistributor && (
-              <>
+            {/* READ-ONLY / FINAL REVIEW CONTROLS */}
+            {isReadOnly ? (
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
+                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
+                  <span>Final Review Only — Read-Only</span>
+                </div>
                 <button
                   type="button"
-                  onClick={() => handleSaveResponses('Draft')}
-                  disabled={saving}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-700 disabled:opacity-50"
+                  onClick={onClose}
+                  className="px-5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors cursor-pointer border border-slate-700"
                 >
-                  <Save className="h-3.5 w-3.5" />
-                  <span>Save Draft</span>
+                  Close
                 </button>
+              </div>
+            ) : (
+              <>
+                {/* DISTRIBUTOR ACTIONS */}
+                {isDistributor && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveResponses('Draft')}
+                      disabled={saving}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-700 disabled:opacity-50"
+                    >
+                      <Save className="h-3.5 w-3.5" />
+                      <span>Save Draft</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleSaveResponses('Submitted')}
+                      disabled={saving}
+                      className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/30 disabled:opacity-50"
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      <span>{status === 'Clarification Required' || status === 'Rejected' ? 'Resubmit Required Data' : 'Submit Required Data'}</span>
+                    </button>
+                  </>
+                )}
+
+                {/* AUDITOR ACTIONS */}
+                {isAuditor && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveResponses(status)}
+                      disabled={saving}
+                      className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-700 disabled:opacity-50"
+                    >
+                      <Save className="h-3.5 w-3.5" />
+                      <span>Save Changes</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={handlePushQuestionnaire}
+                      disabled={saving || questions.length === 0}
+                      className="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <Send className="h-3.5 w-3.5" />
+                      <span>Push to Distributor</span>
+                    </button>
+
+                    {/* Clarification Button for Auditor */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClarificationTargetItem(null);
+                        setClarificationInputText(activeClarificationMessage || '');
+                        setShowClarificationModal(true);
+                      }}
+                      disabled={saving}
+                      className="px-4 py-2 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <HelpCircle className="h-3.5 w-3.5" />
+                      <span>Require Clarification</span>
+                    </button>
+
+                    {/* Overall Reject Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleOverallDecision('Rejected')}
+                      disabled={saving}
+                      className="px-4 py-2 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <XCircle className="h-3.5 w-3.5" />
+                      <span>Reject Evidence</span>
+                    </button>
+
+                    {/* Overall Accept Button */}
+                    <button
+                      type="button"
+                      onClick={() => handleOverallDecision('Accepted')}
+                      disabled={saving}
+                      className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-600/20 disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      <span>Accept Evidence</span>
+                    </button>
+                  </>
+                )}
 
                 <button
                   type="button"
-                  onClick={() => handleSaveResponses('Submitted')}
-                  disabled={saving}
-                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/30 disabled:opacity-50"
+                  onClick={onClose}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
                 >
-                  <Send className="h-3.5 w-3.5" />
-                  <span>{status === 'Clarification Required' || status === 'Rejected' ? 'Resubmit Required Data' : 'Submit Required Data'}</span>
+                  Close
                 </button>
               </>
             )}
-
-            {/* AUDITOR ACTIONS */}
-            {isAuditor && (
-              <>
-                <button
-                  type="button"
-                  onClick={() => handleSaveResponses(status)}
-                  disabled={saving}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer border border-slate-700 disabled:opacity-50"
-                >
-                  <Save className="h-3.5 w-3.5" />
-                  <span>Save Changes</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handlePushQuestionnaire}
-                  disabled={saving || questions.length === 0}
-                  className="px-4 py-2 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  <Send className="h-3.5 w-3.5" />
-                  <span>Push to Distributor</span>
-                </button>
-
-                {/* Clarification Button for Auditor */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setClarificationTargetItem(null);
-                    setClarificationInputText(activeClarificationMessage || '');
-                    setShowClarificationModal(true);
-                  }}
-                  disabled={saving}
-                  className="px-4 py-2 bg-amber-600/20 hover:bg-amber-600 text-amber-300 hover:text-white border border-amber-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  <HelpCircle className="h-3.5 w-3.5" />
-                  <span>Require Clarification</span>
-                </button>
-
-                {/* Overall Reject Button */}
-                <button
-                  type="button"
-                  onClick={() => handleOverallDecision('Rejected')}
-                  disabled={saving}
-                  className="px-4 py-2 bg-rose-600/20 hover:bg-rose-600 text-rose-300 hover:text-white border border-rose-500/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                >
-                  <XCircle className="h-3.5 w-3.5" />
-                  <span>Reject Evidence</span>
-                </button>
-
-                {/* Overall Accept Button */}
-                <button
-                  type="button"
-                  onClick={() => handleOverallDecision('Accepted')}
-                  disabled={saving}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-600/20 disabled:opacity-50"
-                >
-                  <CheckCircle2 className="h-3.5 w-3.5" />
-                  <span>Accept Evidence</span>
-                </button>
-              </>
-            )}
-
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
-            >
-              Close
-            </button>
           </div>
         </div>
 
