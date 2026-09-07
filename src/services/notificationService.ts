@@ -214,16 +214,25 @@ export async function getNotifications(params: {
   // 4. Role and Organization filtering
   const userRoleStr = clean(role);
   const userDistStr = clean(distributor);
+  const isDistributor = userRoleStr.includes('distributor');
 
   const filtered = normalized.filter(n => {
-    const targetRole = clean(n.targetUserRole);
+    let targetRole = clean(n.targetUserRole);
     const targetOrg = clean(n.targetOrganization);
+    const cat = n.category || '';
 
-    if (userRoleStr.includes('distributor')) {
-      // Distributors must NOT see notifications targeted specifically at Auditors
-      if (targetRole === 'auditor') return false;
+    if (targetRole === 'all' || !targetRole) {
+      const isAuditorCat = ['Documents Uploaded', 'Required Data Submitted', 'Required Data Resubmitted', 'Data Submitted', 'IRL Submitted', 'Evidence Uploaded', 'Edit Access Requested'].includes(cat);
+      const isDistCat = ['Evidence Accepted', 'Evidence Rejected', 'Clarification Requested', 'Edit Access Approved', 'System'].includes(cat);
+      if (isAuditorCat) targetRole = 'auditor';
+      else if (isDistCat) targetRole = 'distributor';
+    }
 
-      // If targetOrganization is specified and not 'all', match with distributor organization
+    if (isDistributor) {
+      // Distributors must NOT see Auditor notifications
+      if (targetRole !== 'distributor') return false;
+
+      // Match organization if specified
       if (targetOrg && targetOrg !== 'all') {
         if (userDistStr && userDistStr !== 'all' && !userDistStr.includes('distributor partner') && !userDistStr.includes('distributor entity')) {
           const matches = targetOrg.includes(userDistStr) || userDistStr.includes(targetOrg);
@@ -231,18 +240,37 @@ export async function getNotifications(params: {
         }
       }
       return true;
-    } else if (userRoleStr.includes('auditor') || userRoleStr.includes('admin') || userRoleStr.includes('lead')) {
-      // Auditors must NOT see notifications targeted specifically at Distributors
-      if (targetRole === 'distributor') return false;
+    } else {
+      // Auditors must NOT see Distributor notifications
+      if (targetRole !== 'auditor') return false;
       return true;
     }
-    return true;
   });
 
-  // Sort newest first
-  filtered.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  // 5. Deduplicate
+  const dedupedMap = new Map<string, AppNotification>();
+  filtered.forEach(n => {
+    const vKey = n.targetVoucherNo || n.targetSampleId || n.metadata?.requirementId || '';
+    const dedupeKey = `${clean(n.targetUserRole)}::${clean(n.category)}::${clean(vKey)}::${clean(n.title)}`;
+    const existing = dedupedMap.get(dedupeKey);
+    if (!existing) {
+      dedupedMap.set(dedupeKey, n);
+    } else {
+      const existingTime = new Date(existing.createdAt || 0).getTime();
+      const newTime = new Date(n.createdAt || 0).getTime();
+      if (newTime > existingTime) {
+        n.isRead = existing.isRead || n.isRead;
+        dedupedMap.set(dedupeKey, n);
+      } else {
+        existing.isRead = existing.isRead || n.isRead;
+      }
+    }
+  });
 
-  return filtered;
+  const finalSorted = Array.from(dedupedMap.values());
+  finalSorted.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+  return finalSorted;
 }
 
 /**

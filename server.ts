@@ -195,13 +195,19 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       }
 
       try {
-        await supabase.from('notifications').insert({
-          target_organization: client,
+        await dispatchNotification({
+          target_role: 'Auditor',
+          target_organization: distributor,
           category: 'Submission Completed',
-          title: `IRL Submitted by ${distributor}`,
-          message: `Distributor ${distributor} has submitted their Initial Information Request List for client ${client}.`,
-          is_read: false,
-          created_at: new Date().toISOString()
+          title: `IRL Submitted: ${distributor}`,
+          message: `Distributor ${distributor} submitted Initial Information Request List for ${client}.`,
+          link_tab: 'iir',
+          metadata: {
+            distributorName: distributor,
+            client,
+            linkTab: 'iir',
+            targetRole: 'Auditor'
+          }
         });
       } catch (e) {
         console.warn('Supabase notification note:', e);
@@ -497,13 +503,21 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
 
       // Notifications
       try {
-        await supabase.from('notifications').insert({
-          target_organization: client,
-          category: 'IRL_EDIT_REQUEST',
-          title: 'Edit Access Request',
-          message: `${distributor} has requested edit access for ${client} audit. Scope: ${scope || 'Entire IRL'}. Request ID: ${requestId}.`,
-          is_read: false,
-          created_at: nowIso
+        await dispatchNotification({
+          target_role: 'Auditor',
+          target_organization: distributor,
+          category: 'Edit Access Requested',
+          title: `Edit Access Requested: ${distributor}`,
+          message: `${distributor} requested edit access for ${client} audit. Scope: ${scope || 'Entire IRL'}. Request ID: ${requestId}.`,
+          link_tab: 'iir',
+          metadata: {
+            distributorName: distributor,
+            client,
+            requestId,
+            scope,
+            linkTab: 'iir',
+            targetRole: 'Auditor'
+          }
         });
       } catch (e) {
         console.warn('Notification insert note:', e);
@@ -655,13 +669,20 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           details: `Edit access approved for request ${requestId} (${targetDistributor} / ${targetClient}). Submission unlocked. Comment: "${comment || 'Approved'}"`
         });
 
-        await supabase.from('notifications').insert({
-          target_organization: targetDistributor || 'Distributor',
+        await dispatchNotification({
+          target_role: 'Distributor',
+          target_organization: targetDistributor || 'Midwest Trading Co.',
           category: 'Edit Access Approved',
           title: 'Edit Access Approved',
           message: `Your request for edit access for ${targetClient || 'the audit'} has been approved by APEX. You may now edit permitted requirements.`,
-          is_read: false,
-          created_at: nowIso
+          link_tab: 'iir',
+          metadata: {
+            distributorName: targetDistributor,
+            client: targetClient,
+            requestId,
+            linkTab: 'iir',
+            targetRole: 'Distributor'
+          }
         });
       } catch (e) {}
 
@@ -746,13 +767,20 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           details: `Edit access rejected for request ${requestId} (${targetDistributor} / ${targetClient}). Reason: "${String(comment).trim()}"`
         });
 
-        await supabase.from('notifications').insert({
-          target_organization: targetDistributor || 'Distributor',
+        await dispatchNotification({
+          target_role: 'Distributor',
+          target_organization: targetDistributor || 'Midwest Trading Co.',
           category: 'Edit Access Rejected',
           title: 'Edit Access Rejected',
           message: `Your request for edit access for ${targetClient || 'the audit'} has been rejected by APEX. Reason: "${String(comment).trim()}".`,
-          is_read: false,
-          created_at: nowIso
+          link_tab: 'iir',
+          metadata: {
+            distributorName: targetDistributor,
+            client: targetClient,
+            requestId,
+            linkTab: 'iir',
+            targetRole: 'Distributor'
+          }
         });
       } catch (e) {}
 
@@ -1095,6 +1123,26 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         details: `Evidence version V${versionNum} uploaded for ${requirementId} (${metadata.fileName}). Status: PENDING_REVIEW`
       });
 
+      if (req.auth?.role?.toLowerCase().includes('distributor') || uploadedBy?.toLowerCase().includes('distributor')) {
+        await dispatchNotification({
+          target_role: 'Auditor',
+          target_organization: targetDistributor,
+          category: 'Documents Uploaded',
+          title: `Evidence Uploaded: ${requirementId}`,
+          message: `Distributor ${targetDistributor} uploaded evidence file (${metadata.fileName}, V${versionNum}) for requirement ${requirementId}.`,
+          link_tab: 'evidence_management',
+          metadata: {
+            requirementId,
+            fileName: metadata.fileName,
+            distributorName: targetDistributor,
+            clientName,
+            version: versionNum,
+            targetRole: 'Auditor',
+            linkTab: 'evidence_management'
+          }
+        });
+      }
+
       res.json({
         success: true,
         file: metadata,
@@ -1168,9 +1216,23 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   }
 
   const inMemoryNotifications: any[] = [];
-  const readNotificationIds = new Set<string>();
-  const deletedNotificationIds = new Set<string>();
+  const userReadNotificationIds = new Map<string, Set<string>>();
+  const userAllReadTimestamps = new Map<string, number>();
+  const userDeletedNotificationIds = new Map<string, Set<string>>();
   const NOTIFS_FILE_PATH = path.join(process.cwd(), 'data', 'app_notifications.json');
+
+  function getRecipientUserKey(reqOrUser: any): string {
+    const rawRole = reqOrUser?.headers?.['x-user-role'] || reqOrUser?.query?.role || reqOrUser?.role || reqOrUser?.user?.role || '';
+    const cleanRole = String(rawRole).trim().toLowerCase();
+    const isDist = cleanRole.includes('distributor');
+    const org = String(reqOrUser?.headers?.['x-user-organization'] || reqOrUser?.headers?.['x-user-org'] || reqOrUser?.query?.distributor || reqOrUser?.organization || reqOrUser?.user?.organization || '').trim().toLowerCase();
+    const email = String(reqOrUser?.headers?.['x-user-email'] || reqOrUser?.query?.userEmail || reqOrUser?.email || reqOrUser?.user?.email || '').trim().toLowerCase();
+
+    if (email && email !== 'all' && email !== 'user' && !email.includes('anonymous')) {
+      return email;
+    }
+    return `${isDist ? 'distributor' : 'auditor'}::${org || 'all'}`;
+  }
 
   function getLocalNotifications(): any[] {
     try {
@@ -1192,11 +1254,21 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   }
 
   async function dispatchNotification(payload: NotificationPayload) {
-    const notifId = payload.id || `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const nowIso = payload.created_at || new Date().toISOString();
-    const targetRole = payload.target_role || 'All';
-    const targetOrg = payload.target_organization || 'All';
+    const cat = payload.category || 'System';
 
+    // Canonical target role resolution
+    let targetRole: 'Auditor' | 'Distributor' = 'Auditor';
+    if (payload.target_role === 'Distributor' || payload.target_role === 'Auditor') {
+      targetRole = payload.target_role;
+    } else {
+      const isAuditorCat = ['Documents Uploaded', 'Required Data Submitted', 'Required Data Resubmitted', 'Data Submitted', 'IRL Submitted', 'Evidence Uploaded', 'Edit Access Requested'].includes(cat);
+      const isDistCat = ['Evidence Accepted', 'Evidence Rejected', 'Clarification Requested', 'Edit Access Approved', 'System'].includes(cat);
+      if (isDistCat) targetRole = 'Distributor';
+      else targetRole = 'Auditor';
+    }
+
+    const targetOrg = payload.target_organization || 'All';
     const meta: Record<string, any> = {
       ...(payload.metadata || {}),
       targetRole,
@@ -1206,23 +1278,50 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       linkTab: payload.link_tab || payload.metadata?.linkTab || (targetRole === 'Auditor' ? 'sampling_review' : 'engagement_workspace'),
     };
 
-    // Structured message embeds metadata safely for standard DB schema compatibility
-    const dbMessage = `${payload.message}\n[METADATA:${JSON.stringify(meta)}]`;
+    const vNo = meta.voucherNo || meta.voucher_no || '';
+    const sId = meta.sampleId || meta.sample_id || '';
+    const reqId = meta.requirementId || '';
 
+    // Rapid duplicate prevention (within 45 seconds)
+    const existing = inMemoryNotifications.find(n => {
+      const nV = n.target_voucher_no || n.metadata?.voucherNo || '';
+      const nS = n.target_sample_id || n.metadata?.sampleId || '';
+      const nR = n.metadata?.requirementId || '';
+      const sameRole = (n.target_role || '').toLowerCase() === targetRole.toLowerCase();
+      const sameCat = (n.category || '').toLowerCase() === cat.toLowerCase();
+      const sameTitle = n.title === payload.title;
+      const sameVoucher = vNo && nV === vNo;
+      const sameSample = sId && nS === sId;
+      const sameReq = reqId && nR === reqId;
+
+      if (sameRole && sameCat && (sameTitle || sameVoucher || sameSample || sameReq)) {
+        const ageMs = Date.now() - new Date(n.created_at || 0).getTime();
+        return ageMs < 45000;
+      }
+      return false;
+    });
+
+    if (existing) {
+      existing.created_at = nowIso;
+      existing.message = payload.message;
+      return existing;
+    }
+
+    const notifId = payload.id || `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     const item = {
       id: notifId,
       target_user_email: payload.target_user_email || null,
       target_organization: targetOrg,
       target_role: targetRole,
-      category: payload.category,
+      category: cat,
       title: payload.title,
       message: payload.message,
-      is_read: payload.is_read || false,
+      is_read: false,
       created_at: nowIso,
       link_tab: meta.linkTab,
       metadata: meta,
-      target_voucher_no: meta.voucherNo || meta.voucher_no || '',
-      target_sample_id: meta.sampleId || meta.sample_id || '',
+      target_voucher_no: vNo,
+      target_sample_id: sId,
     };
 
     // 1. Maintain in-memory buffer
@@ -1241,7 +1340,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const supabase = getSupabaseServerClient();
       await supabase.from('system_audit_logs').insert({
         event_type: 'APP_NOTIFICATION',
-        target_user_email: payload.target_user_email || 'all',
+        target_user_email: payload.target_user_email || `${targetRole}::${targetOrg}`,
         ip_address: '127.0.0.1',
         details: JSON.stringify(item)
       });
@@ -1507,10 +1606,9 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
 
            if (isDistributorAction) {
              const isResubmission = targetStatus === 'Submitted' && (payload.actionType === 'RESUBMITTED' || (newDetails.clarificationHistory && newDetails.clarificationHistory.length > 1));
-             const isDraft = targetStatus === 'Draft';
              let notifTitle = '';
              let notifMsg = '';
-             let notifCat = 'Documents Uploaded';
+             let notifCat = 'Required Data Submitted';
 
              if (isResubmission) {
                notifTitle = `Required Data Resubmitted: Voucher #${vNo}`;
@@ -1520,9 +1618,9 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
                notifTitle = `Required Data Submitted: Voucher #${vNo}`;
                notifMsg = `Distributor ${distName} submitted required data and supporting documents for Voucher #${vNo}.`;
                notifCat = 'Required Data Submitted';
-             } else if (isDraft) {
-               notifTitle = `Required Data Draft Updated: Voucher #${vNo}`;
-               notifMsg = `Distributor ${distName} updated required data draft / uploaded documents for Voucher #${vNo}.`;
+             } else if (payload.actionType === 'UPLOAD') {
+               notifTitle = `Documents Uploaded: Voucher #${vNo}`;
+               notifMsg = `Distributor ${distName} uploaded supporting documents for Voucher #${vNo}.`;
                notifCat = 'Documents Uploaded';
              }
 
@@ -1638,25 +1736,43 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
 
           if (isDistributorAction) {
             const isResubmission = targetStatus === 'Submitted' && (payload.actionType === 'RESUBMITTED' || (payload.clarificationHistory && payload.clarificationHistory.length > 1));
-            let notifTitle = targetStatus === 'Submitted' ? (isResubmission ? `Required Data Resubmitted: Voucher #${vNo}` : `Required Data Submitted: Voucher #${vNo}`) : `Required Data Draft Created: Voucher #${vNo}`;
-            let notifMsg = targetStatus === 'Submitted' ? `Distributor ${distName} submitted required data and supporting documents for Voucher #${vNo}.` : `Distributor ${distName} saved draft responses for Voucher #${vNo}.`;
-            await dispatchNotification({
-              target_organization: distName,
-              target_role: 'Auditor',
-              category: targetStatus === 'Submitted' ? 'Submission Completed' : 'Documents Uploaded',
-              title: notifTitle,
-              message: notifMsg,
-              metadata: {
-                voucherNo: vNo,
-                sampleId: sId,
-                engagementId: payload.engagement_id || 'eng-101',
-                distributorName: distName,
-                linkTab: 'sampling_review',
-                targetRole: 'Auditor',
-                status: targetStatus,
-                action: targetStatus
-              }
-            });
+            let notifTitle = '';
+            let notifMsg = '';
+            let notifCat = 'Required Data Submitted';
+
+            if (isResubmission) {
+              notifTitle = `Required Data Resubmitted: Voucher #${vNo}`;
+              notifMsg = `Distributor ${distName} resubmitted required data and updated evidence for Voucher #${vNo} after clarification.`;
+              notifCat = 'Required Data Resubmitted';
+            } else if (targetStatus === 'Submitted') {
+              notifTitle = `Required Data Submitted: Voucher #${vNo}`;
+              notifMsg = `Distributor ${distName} submitted required data and supporting documents for Voucher #${vNo}.`;
+              notifCat = 'Required Data Submitted';
+            } else if (payload.actionType === 'UPLOAD') {
+              notifTitle = `Documents Uploaded: Voucher #${vNo}`;
+              notifMsg = `Distributor ${distName} uploaded supporting documents for Voucher #${vNo}.`;
+              notifCat = 'Documents Uploaded';
+            }
+
+            if (notifTitle) {
+              await dispatchNotification({
+                target_organization: distName,
+                target_role: 'Auditor',
+                category: notifCat,
+                title: notifTitle,
+                message: notifMsg,
+                metadata: {
+                  voucherNo: vNo,
+                  sampleId: sId,
+                  engagementId: payload.engagement_id || 'eng-101',
+                  distributorName: distName,
+                  linkTab: 'sampling_review',
+                  targetRole: 'Auditor',
+                  status: targetStatus,
+                  action: targetStatus
+                }
+              });
+            }
           } else {
             if (targetStatus === 'Accepted' || targetStatus === 'Rejected' || targetStatus === 'Clarification Required') {
               await dispatchNotification({
@@ -1805,35 +1921,65 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   // GET /api/notifications
   app.get('/api/notifications', authenticateRequest, async (req: any, res: any) => {
     try {
-      const { role, distributor } = req.query;
+      const { role, distributor, userEmail } = req.query;
       const supabase = getSupabaseServerClient();
       const clean = (s: any) => String(s || '').trim().toLowerCase();
 
-      const readIdsFromDb = new Set<string>();
-      const deletedIdsFromDb = new Set<string>();
+      // Resolve requesting user context
+      const headerRole = (req.headers['x-user-role'] as string) || '';
+      const effectiveRole = clean(role || headerRole || req.user?.role || 'Auditor');
+      const isDistributorUser = effectiveRole.includes('distributor');
+      const isAuditorUser = !isDistributorUser;
+
+      const headerOrg = (req.headers['x-user-organization'] as string) || (req.headers['x-user-org'] as string) || '';
+      const effectiveOrg = clean(distributor || headerOrg || req.user?.organization || '');
+
+      const effectiveEmail = clean(userEmail || req.headers['x-user-email'] || req.user?.email || '');
+      const userKey = getRecipientUserKey(req);
+
+      const userReadIds = userReadNotificationIds.get(userKey) || new Set<string>();
+      const userDeletedIds = userDeletedNotificationIds.get(userKey) || new Set<string>();
+
+      const readIdsFromDb = new Set<string>(userReadIds);
+      const deletedIdsFromDb = new Set<string>(userDeletedIds);
+      let userDbAllReadTime = 0;
       let dbNotifs: any[] = [];
 
-      // 1. Fetch all notifications, reads, and deletes from Supabase system_audit_logs
+      // 1. Fetch from Supabase system_audit_logs
       try {
         const { data: auditLogs, error: auditErr } = await supabase
           .from('system_audit_logs')
           .select('*')
           .in('event_type', ['APP_NOTIFICATION', 'APP_NOTIFICATION_READ', 'APP_NOTIFICATION_DELETED'])
           .order('created_at', { ascending: false })
-          .limit(300);
+          .limit(350);
 
         if (!auditErr && Array.isArray(auditLogs)) {
           auditLogs.forEach(log => {
             try {
               let parsed = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
-              if (log.event_type === 'APP_NOTIFICATION_READ') {
-                if (parsed?.notificationId === 'ALL' && Array.isArray(parsed?.notificationIds)) {
-                  parsed.notificationIds.forEach((id: string) => readIdsFromDb.add(id));
+              const logTargetEmail = clean(log.target_user_email);
+              const isMatchForThisUser = logTargetEmail === userKey || 
+                                         (effectiveEmail && logTargetEmail === effectiveEmail) ||
+                                         (parsed?.userKey === userKey) ||
+                                         (parsed?.userEmail && clean(parsed.userEmail) === effectiveEmail);
+
+              if (log.event_type === 'APP_NOTIFICATION_READ' && isMatchForThisUser) {
+                if (parsed?.notificationId === 'ALL') {
+                  if (Array.isArray(parsed?.notificationIds)) {
+                    parsed.notificationIds.forEach((id: string) => readIdsFromDb.add(id));
+                  }
+                  if (parsed?.readAt) {
+                    const rTime = new Date(parsed.readAt).getTime();
+                    if (!isNaN(rTime) && rTime > userDbAllReadTime) {
+                      userDbAllReadTime = rTime;
+                    }
+                  }
                 } else {
                   const rId = parsed?.notificationId || parsed?.id;
                   if (rId) readIdsFromDb.add(rId);
                 }
-              } else if (log.event_type === 'APP_NOTIFICATION_DELETED') {
+              } else if (log.event_type === 'APP_NOTIFICATION_DELETED' && isMatchForThisUser) {
                 const dId = parsed?.notificationId || parsed?.id;
                 if (dId) deletedIdsFromDb.add(dId);
               } else if (log.event_type === 'APP_NOTIFICATION' && parsed) {
@@ -1844,7 +1990,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
                     target_user_email: parsed.target_user_email,
                     target_organization: parsed.target_organization || parsed.metadata?.targetOrganization,
                     target_role: parsed.target_role || parsed.metadata?.targetRole,
-                    category: parsed.category,
+                    category: parsed.category || 'System',
                     title: parsed.title,
                     message: parsed.message,
                     is_read: Boolean(parsed.is_read),
@@ -1880,7 +2026,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
 
       // 4. Parse and normalize notifications
       const normalized = dbNotifs
-        .filter(n => !deletedNotificationIds.has(n.id) && !deletedIdsFromDb.has(n.id))
+        .filter(n => !deletedIdsFromDb.has(n.id))
         .map(n => {
           let rawMsg = n.message || '';
           let cleanMsg = rawMsg;
@@ -1893,9 +2039,21 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
             } catch (e) {}
           }
 
-          const targetRole = n.target_role || meta.targetRole || 'All';
+          let targetRole = n.target_role || meta.targetRole || 'All';
           const targetOrg = n.target_organization || meta.targetOrganization || 'All';
-          const isRead = Boolean(n.is_read) || readNotificationIds.has(n.id) || readIdsFromDb.has(n.id);
+          const cat = n.category || '';
+
+          // Canonical target inference if targetRole is generic
+          if (targetRole === 'All' || !targetRole) {
+            const isAuditorCat = ['Documents Uploaded', 'Required Data Submitted', 'Required Data Resubmitted', 'Data Submitted', 'IRL Submitted', 'Evidence Uploaded', 'Edit Access Requested'].includes(cat);
+            const isDistCat = ['Evidence Accepted', 'Evidence Rejected', 'Clarification Requested', 'Edit Access Approved', 'System'].includes(cat);
+            if (isAuditorCat) targetRole = 'Auditor';
+            else if (isDistCat) targetRole = 'Distributor';
+          }
+
+          const nTime = new Date(n.created_at || 0).getTime();
+          const effectiveAllReadTime = Math.max(userAllReadTimestamps.get(userKey) || 0, userDbAllReadTime || 0);
+          const isRead = readIdsFromDb.has(n.id) || (effectiveAllReadTime > 0 && nTime > 0 && nTime <= effectiveAllReadTime);
 
           const createdDate = new Date(n.created_at || Date.now());
           const diffMs = Date.now() - createdDate.getTime();
@@ -1925,38 +2083,74 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           };
         });
 
-      // 5. Role and Organization filtering
-      const userRoleStr = clean(role || req.user?.role);
-      const userDistStr = clean(distributor || req.user?.organization);
-
+      // 5. Strict Recipient-Specific Role and Organization filtering
       const filtered = normalized.filter(n => {
         const targetRole = clean(n.targetUserRole);
         const targetOrg = clean(n.targetOrganization);
 
-        if (userRoleStr.includes('distributor')) {
-          // Distributors must NOT see notifications targeted specifically at Auditors
-          if (targetRole === 'auditor') return false;
+        if (isDistributorUser) {
+          // DISTRIBUTOR LOGIN:
+          // CRITICAL: A notification created for the Auditor MUST NOT appear in the Distributor's notification feed!
+          if (targetRole !== 'distributor') {
+            return false;
+          }
 
-          // If targetOrganization is specified and not 'all', match with distributor organization
-          if (targetOrg && targetOrg !== 'all') {
-            if (userDistStr && userDistStr !== 'all' && !userDistStr.includes('distributor partner') && !userDistStr.includes('distributor entity')) {
-              const matches = targetOrg.includes(userDistStr) || userDistStr.includes(targetOrg);
+          // Distributor Organization matching:
+          if (effectiveOrg && effectiveOrg !== 'all' && !effectiveOrg.includes('distributor partner') && !effectiveOrg.includes('distributor entity')) {
+            if (targetOrg && targetOrg !== 'all') {
+              const matches = targetOrg.includes(effectiveOrg) || effectiveOrg.includes(targetOrg);
               if (!matches) return false;
             }
           }
           return true;
-        } else if (userRoleStr.includes('auditor') || userRoleStr.includes('admin') || userRoleStr.includes('lead')) {
-          // Auditors must NOT see notifications targeted specifically at Distributors
-          if (targetRole === 'distributor') return false;
+        } else {
+          // AUDITOR LOGIN:
+          // CRITICAL: A notification created for the Distributor MUST NOT appear in the Auditor's notification feed!
+          if (targetRole !== 'auditor') {
+            return false;
+          }
+
+          // If auditor filtered by a specific distributor:
+          if (effectiveOrg && effectiveOrg !== 'all' && !effectiveOrg.includes('apex') && !effectiveOrg.includes('audit')) {
+            if (targetOrg && targetOrg !== 'all') {
+              const matches = targetOrg.includes(effectiveOrg) || effectiveOrg.includes(targetOrg);
+              if (!matches) return false;
+            }
+          }
           return true;
         }
-        return true;
       });
 
-      // Sort newest first
-      filtered.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+      // 6. Deduplicate notifications (prevent duplicates for same voucher, title, role)
+      const dedupedMap = new Map<string, any>();
+      filtered.forEach(n => {
+        const vKey = n.targetVoucherNo || n.targetSampleId || n.metadata?.requirementId || '';
+        const dedupeKey = `${clean(n.targetUserRole)}::${clean(n.category)}::${clean(vKey)}::${clean(n.title)}`;
+        const existing = dedupedMap.get(dedupeKey);
+        if (!existing) {
+          dedupedMap.set(dedupeKey, n);
+        } else {
+          // Keep the newer one or preserve isRead if true
+          const existingTime = new Date(existing.createdAt || 0).getTime();
+          const newTime = new Date(n.createdAt || 0).getTime();
+          if (newTime > existingTime) {
+            n.isRead = existing.isRead || n.isRead;
+            dedupedMap.set(dedupeKey, n);
+          } else {
+            existing.isRead = existing.isRead || n.isRead;
+          }
+        }
+      });
 
-      res.json({ success: true, notifications: filtered });
+      const finalSorted = Array.from(dedupedMap.values());
+      finalSorted.sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+      res.json({
+        success: true,
+        notifications: finalSorted,
+        count: finalSorted.length,
+        unreadCount: finalSorted.filter(n => !n.isRead).length
+      });
     } catch (err: any) {
       console.error('Error fetching notifications:', err);
       res.status(500).json({ success: false, error: err.message });
@@ -1985,26 +2179,23 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   app.put('/api/notifications/:id/read', authenticateRequest, async (req: any, res: any) => {
     try {
       const { id } = req.params;
-      readNotificationIds.add(id);
+      const userKey = getRecipientUserKey(req);
 
-      // 1. Update in-memory
-      const inMem = inMemoryNotifications.find(n => n.id === id);
-      if (inMem) inMem.is_read = true;
+      let userReads = userReadNotificationIds.get(userKey);
+      if (!userReads) {
+        userReads = new Set<string>();
+        userReadNotificationIds.set(userKey, userReads);
+      }
+      userReads.add(id);
 
-      // 2. Update local disk file
-      const diskList = getLocalNotifications();
-      const onDisk = diskList.find(n => n.id === id);
-      if (onDisk) onDisk.is_read = true;
-      saveLocalNotifications(diskList);
-
-      // 3. Persist read status into database (system_audit_logs)
+      // Persist read status into database (system_audit_logs)
       try {
         const supabase = getSupabaseServerClient();
         await supabase.from('system_audit_logs').insert({
           event_type: 'APP_NOTIFICATION_READ',
-          target_user_email: req.user?.email || 'user',
-          ip_address: '127.0.0.1',
-          details: JSON.stringify({ notificationId: id, readAt: new Date().toISOString() })
+          target_user_email: userKey,
+          ip_address: req.ip || '127.0.0.1',
+          details: JSON.stringify({ notificationId: id, userKey, readAt: new Date().toISOString() })
         });
       } catch (e) {
         console.warn('DB notification read persist note:', e);
@@ -2016,36 +2207,121 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
     }
   });
 
+  // PUT /api/notifications/read (Alias for mark as read supporting body payload)
+  app.put('/api/notifications/read', express.json(), authenticateRequest, async (req: any, res: any) => {
+    try {
+      const userKey = getRecipientUserKey(req);
+      let userReads = userReadNotificationIds.get(userKey);
+      if (!userReads) {
+        userReads = new Set<string>();
+        userReadNotificationIds.set(userKey, userReads);
+      }
+
+      const notifId = req.body?.notificationId || req.body?.id;
+      const notifIds = req.body?.notificationIds;
+
+      if (notifId === 'ALL' || notifIds) {
+        const rawRole = req.headers['x-user-role'] || req.query.role || req.user?.role || '';
+        const isDist = String(rawRole).trim().toLowerCase().includes('distributor');
+
+        const allNotifs = [...inMemoryNotifications, ...getLocalNotifications()];
+        const idsToMark: string[] = Array.isArray(notifIds) ? notifIds : [];
+        if (notifId === 'ALL') {
+          allNotifs.forEach(n => {
+            const targetRole = String(n.target_role || n.metadata?.targetRole || '').trim().toLowerCase();
+            if (isDist ? targetRole === 'distributor' : targetRole === 'auditor') {
+              idsToMark.push(n.id);
+            }
+          });
+        }
+
+        idsToMark.forEach(id => userReads!.add(id));
+        userAllReadTimestamps.set(userKey, Date.now());
+
+        try {
+          const supabase = getSupabaseServerClient();
+          await supabase.from('system_audit_logs').insert({
+            event_type: 'APP_NOTIFICATION_READ',
+            target_user_email: userKey,
+            ip_address: req.ip || '127.0.0.1',
+            details: JSON.stringify({
+              notificationId: 'ALL',
+              notificationIds: idsToMark,
+              userKey,
+              readAt: new Date().toISOString()
+            })
+          });
+        } catch (e) {}
+
+        return res.json({ success: true, count: idsToMark.length });
+      } else if (notifId) {
+        userReads.add(notifId);
+        try {
+          const supabase = getSupabaseServerClient();
+          await supabase.from('system_audit_logs').insert({
+            event_type: 'APP_NOTIFICATION_READ',
+            target_user_email: userKey,
+            ip_address: req.ip || '127.0.0.1',
+            details: JSON.stringify({ notificationId: notifId, userKey, readAt: new Date().toISOString() })
+          });
+        } catch (e) {}
+        return res.json({ success: true });
+      }
+
+      return res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
   // PUT /api/notifications/read-all
   app.put('/api/notifications/read-all', authenticateRequest, async (req: any, res: any) => {
     try {
-      inMemoryNotifications.forEach(n => {
-        n.is_read = true;
-        readNotificationIds.add(n.id);
-      });
+      const userKey = getRecipientUserKey(req);
+      let userReads = userReadNotificationIds.get(userKey);
+      if (!userReads) {
+        userReads = new Set<string>();
+        userReadNotificationIds.set(userKey, userReads);
+      }
 
-      const diskList = getLocalNotifications();
-      diskList.forEach(n => {
-        n.is_read = true;
-        readNotificationIds.add(n.id);
+      // Determine the notifications that belong to this user
+      const rawRole = req.headers['x-user-role'] || req.query.role || req.user?.role || '';
+      const isDist = String(rawRole).trim().toLowerCase().includes('distributor');
+
+      const allNotifs = [...inMemoryNotifications, ...getLocalNotifications()];
+      const idsToMark: string[] = [];
+      allNotifs.forEach(n => {
+        const targetRole = String(n.target_role || n.metadata?.targetRole || '').trim().toLowerCase();
+        if (isDist) {
+          if (targetRole === 'distributor') {
+            idsToMark.push(n.id);
+            userReads!.add(n.id);
+          }
+        } else {
+          if (targetRole === 'auditor') {
+            idsToMark.push(n.id);
+            userReads!.add(n.id);
+          }
+        }
       });
-      saveLocalNotifications(diskList);
+      userAllReadTimestamps.set(userKey, Date.now());
 
       try {
         const supabase = getSupabaseServerClient();
         await supabase.from('system_audit_logs').insert({
           event_type: 'APP_NOTIFICATION_READ',
-          target_user_email: req.user?.email || 'user',
-          ip_address: '127.0.0.1',
+          target_user_email: userKey,
+          ip_address: req.ip || '127.0.0.1',
           details: JSON.stringify({
             notificationId: 'ALL',
-            notificationIds: Array.from(readNotificationIds),
+            notificationIds: idsToMark,
+            userKey,
             readAt: new Date().toISOString()
           })
         });
       } catch (e) {}
 
-      res.json({ success: true });
+      res.json({ success: true, count: idsToMark.length });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
     }
@@ -2055,21 +2331,22 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   app.delete('/api/notifications/:id', authenticateRequest, async (req: any, res: any) => {
     try {
       const { id } = req.params;
-      deletedNotificationIds.add(id);
+      const userKey = getRecipientUserKey(req);
 
-      const idx = inMemoryNotifications.findIndex(n => n.id === id);
-      if (idx !== -1) inMemoryNotifications.splice(idx, 1);
-
-      const diskList = getLocalNotifications().filter(n => n.id !== id);
-      saveLocalNotifications(diskList);
+      let userDeletes = userDeletedNotificationIds.get(userKey);
+      if (!userDeletes) {
+        userDeletes = new Set<string>();
+        userDeletedNotificationIds.set(userKey, userDeletes);
+      }
+      userDeletes.add(id);
 
       try {
         const supabase = getSupabaseServerClient();
         await supabase.from('system_audit_logs').insert({
           event_type: 'APP_NOTIFICATION_DELETED',
-          target_user_email: req.user?.email || 'user',
-          ip_address: '127.0.0.1',
-          details: JSON.stringify({ notificationId: id, deletedAt: new Date().toISOString() })
+          target_user_email: userKey,
+          ip_address: req.ip || '127.0.0.1',
+          details: JSON.stringify({ notificationId: id, userKey, deletedAt: new Date().toISOString() })
         });
       } catch (e) {}
 
@@ -3709,25 +3986,38 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         details: `${actionName} for Requirement ${reqRef} (${fileName}) uploaded by ${targetDistributor}. Comment: "${trimmedComment || 'Accepted by Auditor'}"`
       });
 
-      // Create Persistent Notification for Distributor if Clarification or Rejection
-      if (formattedStatus === 'CLARIFICATION_REQUIRED' || formattedStatus === 'REJECTED') {
-        const notifTitle = formattedStatus === 'CLARIFICATION_REQUIRED' 
-          ? `Clarification Required for IRL ${reqRef}`
-          : `Evidence Rejected for IRL ${reqRef}`;
-        
-        const notifMsg = formattedStatus === 'CLARIFICATION_REQUIRED'
-          ? `Auditor requested clarification on requirement ${reqRef} (${fileName}). Note: "${trimmedComment}"`
-          : `Evidence file ${fileName} for requirement ${reqRef} was rejected. Reason: "${trimmedComment}"`;
+      // Create Persistent Notification for Distributor
+      const notifCat = formattedStatus === 'ACCEPTED' ? 'Evidence Accepted' :
+                       formattedStatus === 'CLARIFICATION_REQUIRED' ? 'Clarification Requested' : 'Evidence Rejected';
+      const notifTitle = formattedStatus === 'ACCEPTED' 
+        ? `Evidence Accepted: ${reqRef}`
+        : formattedStatus === 'CLARIFICATION_REQUIRED'
+        ? `Clarification Requested: ${reqRef}`
+        : `Evidence Rejected: ${reqRef}`;
+      
+      const notifMsg = formattedStatus === 'ACCEPTED'
+        ? `Auditor accepted evidence file ${fileName} for requirement ${reqRef}.`
+        : formattedStatus === 'CLARIFICATION_REQUIRED'
+        ? `Auditor requested clarification on requirement ${reqRef} (${fileName}). Note: "${trimmedComment}"`
+        : `Evidence file ${fileName} for requirement ${reqRef} was rejected. Reason: "${trimmedComment}"`;
 
-        await supabase.from('notifications').insert({
-          target_organization: targetDistributor,
-          category: formattedStatus === 'CLARIFICATION_REQUIRED' ? 'Clarification Requested' : 'Evidence Rejected',
-          title: notifTitle,
-          message: notifMsg,
-          is_read: false,
-          created_at: nowIso
-        });
-      }
+      await dispatchNotification({
+        target_role: 'Distributor',
+        target_organization: targetDistributor,
+        category: notifCat,
+        title: notifTitle,
+        message: notifMsg,
+        link_tab: 'evidence_management',
+        metadata: {
+          requirementId: reqRef,
+          fileName,
+          distributorName: targetDistributor,
+          status: formattedStatus,
+          comment: trimmedComment,
+          targetRole: 'Distributor',
+          linkTab: 'evidence_management'
+        }
+      });
 
       return res.json({
         success: true,
@@ -4800,6 +5090,44 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         return res.status(500).json({
           error: `Database persistence failed: ${insertRes.error.message}`
         });
+      }
+
+      try {
+        if (session.isDistributor) {
+          await dispatchNotification({
+            target_role: 'Auditor',
+            target_organization: distributorId,
+            category: 'Clarification Responded',
+            title: `Distributor Message: ${distributorId}`,
+            message: `${session.name} (${distributorId}) responded: "${content.trim().substring(0, 100)}${content.trim().length > 100 ? '...' : ''}"`,
+            link_tab: 'discussions',
+            metadata: {
+              conversationId: validConvId,
+              distributorName: distributorId,
+              senderName: session.name,
+              linkTab: 'discussions',
+              targetRole: 'Auditor'
+            }
+          });
+        } else {
+          await dispatchNotification({
+            target_role: 'Distributor',
+            target_organization: distributorId,
+            category: 'Auditor Remarks',
+            title: `Auditor Message from ${session.name}`,
+            message: `Auditor sent a message: "${content.trim().substring(0, 100)}${content.trim().length > 100 ? '...' : ''}"`,
+            link_tab: 'discussions',
+            metadata: {
+              conversationId: validConvId,
+              distributorName: distributorId,
+              senderName: session.name,
+              linkTab: 'discussions',
+              targetRole: 'Distributor'
+            }
+          });
+        }
+      } catch (notifErr) {
+        console.warn('Discussion notification note:', notifErr);
       }
 
       console.log(`💬 Message permanently saved in Supabase for '${validConvId}' by ${session.name} (${session.org})`);
