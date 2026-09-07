@@ -34,8 +34,25 @@ export interface AppNotification {
 
 // In-memory cache for high-speed delivery and fallback
 const inMemoryNotifications: any[] = [];
-const inMemoryReadIds = new Set<string>();
-const inMemoryDeletedIds = new Set<string>();
+const userReadNotificationIds = new Map<string, Set<string>>();
+const userDeletedNotificationIds = new Map<string, Set<string>>();
+const userAllReadTimestamps = new Map<string, number>();
+
+/**
+ * Derives a consistent recipient user key for isolated tracking.
+ */
+export function getRecipientUserKey(params: { role?: string; distributor?: string; userEmail?: string }): string {
+  const clean = (s: any) => String(s || '').trim().toLowerCase();
+  const rawRole = params.role || '';
+  const isDist = clean(rawRole).includes('distributor');
+  const org = clean(params.distributor || '');
+  const email = clean(params.userEmail || '');
+
+  if (email && email !== 'all' && email !== 'user' && !email.includes('anonymous')) {
+    return email;
+  }
+  return `${isDist ? 'distributor' : 'auditor'}::${org || 'all'}`;
+}
 
 /**
  * Dispatches and permanently persists a notification into Supabase database (system_audit_logs).
@@ -102,8 +119,15 @@ export async function getNotifications(params: {
   const { role, distributor, userEmail } = params;
   const clean = (s: any) => String(s || '').trim().toLowerCase();
 
-  const readIdsFromDb = new Set<string>(inMemoryReadIds);
-  const deletedIdsFromDb = new Set<string>(inMemoryDeletedIds);
+  const userKey = getRecipientUserKey(params);
+  const effectiveEmail = clean(userEmail || '');
+
+  const userReadIds = userReadNotificationIds.get(userKey) || new Set<string>();
+  const userDeletedIds = userDeletedNotificationIds.get(userKey) || new Set<string>();
+
+  const readIdsFromDb = new Set<string>(userReadIds);
+  const deletedIdsFromDb = new Set<string>(userDeletedIds);
+  let userDbAllReadTime = userAllReadTimestamps.get(userKey) || 0;
   const rawNotifs: any[] = [];
 
   // 1. Query Supabase system_audit_logs
@@ -114,20 +138,34 @@ export async function getNotifications(params: {
       .select('*')
       .in('event_type', ['APP_NOTIFICATION', 'APP_NOTIFICATION_READ', 'APP_NOTIFICATION_DELETED'])
       .order('created_at', { ascending: false })
-      .limit(300);
+      .limit(350);
 
     if (!auditErr && Array.isArray(auditLogs)) {
       auditLogs.forEach(log => {
         try {
           let parsed = typeof log.details === 'string' ? JSON.parse(log.details) : log.details;
-          if (log.event_type === 'APP_NOTIFICATION_READ') {
-            if (parsed?.notificationId === 'ALL' && Array.isArray(parsed?.notificationIds)) {
-              parsed.notificationIds.forEach((id: string) => readIdsFromDb.add(id));
+          const logTargetEmail = clean(log.target_user_email);
+          const isMatchForThisUser = logTargetEmail === userKey || 
+                                     (effectiveEmail && logTargetEmail === effectiveEmail) ||
+                                     (parsed?.userKey === userKey) ||
+                                     (parsed?.userEmail && clean(parsed.userEmail) === effectiveEmail);
+
+          if (log.event_type === 'APP_NOTIFICATION_READ' && isMatchForThisUser) {
+            if (parsed?.notificationId === 'ALL') {
+              if (Array.isArray(parsed?.notificationIds)) {
+                parsed.notificationIds.forEach((id: string) => readIdsFromDb.add(id));
+              }
+              if (parsed?.readAt) {
+                const rTime = new Date(parsed.readAt).getTime();
+                if (!isNaN(rTime) && rTime > userDbAllReadTime) {
+                  userDbAllReadTime = rTime;
+                }
+              }
             } else {
               const rId = parsed?.notificationId || parsed?.id;
               if (rId) readIdsFromDb.add(rId);
             }
-          } else if (log.event_type === 'APP_NOTIFICATION_DELETED') {
+          } else if (log.event_type === 'APP_NOTIFICATION_DELETED' && isMatchForThisUser) {
             const dId = parsed?.notificationId || parsed?.id;
             if (dId) deletedIdsFromDb.add(dId);
           } else if (log.event_type === 'APP_NOTIFICATION' && parsed) {
@@ -136,16 +174,16 @@ export async function getNotifications(params: {
               rawNotifs.push({
                 id: notifId,
                 target_user_email: parsed.target_user_email,
-                target_organization: parsed.target_organization || parsed.metadata?.targetOrganization,
-                target_role: parsed.target_role || parsed.metadata?.targetRole,
+                target_organization: parsed.target_organization || parsed.targetOrganization || parsed.metadata?.targetOrganization,
+                target_role: parsed.target_role || parsed.targetRole || parsed.metadata?.targetRole,
                 category: parsed.category || 'System',
                 title: parsed.title,
                 message: parsed.message,
                 is_read: Boolean(parsed.is_read),
-                created_at: parsed.created_at || log.created_at,
-                link_tab: parsed.link_tab || parsed.metadata?.linkTab,
-                target_voucher_no: parsed.target_voucher_no || parsed.metadata?.voucherNo || '',
-                target_sample_id: parsed.target_sample_id || parsed.metadata?.sampleId || '',
+                created_at: parsed.created_at || parsed.createdAt || log.created_at,
+                link_tab: parsed.link_tab || parsed.linkTab || parsed.metadata?.linkTab,
+                target_voucher_no: parsed.target_voucher_no || parsed.targetVoucherNo || parsed.metadata?.voucherNo || '',
+                target_sample_id: parsed.target_sample_id || parsed.targetSampleId || parsed.metadata?.sampleId || '',
                 metadata: parsed.metadata || {}
               });
             }
@@ -179,9 +217,20 @@ export async function getNotifications(params: {
         } catch (e) {}
       }
 
-      const targetRole = n.target_role || meta.targetRole || 'All';
+      let targetRole = n.target_role || meta.targetRole || 'All';
       const targetOrg = n.target_organization || meta.targetOrganization || 'All';
-      const isRead = Boolean(n.is_read) || readIdsFromDb.has(n.id);
+      const cat = n.category || '';
+
+      // Canonical target inference if targetRole is generic
+      if (targetRole === 'All' || !targetRole) {
+        const isAuditorCat = ['Documents Uploaded', 'Required Data Submitted', 'Required Data Resubmitted', 'Data Submitted', 'IRL Submitted', 'Evidence Uploaded', 'Edit Access Requested'].includes(cat);
+        const isDistCat = ['Evidence Accepted', 'Evidence Rejected', 'Clarification Requested', 'Edit Access Approved', 'System'].includes(cat);
+        if (isAuditorCat) targetRole = 'Auditor';
+        else if (isDistCat) targetRole = 'Distributor';
+      }
+
+      const nTime = new Date(n.created_at || 0).getTime();
+      const isRead = readIdsFromDb.has(n.id) || (userDbAllReadTime > 0 && nTime > 0 && nTime <= userDbAllReadTime);
 
       const createdDate = new Date(n.created_at || Date.now());
       const diffMs = Date.now() - createdDate.getTime();
@@ -211,38 +260,40 @@ export async function getNotifications(params: {
       };
     });
 
-  // 4. Role and Organization filtering
-  const userRoleStr = clean(role);
+  // 4. Role and Organization filtering (CRITICAL: Recipient Isolation)
+  const userRoleStr = clean(role || 'auditor');
   const userDistStr = clean(distributor);
   const isDistributor = userRoleStr.includes('distributor');
 
   const filtered = normalized.filter(n => {
     let targetRole = clean(n.targetUserRole);
     const targetOrg = clean(n.targetOrganization);
-    const cat = n.category || '';
-
-    if (targetRole === 'all' || !targetRole) {
-      const isAuditorCat = ['Documents Uploaded', 'Required Data Submitted', 'Required Data Resubmitted', 'Data Submitted', 'IRL Submitted', 'Evidence Uploaded', 'Edit Access Requested'].includes(cat);
-      const isDistCat = ['Evidence Accepted', 'Evidence Rejected', 'Clarification Requested', 'Edit Access Approved', 'System'].includes(cat);
-      if (isAuditorCat) targetRole = 'auditor';
-      else if (isDistCat) targetRole = 'distributor';
-    }
 
     if (isDistributor) {
-      // Distributors must NOT see Auditor notifications
+      // DISTRIBUTOR LOGIN:
+      // CRITICAL: A notification created for the Auditor MUST NOT appear in the Distributor's notification feed!
       if (targetRole !== 'distributor') return false;
 
       // Match organization if specified
-      if (targetOrg && targetOrg !== 'all') {
-        if (userDistStr && userDistStr !== 'all' && !userDistStr.includes('distributor partner') && !userDistStr.includes('distributor entity')) {
+      if (userDistStr && userDistStr !== 'all' && !userDistStr.includes('distributor partner') && !userDistStr.includes('distributor entity')) {
+        if (targetOrg && targetOrg !== 'all') {
           const matches = targetOrg.includes(userDistStr) || userDistStr.includes(targetOrg);
           if (!matches) return false;
         }
       }
       return true;
     } else {
-      // Auditors must NOT see Distributor notifications
+      // AUDITOR LOGIN:
+      // CRITICAL: A notification created for the Distributor MUST NOT appear in the Auditor's notification feed!
       if (targetRole !== 'auditor') return false;
+
+      // If auditor filtered by a specific distributor:
+      if (userDistStr && userDistStr !== 'all' && !userDistStr.includes('apex') && !userDistStr.includes('audit')) {
+        if (targetOrg && targetOrg !== 'all') {
+          const matches = targetOrg.includes(userDistStr) || userDistStr.includes(targetOrg);
+          if (!matches) return false;
+        }
+      }
       return true;
     }
   });
@@ -274,20 +325,24 @@ export async function getNotifications(params: {
 }
 
 /**
- * Marks a single notification as read.
+ * Marks a single notification as read for a specific user.
  */
-export async function markNotificationAsRead(notificationId: string, userEmail?: string): Promise<boolean> {
-  inMemoryReadIds.add(notificationId);
-  const inMem = inMemoryNotifications.find(n => n.id === notificationId);
-  if (inMem) inMem.is_read = true;
+export async function markNotificationAsRead(notificationId: string, userEmailOrKey?: string): Promise<boolean> {
+  const userKey = userEmailOrKey || 'user';
+  let userReads = userReadNotificationIds.get(userKey);
+  if (!userReads) {
+    userReads = new Set<string>();
+    userReadNotificationIds.set(userKey, userReads);
+  }
+  userReads.add(notificationId);
 
   try {
     const supabase = getSupabaseServerClient();
     await supabase.from('system_audit_logs').insert({
       event_type: 'APP_NOTIFICATION_READ',
-      target_user_email: userEmail || 'user',
+      target_user_email: userKey,
       ip_address: '127.0.0.1',
-      details: JSON.stringify({ notificationId, readAt: new Date().toISOString() })
+      details: JSON.stringify({ notificationId, userKey, readAt: new Date().toISOString() })
     });
     return true;
   } catch (err) {
@@ -297,30 +352,36 @@ export async function markNotificationAsRead(notificationId: string, userEmail?:
 }
 
 /**
- * Marks all matching notifications as read.
+ * Marks all matching notifications as read for a specific user.
  */
 export async function markAllNotificationsAsRead(params: {
   userEmail?: string;
   role?: string;
   distributor?: string;
+  userKey?: string;
 }): Promise<boolean> {
   try {
+    const userKey = params.userKey || getRecipientUserKey(params);
+    let userReads = userReadNotificationIds.get(userKey);
+    if (!userReads) {
+      userReads = new Set<string>();
+      userReadNotificationIds.set(userKey, userReads);
+    }
+
     const current = await getNotifications(params);
     const ids = current.map(n => n.id);
-    ids.forEach(id => {
-      inMemoryReadIds.add(id);
-      const inMem = inMemoryNotifications.find(n => n.id === id);
-      if (inMem) inMem.is_read = true;
-    });
+    ids.forEach(id => userReads!.add(id));
+    userAllReadTimestamps.set(userKey, Date.now());
 
     const supabase = getSupabaseServerClient();
     await supabase.from('system_audit_logs').insert({
       event_type: 'APP_NOTIFICATION_READ',
-      target_user_email: params.userEmail || 'user',
+      target_user_email: userKey,
       ip_address: '127.0.0.1',
       details: JSON.stringify({
         notificationId: 'ALL',
         notificationIds: ids,
+        userKey,
         readAt: new Date().toISOString()
       })
     });
@@ -332,20 +393,24 @@ export async function markAllNotificationsAsRead(params: {
 }
 
 /**
- * Dismisses/deletes a notification.
+ * Dismisses/deletes a notification for a specific user.
  */
-export async function deleteNotification(notificationId: string, userEmail?: string): Promise<boolean> {
-  inMemoryDeletedIds.add(notificationId);
-  const idx = inMemoryNotifications.findIndex(n => n.id === notificationId);
-  if (idx !== -1) inMemoryNotifications.splice(idx, 1);
+export async function deleteNotification(notificationId: string, userEmailOrKey?: string): Promise<boolean> {
+  const userKey = userEmailOrKey || 'user';
+  let userDeletes = userDeletedNotificationIds.get(userKey);
+  if (!userDeletes) {
+    userDeletes = new Set<string>();
+    userDeletedNotificationIds.set(userKey, userDeletes);
+  }
+  userDeletes.add(notificationId);
 
   try {
     const supabase = getSupabaseServerClient();
     await supabase.from('system_audit_logs').insert({
       event_type: 'APP_NOTIFICATION_DELETED',
-      target_user_email: userEmail || 'user',
+      target_user_email: userKey,
       ip_address: '127.0.0.1',
-      details: JSON.stringify({ notificationId, deletedAt: new Date().toISOString() })
+      details: JSON.stringify({ notificationId, userKey, deletedAt: new Date().toISOString() })
     });
     return true;
   } catch (err) {

@@ -32,7 +32,8 @@ import {
   getNotifications,
   markNotificationAsRead,
   markAllNotificationsAsRead,
-  deleteNotification
+  deleteNotification,
+  getRecipientUserKey
 } from '../src/services/notificationService.js';
 
 dotenv.config();
@@ -1436,6 +1437,109 @@ app.post('/api/sampling/required-data/responses', async (req: any, res: any) => 
          await dbStore.updateAuditLog(existingRecord.id, { details: newDetails });
        } catch(e) {}
 
+       // Dispatch notifications for Required Data events
+       try {
+         const vNo = payload.voucher_no || payload.voucherNo || newDetails.voucher_no || newDetails.voucherNo || payload.sample_id || 'Unknown';
+         const sId = payload.sample_id || newDetails.sample_id || vNo;
+         const distName = payload.distributor_id || payload.distributorName || newDetails.distributor_id || 'Midwest Trading Co.';
+         const targetStatus = payload.status || newDetails.status || 'Draft';
+         const isDistributorAction = payload.actionRole === 'Distributor' || 
+           session.isDistributor || 
+           (session.role && session.role.toLowerCase().includes('distributor')) ||
+           (req.headers['x-user-role'] && String(req.headers['x-user-role']).toLowerCase().includes('distributor'));
+
+         if (isDistributorAction) {
+           const isResubmission = targetStatus === 'Submitted' && (payload.actionType === 'RESUBMITTED' || (newDetails.clarificationHistory && newDetails.clarificationHistory.length > 1));
+           let notifTitle = '';
+           let notifMsg = '';
+           let notifCat = 'Required Data Submitted';
+
+           if (isResubmission) {
+             notifTitle = `Required Data Resubmitted: Voucher #${vNo}`;
+             notifMsg = `Distributor ${distName} resubmitted required data and updated evidence for Voucher #${vNo} after clarification.`;
+             notifCat = 'Required Data Resubmitted';
+           } else if (targetStatus === 'Submitted') {
+             notifTitle = `Required Data Submitted: Voucher #${vNo}`;
+             notifMsg = `Distributor ${distName} submitted required data and supporting documents for Voucher #${vNo}.`;
+             notifCat = 'Required Data Submitted';
+           } else if (payload.actionType === 'UPLOAD') {
+             notifTitle = `Documents Uploaded: Voucher #${vNo}`;
+             notifMsg = `Distributor ${distName} uploaded supporting documents for Voucher #${vNo}.`;
+             notifCat = 'Documents Uploaded';
+           }
+
+           if (notifTitle) {
+             await dispatchNotification({
+               target_organization: distName,
+               target_role: 'Auditor',
+               category: notifCat,
+               title: notifTitle,
+               message: notifMsg,
+               link_tab: 'sampling_review',
+               metadata: {
+                 voucherNo: vNo,
+                 sampleId: sId,
+                 engagementId: payload.engagement_id || newDetails.engagement_id || 'eng-101',
+                 distributorName: distName,
+                 linkTab: 'sampling_review',
+                 targetRole: 'Auditor',
+                 status: targetStatus,
+                 action: isResubmission ? 'Resubmitted' : targetStatus
+               }
+             });
+           }
+         } else {
+           let notifTitle = '';
+           let notifMsg = '';
+           let notifCat = 'System';
+
+           if (targetStatus === 'Clarification Required') {
+             notifTitle = `Clarification Requested: Voucher #${vNo}`;
+             notifMsg = `Auditor requested clarification on Voucher #${vNo}: "${payload.clarificationMessage || newDetails.clarificationMessage || 'Please review requested items.'}"`;
+             notifCat = 'Clarification Requested';
+           } else if (targetStatus === 'Accepted') {
+             notifTitle = `Evidence Accepted: Voucher #${vNo}`;
+             notifMsg = `Auditor accepted all submitted required data and evidence for Voucher #${vNo}.`;
+             notifCat = 'Evidence Accepted';
+           } else if (targetStatus === 'Rejected') {
+             notifTitle = `Evidence Rejected: Voucher #${vNo}`;
+             notifMsg = `Auditor rejected the submitted evidence for Voucher #${vNo}. Please review remarks and provide required documentation.`;
+             notifCat = 'Evidence Rejected';
+           } else if (payload.actionType === 'ITEM_DECISION') {
+             notifTitle = `Item Review Decision: Voucher #${vNo}`;
+             notifMsg = `Auditor set item decision to "${payload.itemDecision || 'Reviewed'}" for Voucher #${vNo}.`;
+             notifCat = payload.itemDecision === 'Accepted' ? 'Evidence Accepted' : payload.itemDecision === 'Rejected' ? 'Evidence Rejected' : 'Clarification Requested';
+           } else if (payload.auditorReviewNotes) {
+             notifTitle = `Auditor Review Remarks: Voucher #${vNo}`;
+             notifMsg = `Auditor added review comments on Voucher #${vNo}: "${payload.auditorReviewNotes}"`;
+             notifCat = 'Required Data Updated';
+           }
+
+           if (notifTitle) {
+             await dispatchNotification({
+               target_organization: distName,
+               target_role: 'Distributor',
+               category: notifCat,
+               title: notifTitle,
+               message: notifMsg,
+               link_tab: 'engagement_workspace',
+               metadata: {
+                 voucherNo: vNo,
+                 sampleId: sId,
+                 engagementId: payload.engagement_id || newDetails.engagement_id || 'eng-101',
+                 distributorName: distName,
+                 linkTab: 'engagement_workspace',
+                 targetRole: 'Distributor',
+                 status: targetStatus,
+                 action: targetStatus
+               }
+             });
+           }
+         }
+       } catch (notifErr) {
+         console.warn('Error dispatching update response notification in api/index.ts:', notifErr);
+       }
+
        res.json({ success: true, dbId: existingRecord.id, status: newDetails.status });
     } else {
        const newDetails = {
@@ -1479,6 +1583,41 @@ app.post('/api/sampling/required-data/responses', async (req: any, res: any) => 
          organization: session.org || 'Internal',
          details: newDetails
        });
+
+       // Dispatch notifications for Required Data insert events
+       try {
+         const vNo = payload.voucher_no || payload.voucherNo || newDetails.voucher_no || newDetails.voucherNo || payload.sample_id || 'Unknown';
+         const sId = payload.sample_id || newDetails.sample_id || vNo;
+         const distName = payload.distributor_id || payload.distributorName || newDetails.distributor_id || 'Midwest Trading Co.';
+         const targetStatus = payload.status || newDetails.status || 'Draft';
+         const isDistributorAction = payload.actionRole === 'Distributor' || 
+           session.isDistributor || 
+           (session.role && session.role.toLowerCase().includes('distributor')) ||
+           (req.headers['x-user-role'] && String(req.headers['x-user-role']).toLowerCase().includes('distributor'));
+
+         if (isDistributorAction && targetStatus === 'Submitted') {
+           await dispatchNotification({
+             target_organization: distName,
+             target_role: 'Auditor',
+             category: 'Required Data Submitted',
+             title: `Required Data Submitted: Voucher #${vNo}`,
+             message: `Distributor ${distName} submitted required data and supporting documents for Voucher #${vNo}.`,
+             link_tab: 'sampling_review',
+             metadata: {
+               voucherNo: vNo,
+               sampleId: sId,
+               engagementId: payload.engagement_id || newDetails.engagement_id || 'eng-101',
+               distributorName: distName,
+               linkTab: 'sampling_review',
+               targetRole: 'Auditor',
+               status: targetStatus,
+               action: targetStatus
+             }
+           });
+         }
+       } catch (notifErr) {
+         console.warn('Error dispatching insert response notification in api/index.ts:', notifErr);
+       }
 
        res.json({ success: true, dbId: insertedId || savedLog.id, status: payload.status || 'Draft' });
     }
@@ -1577,6 +1716,28 @@ app.post('/api/sampling/required-data/push', async (req: any, res: any) => {
       });
     }
 
+    // Dispatch notification to Distributor
+    try {
+      await dispatchNotification({
+        target_organization: distributorName || distributorId || 'Distributor',
+        target_role: 'Distributor',
+        category: 'System',
+        title: `New Required Data Questionnaire: Voucher #${voucherNo || sampleId}`,
+        message: `Auditor has prepared and pushed the required data questionnaire for Voucher #${voucherNo || sampleId}. Please review the questions and provide required documentation.`,
+        metadata: {
+          voucherNo,
+          sampleId,
+          engagementId: engagementId || 'eng-101',
+          distributorName: distributorName || distributorId,
+          linkTab: 'engagement_workspace',
+          targetRole: 'Distributor',
+          action: 'Pushed'
+        }
+      });
+    } catch (notifPushErr) {
+      console.warn('Error sending push notification in api/index.ts:', notifPushErr);
+    }
+
     res.json({ success: true, message: 'Questionnaire successfully pushed to distributor!' });
   } catch (err: any) {
     console.error(err);
@@ -1587,75 +1748,54 @@ app.post('/api/sampling/required-data/push', async (req: any, res: any) => {
 // Notifications endpoints
 app.get('/api/notifications', async (req: any, res: any) => {
   try {
-    const supabase = getSupabaseServerClient();
-    let notifications: any[] = [];
-    try {
-      const { data, error } = await supabase
-        .from('system_audit_logs')
-        .select('*')
-        .eq('event_type', 'APP_NOTIFICATION')
-        .order('created_at', { ascending: false })
-        .limit(100);
-      if (!error && data) {
-        notifications = data.map(d => {
-          let parsed = d.details;
-          if (typeof parsed === 'string') {
-            try { parsed = JSON.parse(parsed); } catch(e) {}
-          }
-          return { dbId: d.id, ...(parsed || {}) };
-        });
-      }
-    } catch(e) {}
+    const headerRole = (req.headers['x-user-role'] as string) || '';
+    const queryRole = (req.query.role as string) || '';
+    const effectiveRole = queryRole || headerRole || 'Auditor';
 
-    if (notifications.length === 0) {
-      const logs = await dbStore.getAuditLogs('APP_NOTIFICATION');
-      notifications = logs.map(d => {
-        let parsed = d.details;
-        if (typeof parsed === 'string') {
-          try { parsed = JSON.parse(parsed); } catch(e) {}
-        }
-        return { dbId: d.id, ...(parsed || {}) };
-      });
-    }
+    const headerOrg = (req.headers['x-user-organization'] as string) || (req.headers['x-user-org'] as string) || '';
+    const queryDist = (req.query.distributor as string) || '';
+    const effectiveOrg = queryDist || headerOrg || '';
 
-    res.json({ success: true, notifications });
+    const effectiveEmail = (req.query.userEmail as string) || (req.headers['x-user-email'] as string) || '';
+
+    const notifications = await getNotifications({
+      role: effectiveRole,
+      distributor: effectiveOrg,
+      userEmail: effectiveEmail
+    });
+
+    res.json({
+      success: true,
+      notifications,
+      count: notifications.length,
+      unreadCount: notifications.filter((n: any) => !n.isRead).length
+    });
   } catch (err: any) {
+    console.error('Error fetching notifications in api/index.ts:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 app.post('/api/notifications', async (req: any, res: any) => {
   try {
-    const payload = req.body;
-    const session = authenticateRequestSession(req);
-    const item = {
-      id: `notif_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-      target_user_email: payload.target_user_email || null,
-      target_organization: payload.target_organization || 'All',
-      target_role: payload.target_role || 'All',
-      category: payload.category || 'System',
-      title: payload.title || 'Notification',
-      message: payload.message || '',
-      is_read: false,
-      created_at: new Date().toISOString(),
-      metadata: payload.metadata || {}
-    };
+    const payload = req.body || {};
+    const targetRole = payload.targetRole || payload.target_role || 'All';
+    const targetOrg = payload.targetOrganization || payload.target_organization || 'All';
+    const title = payload.title || 'Notification';
+    const message = payload.message || '';
+    const category = payload.category || 'System';
+    const metadata = payload.metadata || {};
 
-    const supabase = getSupabaseServerClient();
-    try {
-      await supabase.from('system_audit_logs').insert({
-        event_type: 'APP_NOTIFICATION',
-        target_user_email: item.target_user_email || 'all',
-        ip_address: req.ip || '127.0.0.1',
-        details: item
-      });
-    } catch(e) {}
-
-    await dbStore.insertAuditLog({
-      event_type: 'APP_NOTIFICATION',
-      user_email: session.email || 'system',
-      organization: session.org || 'Internal',
-      details: item
+    const item = await dispatchNotification({
+      title,
+      message,
+      category,
+      target_role: targetRole,
+      target_organization: targetOrg,
+      target_voucher_no: payload.targetVoucherNo || payload.target_voucher_no || metadata.voucherNo || metadata.voucher_no || '',
+      target_sample_id: payload.targetSampleId || payload.target_sample_id || metadata.sampleId || metadata.sample_id || '',
+      link_tab: payload.linkTab || payload.link_tab || metadata.linkTab,
+      metadata
     });
 
     res.json({ success: true, notification: item });
@@ -1667,22 +1807,41 @@ app.post('/api/notifications', async (req: any, res: any) => {
 app.put('/api/notifications/:id/read', async (req: any, res: any) => {
   try {
     const { id } = req.params;
-    const supabase = getSupabaseServerClient();
-    try {
-      const { data: row } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
-      if (row) {
-        let parsed = row.details;
-        if (typeof parsed === 'string') {
-          try { parsed = JSON.parse(parsed); } catch(e) {}
-        }
-        const updated = { ...parsed, is_read: true };
-        await supabase.from('system_audit_logs').update({ details: updated }).eq('id', id);
-      }
-    } catch(e) {}
-    try {
-      await dbStore.updateAuditLog(id, { details: { is_read: true } });
-    } catch(e) {}
+    const userKey = getRecipientUserKey({
+      role: (req.headers['x-user-role'] as string) || (req.query.role as string) || '',
+      distributor: (req.headers['x-user-organization'] as string) || (req.query.distributor as string) || '',
+      userEmail: (req.query.userEmail as string) || (req.headers['x-user-email'] as string) || ''
+    });
+    await markNotificationAsRead(id, userKey);
     res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.put('/api/notifications/read', express.json(), async (req: any, res: any) => {
+  try {
+    const userKey = getRecipientUserKey({
+      role: (req.headers['x-user-role'] as string) || (req.query.role as string) || '',
+      distributor: (req.headers['x-user-organization'] as string) || (req.query.distributor as string) || '',
+      userEmail: (req.query.userEmail as string) || (req.headers['x-user-email'] as string) || ''
+    });
+    const notifId = req.body?.notificationId || req.body?.id;
+    const notifIds = req.body?.notificationIds;
+
+    if (notifId === 'ALL' || notifIds) {
+      await markAllNotificationsAsRead({
+        role: (req.headers['x-user-role'] as string) || (req.query.role as string) || '',
+        distributor: (req.headers['x-user-organization'] as string) || (req.query.distributor as string) || '',
+        userEmail: (req.query.userEmail as string) || (req.headers['x-user-email'] as string) || '',
+        userKey
+      });
+      return res.json({ success: true, count: Array.isArray(notifIds) ? notifIds.length : 0 });
+    } else if (notifId) {
+      await markNotificationAsRead(notifId, userKey);
+      return res.json({ success: true });
+    }
+    return res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
@@ -1690,21 +1849,32 @@ app.put('/api/notifications/:id/read', async (req: any, res: any) => {
 
 app.put('/api/notifications/read-all', async (req: any, res: any) => {
   try {
-    const supabase = getSupabaseServerClient();
-    try {
-      const { data } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'APP_NOTIFICATION');
-      if (data) {
-        for (const row of data) {
-          let parsed = row.details;
-          if (typeof parsed === 'string') {
-            try { parsed = JSON.parse(parsed); } catch(e) {}
-          }
-          if (parsed && !parsed.is_read) {
-            await supabase.from('system_audit_logs').update({ details: { ...parsed, is_read: true } }).eq('id', row.id);
-          }
-        }
-      }
-    } catch(e) {}
+    const userKey = getRecipientUserKey({
+      role: (req.headers['x-user-role'] as string) || (req.query.role as string) || '',
+      distributor: (req.headers['x-user-organization'] as string) || (req.query.distributor as string) || '',
+      userEmail: (req.query.userEmail as string) || (req.headers['x-user-email'] as string) || ''
+    });
+    await markAllNotificationsAsRead({
+      role: (req.headers['x-user-role'] as string) || (req.query.role as string) || '',
+      distributor: (req.headers['x-user-organization'] as string) || (req.query.distributor as string) || '',
+      userEmail: (req.query.userEmail as string) || (req.headers['x-user-email'] as string) || '',
+      userKey
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.delete('/api/notifications/:id', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const userKey = getRecipientUserKey({
+      role: (req.headers['x-user-role'] as string) || (req.query.role as string) || '',
+      distributor: (req.headers['x-user-organization'] as string) || (req.query.distributor as string) || '',
+      userEmail: (req.query.userEmail as string) || (req.headers['x-user-email'] as string) || ''
+    });
+    await deleteNotification(id, userKey);
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
@@ -2476,14 +2646,15 @@ app.get('/api/evidence', async (req: any, res: any) => {
   }
 });
 
-app.post('/api/evidence/upload', (req, res) => {
+app.post('/api/evidence/upload', async (req, res) => {
   const { auditId, requestRef, fileName, fileSizeMB, fileType, uploadedBy, distributorName } = req.body;
+  const dist = distributorName || 'Midwest Trading Co.';
 
   const evidenceRecord = {
     id: `ev-${Date.now()}`,
     auditId: auditId || 'eng-001',
     auditCode: 'AUD-2026-001',
-    distributorName: distributorName || 'Midwest Trading Co.',
+    distributorName: dist,
     requestRef: requestRef || '1.1',
     requestTitle: 'Corporate Registration & Business License',
     fileName: fileName || 'Document.pdf',
@@ -2496,6 +2667,27 @@ app.post('/api/evidence/upload', (req, res) => {
     status: 'Pending Review'
   };
 
+  try {
+    await dispatchNotification({
+      target_role: 'Auditor',
+      target_organization: dist,
+      category: 'Evidence Uploaded',
+      title: `Evidence Uploaded: ${requestRef || fileName}`,
+      message: `Distributor ${dist} uploaded evidence file "${fileName}" for ${requestRef || 'Audit Requirement'}.`,
+      link_tab: 'evidence_management',
+      metadata: {
+        requirementId: requestRef,
+        fileName,
+        distributorName: dist,
+        targetRole: 'Auditor',
+        action: 'Uploaded',
+        linkTab: 'evidence_management'
+      }
+    });
+  } catch (e) {
+    console.warn('Upload notification error:', e);
+  }
+
   return res.json({
     success: true,
     evidence: evidenceRecord,
@@ -2503,9 +2695,43 @@ app.post('/api/evidence/upload', (req, res) => {
   });
 });
 
-app.post('/api/evidence/:id/status', (req, res) => {
+app.post(['/api/evidence/:id/status', '/api/evidence/:id/review'], async (req, res) => {
   const { id } = req.params;
-  const { status, reviewerComment, reviewedBy } = req.body;
+  const { status, reviewerComment, reviewedBy, distributorName } = req.body;
+
+  try {
+    const formattedStatus = (status || 'Accepted').toUpperCase();
+    const notifCat = formattedStatus.includes('ACCEPT') ? 'Evidence Accepted' :
+                     formattedStatus.includes('CLARIF') ? 'Clarification Requested' : 'Evidence Rejected';
+    const notifTitle = formattedStatus.includes('ACCEPT')
+      ? `Evidence Accepted: ${id}`
+      : formattedStatus.includes('CLARIF')
+      ? `Clarification Requested: ${id}`
+      : `Evidence Rejected: ${id}`;
+    const notifMsg = formattedStatus.includes('ACCEPT')
+      ? `Auditor accepted evidence ${id}.`
+      : formattedStatus.includes('CLARIF')
+      ? `Auditor requested clarification on evidence ${id}: "${reviewerComment || ''}"`
+      : `Evidence ${id} was rejected. Reason: "${reviewerComment || ''}"`;
+
+    await dispatchNotification({
+      target_role: 'Distributor',
+      target_organization: distributorName || 'All',
+      category: notifCat,
+      title: notifTitle,
+      message: notifMsg,
+      link_tab: 'evidence_management',
+      metadata: {
+        evidenceId: id,
+        status,
+        comment: reviewerComment,
+        targetRole: 'Distributor',
+        linkTab: 'evidence_management'
+      }
+    });
+  } catch (e) {
+    console.warn('Evidence status notification error:', e);
+  }
 
   return res.json({
     success: true,
