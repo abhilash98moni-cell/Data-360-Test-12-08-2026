@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { RequiredDataQuestionnaire } from './RequiredDataQuestionnaire';
 import { Plus,  
   ArrowLeft, Search, Filter, CheckCircle2, AlertTriangle, 
-  FileText, Info, Save, X, Edit, ExternalLink, Database
+  FileText, Info, Save, X, Edit, ExternalLink, Database, ShieldCheck
  } from 'lucide-react';
 import { UserSession } from '../types';
 import { CurrencyMode, formatFinancialAmount } from '../utils/currencyFormatter';
@@ -108,7 +107,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
 }) => {
   const isDistributor = currentUser?.role === 'Distributor';
   const [openClassificationId, setOpenClassificationId] = useState<string | null>(null);
-  const [openQuestionnaireFor, setOpenQuestionnaireFor] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState<'GL' | '3PD' | 'EMP' | 'SALES'>('GL');
 
   const [availablePopulations, setAvailablePopulations] = useState<any[]>([]);
@@ -117,24 +115,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   
   const [populationRecords, setPopulationRecords] = useState<any[]>([]);
   const [assignedSamples, setAssignedSamples] = useState<any[]>([]);
-
-  useEffect(() => {
-    if (targetVoucherNo) {
-      const found = assignedSamples.find(s => s.voucherNo === targetVoucherNo || s.sampleId === targetVoucherNo || s.id === targetVoucherNo);
-      if (found) {
-        setOpenQuestionnaireFor(found);
-      } else {
-        setOpenQuestionnaireFor({
-          id: targetVoucherNo,
-          sampleId: targetVoucherNo,
-          voucherNo: targetVoucherNo,
-          accountDescription: 'Sampling Transaction Required Data',
-          testingClassification: ['3rd Party Disbursement'],
-          status: 'Under Review'
-        });
-      }
-    }
-  }, [targetVoucherNo, assignedSamples]);
   const [classificationChanges, setClassificationChanges] = useState<Record<string, string[]>>({});
   const [isSavingClassifications, setIsSavingClassifications] = useState(false);
   const [classificationSaveSuccess, setClassificationSaveSuccess] = useState(false);
@@ -148,18 +128,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [customQuestions, setCustomQuestions] = useState<any[]>([]);
-  const [showQuestionBuilder, setShowQuestionBuilder] = useState(false);
-  const [isSavingQuestion, setIsSavingQuestion] = useState(false);
-  const [questionBuilderForm, setQuestionBuilderForm] = useState({
-    text: '',
-    type: 'Yes / No',
-    required: false,
-    scope: 'classification',
-    guidance: '',
-    options: ['Option 1', 'Option 2'],
-    conditionalRules: [] as any[]
-  });
-  
   const [questionnaireResponses, setQuestionnaireResponses] = useState<Record<string, any>>({});
 
   const fetchQuestionnaireResponses = async () => {
@@ -224,319 +192,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
        fetchCustomQuestions();
     }
   }, [selectedDistributor, selectedAuditFilter]);
-
-  const handleSaveCustomQuestion = async () => {
-     if (!questionBuilderForm.text.trim()) {
-        alert("Question text is required.");
-        return;
-     }
-     setIsSavingQuestion(true);
-     try {
-       const contextClass = reviewRecord?._activeClassificationContext || (reviewRecord && Array.isArray(reviewRecord.testingClassification) ? reviewRecord.testingClassification[0] : reviewRecord?.testingClassification) || 'General';
-       
-       // Calculate next attribute code
-       const baseTemplate = TESTING_TEMPLATES[contextClass] || [];
-       const existingClassQuestions = customQuestions.filter(q => q.contextClass === contextClass);
-       
-       // Find the highest letter
-       let highestCharCode = 64; // Before 'A'
-       for (const attr of baseTemplate) {
-          if (attr.id && attr.id.length === 1) {
-             const code = attr.id.charCodeAt(0);
-             if (code > highestCharCode) highestCharCode = code;
-          }
-       }
-       for (const attr of existingClassQuestions) {
-          if (attr.attributeCode && attr.attributeCode.length === 1) {
-             const code = attr.attributeCode.charCodeAt(0);
-             if (code > highestCharCode) highestCharCode = code;
-          }
-       }
-       const nextAttributeCode = String.fromCharCode(highestCharCode + 1);
-
-       const payload = {
-          question_id: 'CQ' + Date.now(),
-          engagement_id: selectedAuditFilter || 'eng-101',
-          testing_classification: contextClass,
-          question_text: questionBuilderForm.text,
-          question_type: questionBuilderForm.type,
-          required: questionBuilderForm.required,
-          scope: questionBuilderForm.scope,
-          sample_id: questionBuilderForm.scope === 'sample' ? reviewRecord?.id : null,
-          attribute_code: nextAttributeCode,
-          options: questionBuilderForm.options,
-          conditional_rules: questionBuilderForm.conditionalRules,
-          display_order: customQuestions.length
-       };
-       
-       const res = await fetch('/api/sampling/questions', {
-          method: 'POST',
-          headers: {
-             'Content-Type': 'application/json',
-          'x-user-email': currentUser?.email || '',
-          'x-user-role': currentUser?.role || '',
-             'x-user-organization': currentUser?.organization || '',
-             'x-user-name': currentUser?.name || ''
-          },
-          body: JSON.stringify(payload)
-       });
-       const data = await res.json();
-       if (data.success) {
-          setShowQuestionBuilder(false);
-          setQuestionBuilderForm({
-             text: '',
-             type: 'Yes / No',
-             required: false,
-             scope: 'classification',
-             guidance: '',
-             options: ['Option 1', 'Option 2'],
-             conditionalRules: []
-          });
-          await fetchCustomQuestions();
-       } else {
-          alert("Failed to save question. Please try again.");
-       }
-     } catch (err) {
-       console.error("Error saving question:", err);
-       alert("Failed to save question. Please try again.");
-     } finally {
-       setIsSavingQuestion(false);
-     }
-  };
-
-  const renderQuestionBuilderModal = () => {
-     if (!showQuestionBuilder) return null;
-     return (
-       <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm overflow-y-auto">
-         <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col">
-           <div className="p-6 border-b border-slate-800 flex justify-between items-center">
-             <h2 className="text-xl font-bold text-white">Add Testing Question</h2>
-             <button onClick={() => setShowQuestionBuilder(false)} className="text-slate-400 hover:text-white">
-               <X className="w-5 h-5" />
-             </button>
-           </div>
-           <div className="p-6 space-y-6 flex-1 overflow-y-auto max-h-[70vh]">
-             <div className="bg-slate-950 p-4 border border-slate-800 rounded-lg flex flex-col gap-2">
-               <div className="flex gap-4">
-                  <div className="w-1/2">
-                    <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Testing Classification</span>
-                    <span className="text-sm font-semibold text-slate-300">
-                      {reviewRecord?._activeClassificationContext || (reviewRecord && Array.isArray(reviewRecord.testingClassification) ? reviewRecord.testingClassification[0] : reviewRecord?.testingClassification) || 'General'}
-                    </span>
-                  </div>
-                  <div className="w-1/2">
-                    <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Sample ID</span>
-                    <span className="text-sm font-mono text-slate-300">{reviewRecord?.id || 'Unknown'}</span>
-                  </div>
-               </div>
-             </div>
-             
-             <div>
-               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Question Scope *</label>
-               <div className="flex flex-col gap-3 p-4 bg-slate-950 border border-slate-800 rounded-lg">
-                 <label className="flex items-center gap-3 cursor-pointer">
-                   <input 
-                     type="radio" 
-                     name="question_scope"
-                     className="w-4 h-4 border-slate-700 bg-slate-900 text-indigo-500 focus:ring-indigo-500/20"
-                     checked={questionBuilderForm.scope === 'classification'}
-                     onChange={() => setQuestionBuilderForm(prev => ({...prev, scope: 'classification'}))}
-                   />
-                   <span className="text-sm text-slate-300">Apply to ALL samples in this Testing Classification</span>
-                 </label>
-                 <label className="flex items-center gap-3 cursor-pointer">
-                   <input 
-                     type="radio" 
-                     name="question_scope"
-                     className="w-4 h-4 border-slate-700 bg-slate-900 text-indigo-500 focus:ring-indigo-500/20"
-                     checked={questionBuilderForm.scope === 'sample'}
-                     onChange={() => setQuestionBuilderForm(prev => ({...prev, scope: 'sample'}))}
-                   />
-                   <span className="text-sm text-slate-300">Apply ONLY to this particular sample</span>
-                 </label>
-               </div>
-             </div>
-
-             <div>
-               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Question Text *</label>
-               <textarea 
-                 className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none placeholder:text-slate-600"
-                 placeholder="Enter your question here..."
-                 rows={3}
-                 value={questionBuilderForm.text}
-                 onChange={e => setQuestionBuilderForm(prev => ({...prev, text: e.target.value}))}
-               />
-             </div>
-             
-             <div className="grid grid-cols-2 gap-6">
-               <div>
-                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Question Type *</label>
-                 <select 
-                   className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none"
-                   value={questionBuilderForm.type}
-                   onChange={e => setQuestionBuilderForm(prev => ({...prev, type: e.target.value}))}
-                 >
-                   <option value="Yes / No">Yes / No</option>
-                   <option value="Yes / No / N/A">Yes / No / N/A</option>
-                   <option value="Single Choice">Single Choice</option>
-                   <option value="Multiple Choice">Multiple Choice</option>
-                   <option value="Checkbox / Multiple Select">Checkbox / Multiple Select</option>
-                   <option value="Text Answer">Text Answer</option>
-                   <option value="Number">Number</option>
-                   <option value="Date">Date</option>
-                   <option value="File Upload">File Upload</option>
-                   <option value="Yes / No + Conditional Follow-up">Yes / No + Conditional Follow-up</option>
-                 </select>
-               </div>
-               
-               <div>
-                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Required</label>
-                 <label className="flex items-center gap-3 p-3 bg-slate-950 border border-slate-700 rounded-lg cursor-pointer hover:border-slate-600 transition-colors">
-                   <input 
-                     type="checkbox" 
-                     className="w-4 h-4 rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500/20"
-                     checked={questionBuilderForm.required}
-                     onChange={e => setQuestionBuilderForm(prev => ({...prev, required: e.target.checked}))}
-                   />
-                   <span className="text-sm font-semibold text-slate-300">Required question</span>
-                 </label>
-               </div>
-             </div>
-             
-             {['Single Choice', 'Multiple Choice', 'Checkbox / Multiple Select'].includes(questionBuilderForm.type) && (
-               <div className="space-y-3">
-                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Answer Options</label>
-                 {questionBuilderForm.options.map((opt, i) => (
-                   <div key={i} className="flex gap-2">
-                     <input 
-                       type="text" 
-                       className="flex-1 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none"
-                       value={opt}
-                       onChange={e => {
-                         const newOpts = [...questionBuilderForm.options];
-                         newOpts[i] = e.target.value;
-                         setQuestionBuilderForm(prev => ({...prev, options: newOpts}));
-                       }}
-                     />
-                     <button 
-                       onClick={() => {
-                         setQuestionBuilderForm(prev => ({...prev, options: prev.options.filter((_, idx) => idx !== i)}));
-                       }}
-                       className="px-3 py-2 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 rounded-lg transition-colors text-xs font-bold"
-                     >
-                       Delete
-                     </button>
-                   </div>
-                 ))}
-                 <button 
-                   onClick={() => setQuestionBuilderForm(prev => ({...prev, options: [...prev.options, 'New Option']}))}
-                   className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg transition-colors text-xs font-bold flex items-center gap-2"
-                 >
-                   <Plus className="w-3.5 h-3.5" /> Add Option
-                 </button>
-               </div>
-             )}
-             
-             {questionBuilderForm.type === 'Yes / No + Conditional Follow-up' && (
-                <div className="p-4 bg-indigo-500/10 border border-indigo-500/30 rounded-xl space-y-4">
-                  <h4 className="text-sm font-bold text-indigo-400">Conditional Rules</h4>
-                  <div className="space-y-4">
-                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
-                      <div className="text-xs font-bold text-slate-400 mb-2">IF YES</div>
-                      <button className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-bold flex items-center gap-1">
-                        <Plus className="w-3 h-3" /> Add Follow-up Question
-                      </button>
-                    </div>
-                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-3">
-                      <div className="text-xs font-bold text-slate-400 mb-2">IF NO</div>
-                      <button className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-xs font-bold flex items-center gap-1">
-                        <Plus className="w-3 h-3" /> Add Follow-up Question
-                      </button>
-                    </div>
-                  </div>
-                </div>
-             )}
-
-             <div>
-               <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Help / Guidance</label>
-               <textarea 
-                 className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-sm text-slate-200 focus:border-indigo-500 focus:outline-none placeholder:text-slate-600"
-                 placeholder="Optional guidance..."
-                 rows={2}
-                 value={questionBuilderForm.guidance}
-                 onChange={e => setQuestionBuilderForm(prev => ({...prev, guidance: e.target.value}))}
-               />
-             </div>
-             
-             <div className="p-4 bg-slate-950 border border-slate-800 rounded-xl">
-               <div className="text-[10px] font-extrabold uppercase tracking-wider text-slate-500 mb-3">Preview</div>
-               <div className="text-sm font-medium text-slate-200 mb-3">{questionBuilderForm.text || 'Question Text'}</div>
-               
-               {['Yes / No', 'Yes / No + Conditional Follow-up'].includes(questionBuilderForm.type) && (
-                 <div className="flex gap-2">
-                   <div className="w-4 h-4 rounded-full border border-slate-600"></div> <span className="text-sm text-slate-400 mr-4">Yes</span>
-                   <div className="w-4 h-4 rounded-full border border-slate-600"></div> <span className="text-sm text-slate-400">No</span>
-                 </div>
-               )}
-               {questionBuilderForm.type === 'Yes / No / N/A' && (
-                 <div className="flex gap-2">
-                   <div className="w-4 h-4 rounded-full border border-slate-600"></div> <span className="text-sm text-slate-400 mr-4">Yes</span>
-                   <div className="w-4 h-4 rounded-full border border-slate-600"></div> <span className="text-sm text-slate-400 mr-4">No</span>
-                   <div className="w-4 h-4 rounded-full border border-slate-600"></div> <span className="text-sm text-slate-400">N/A</span>
-                 </div>
-               )}
-               {['Single Choice', 'Multiple Choice', 'Checkbox / Multiple Select'].includes(questionBuilderForm.type) && (
-                 <div className="space-y-2">
-                   {questionBuilderForm.options.map((opt, i) => (
-                     <div key={i} className="flex gap-2 items-center">
-                       <div className={`w-4 h-4 border border-slate-600 ${questionBuilderForm.type === 'Single Choice' ? 'rounded-full' : 'rounded'}`}></div>
-                       <span className="text-sm text-slate-400">{opt || 'Option ' + (i+1)}</span>
-                     </div>
-                   ))}
-                 </div>
-               )}
-               {questionBuilderForm.type === 'Text Answer' && (
-                 <div className="w-full h-16 border border-slate-700 bg-slate-900 rounded-lg flex items-start p-2">
-                   <span className="text-slate-500 text-xs">Text answer area...</span>
-                 </div>
-               )}
-               {questionBuilderForm.type === 'Number' && (
-                 <div className="w-32 h-10 border border-slate-700 bg-slate-900 rounded-lg flex items-center p-2">
-                   <span className="text-slate-500 text-xs">123...</span>
-                 </div>
-               )}
-               {questionBuilderForm.type === 'Date' && (
-                 <div className="w-40 h-10 border border-slate-700 bg-slate-900 rounded-lg flex items-center p-2">
-                   <span className="text-slate-500 text-xs">DD/MM/YYYY</span>
-                 </div>
-               )}
-               {questionBuilderForm.type === 'File Upload' && (
-                 <div className="px-4 py-2 bg-slate-800 text-slate-400 border border-slate-700 rounded-lg inline-flex items-center gap-2 text-xs font-bold">
-                   <Plus className="w-3 h-3" /> Upload File
-                 </div>
-               )}
-             </div>
-           </div>
-           
-           <div className="p-6 border-t border-slate-800 bg-slate-900/50 flex justify-end gap-3">
-             <button 
-               onClick={() => setShowQuestionBuilder(false)}
-               className="px-4 py-2 text-sm font-bold text-slate-400 hover:text-white transition-colors"
-             >
-               Cancel
-             </button>
-             <button 
-               onClick={handleSaveCustomQuestion}
-               disabled={isSavingQuestion}
-               className="px-6 py-2 text-sm font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors flex items-center gap-2 disabled:opacity-50"
-             >
-               {isSavingQuestion ? 'Saving...' : 'Save Question'}
-             </button>
-           </div>
-         </div>
-       </div>
-     );
-  };
 
   // Fetch Available Populations and Restore Active Sampling State
   const fetchSamplingWorkspace = async () => {
@@ -1032,6 +687,15 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         testingReference = `${prefix}-${pop.voucherNo && pop.voucherNo !== '—' ? pop.voucherNo : pop.id}`;
       }
 
+      const cleanKey1 = String(pop.id || '').toLowerCase();
+      const cleanKey2 = String(pop.voucherNo || '').toLowerCase();
+      const cleanKey3 = String(dbSample?.sampleId || dbSample?.id || '').toLowerCase();
+      const qResp = questionnaireResponses[cleanKey1] || questionnaireResponses[cleanKey2] || questionnaireResponses[cleanKey3];
+      const qStatus = qResp?.status;
+      const isAccepted = qStatus === 'Accepted' || 
+                         qStatus === 'Completed' || 
+                         testingStatus === 'Tested';
+
       return {
         ...pop,
         ...(dbSample || {}),
@@ -1048,9 +712,11 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         testingClassification: cleanClassifications,
         testingStatus,
         testingReference,
-        isAssigned
+        isAssigned,
+        isAccepted,
+        questionnaireStatus: qStatus || 'Accepted'
       };
-    }).filter(rec => {
+    }).filter(rec => rec.isAccepted).filter(rec => {
         if (!searchQuery) return true;
         const q = searchQuery.toLowerCase();
         return (
@@ -1061,7 +727,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             (rec.accountDescription || '').toLowerCase().includes(q)
         );
     });
-  }, [populationRecords, assignedSamples, classificationChanges, searchQuery]);
+  }, [populationRecords, assignedSamples, classificationChanges, questionnaireResponses, searchQuery]);
 
   const totalGLDebit = useMemo(() => mergedRecords.reduce((sum, r) => sum + (Number(r.debit) || 0), 0), [mergedRecords]);
   const totalGLCredit = useMemo(() => mergedRecords.reduce((sum, r) => sum + (Number(r.credit) || 0), 0), [mergedRecords]);
@@ -1219,7 +885,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Credit</th>
             <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Balance</th>
             {!isDistributor && <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] bg-slate-900">Testing Classification</th>}
-            <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] bg-slate-900 text-center">Required Data</th>
+            <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] bg-slate-900 text-center">Final Review Status</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800/50">
@@ -1227,16 +893,14 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             <tr>
               <td colSpan={isDistributor ? 8 : 10} className="py-16 text-center">
                 <div className="flex flex-col items-center justify-center max-w-md mx-auto space-y-3">
-                  <div className="w-12 h-12 rounded-full bg-indigo-500/10 text-indigo-400 flex items-center justify-center">
-                    <Database className="w-6 h-6" />
+                  <div className="w-12 h-12 rounded-full bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+                    <CheckCircle2 className="w-6 h-6" />
                   </div>
-                  <h4 className="text-base font-bold text-white">No General Ledger Population Found</h4>
+                  <h4 className="text-base font-bold text-white">Final Review: No Accepted Samples Yet</h4>
                   <p className="text-xs text-slate-400 leading-relaxed">
-                    {availablePopulations.length === 0
-                      ? 'No General Ledger population has been uploaded yet for this engagement. Upload and configure the General Ledger in Engagement Workspace → Sampling.'
-                      : 'The active population contains no transaction records.'}
+                    Sampling Review is reserved for final review of accepted items only. Review evidence and accept submissions in Engagement Workspace → Sampling to view them here.
                   </p>
-                  {onNavigateToUpload && availablePopulations.length === 0 && (
+                  {onNavigateToUpload && (
                     <button
                       onClick={onNavigateToUpload}
                       className="mt-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold transition-all shadow-md shadow-indigo-600/20 flex items-center gap-1.5"
@@ -1340,43 +1004,11 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                 
                 </td>
                 )}
-                <td className="py-2.5 px-4 bg-slate-900/40">
-                  <div className="flex flex-col items-center justify-center gap-1">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setOpenQuestionnaireFor(rec);
-                      }}
-                      className="flex items-center justify-center gap-1.5 w-full max-w-[140px] bg-indigo-600/20 text-indigo-400 border border-indigo-500/30 rounded px-3 py-1.5 hover:bg-indigo-600 hover:text-white transition-colors text-xs font-semibold cursor-pointer"
-                    >
-                      <FileText className="h-3.5 w-3.5" />
-                      Questionnaire
-                    </button>
-                    {(() => {
-                      const cleanKey1 = String(rec.id || '').toLowerCase();
-                      const cleanKey2 = String(rec.voucherNo || '').toLowerCase();
-                      const resp = questionnaireResponses[cleanKey1] || questionnaireResponses[cleanKey2];
-                      if (!resp?.status) return null;
-                      const st = resp.status;
-                      const badgeClass =
-                        st === 'Accepted'
-                          ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                          : st === 'Clarification Required'
-                          ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                          : st === 'Submitted'
-                          ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                          : st === 'Pending Submission'
-                          ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40'
-                          : st === 'Rejected'
-                          ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                          : 'bg-slate-800 text-slate-400 border-slate-700';
-                      return (
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badgeClass}`}>
-                          {st}
-                        </span>
-                      );
-                    })()}
-                  </div>
+                <td className="py-2.5 px-4 bg-slate-900/40 text-center">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    Accepted
+                  </span>
                 </td>
               </tr>
             ))
@@ -1487,12 +1119,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
               </div>
               <div className="flex items-center justify-between w-full">
                 <h2 className="text-xl font-bold text-white">Sample Testing & Attributes</h2>
-                <button 
-                  onClick={() => setShowQuestionBuilder(true)}
-                  className="px-3 py-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg transition-colors flex items-center gap-1.5"
-                >
-                  <Plus className="w-3.5 h-3.5" /> Add Question
-                </button>
               </div>
             </div>
             <button onClick={() => setReviewRecord(null)} className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors shrink-0">
@@ -1753,8 +1379,13 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       <div className="p-8 pb-4">
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-black text-white tracking-tight">Sampling & Testing</h1>
-            <p className="text-slate-400 mt-2">General Ledger Analysis & Transaction Testing</p>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-black text-white tracking-tight">Sampling Review</h1>
+              <span className="px-2.5 py-1 text-xs font-bold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 rounded-lg flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" /> Final Review Only
+              </span>
+            </div>
+            <p className="text-slate-400 mt-2">Final Review of Accepted &amp; Tested Transaction Samples</p>
           </div>
         </div>
 
@@ -1838,23 +1469,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       </div>
 
       {!isDistributor && renderReviewModal()}
-      {renderQuestionBuilderModal()}
-      
-      {openQuestionnaireFor && (
-        <RequiredDataQuestionnaire 
-          transaction={openQuestionnaireFor}
-          engagementId={selectedAuditFilter || 'eng-101'}
-          currentUser={currentUser}
-          currencyMode={currencyMode as CurrencyMode}
-          selectedDistributor={selectedDistributor}
-          selectedClient={selectedClient}
-          onClose={() => {
-            setOpenQuestionnaireFor(null);
-            fetchQuestionnaireResponses();
-            fetchAssignedSamples();
-          }}
-        />
-      )}
     </div>
   );
 };

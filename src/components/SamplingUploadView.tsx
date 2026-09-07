@@ -819,11 +819,9 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                   <th className="py-2.5 px-3 text-right">Debit</th>
                   <th className="py-2.5 px-3 text-right">Credit</th>
                   <th className="py-2.5 px-3 text-right">Balance</th>
-                  {isDistributor && (
-                    <th className="py-2.5 px-3 text-center font-extrabold text-indigo-300 uppercase tracking-wider whitespace-nowrap bg-slate-900/90">
-                      REQUIRED DATA
-                    </th>
-                  )}
+                  <th className="py-2.5 px-3 text-center font-extrabold text-indigo-300 uppercase tracking-wider whitespace-nowrap bg-slate-900/90">
+                    REQUIRED DATA
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
@@ -849,63 +847,70 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                     <td className="py-2.5 px-3 text-right text-slate-300 whitespace-nowrap">
                       {row.balance !== undefined && row.balance !== null && Number(row.balance) !== 0 ? formatFinancialAmount(row.balance, currencyMode) : '—'}
                     </td>
-                    {isDistributor && (
-                      <td className="py-2.5 px-3 text-center whitespace-nowrap bg-slate-950/20">
-                        {(() => {
-                          const resp = questionnaireResponses[row.id] || questionnaireResponses[row.voucherNo] || questionnaireResponses[row.sampleId];
-                          const st = resp?.status;
-                          const isAccepted = st === 'Accepted';
-                          const isCompleted = st === 'Completed' || st === 'Submitted';
-                          const isClarification = st === 'Clarification Required';
-                          const isRejected = st === 'Rejected';
-                          const isDraft = st === 'Draft';
+                    <td className="py-2.5 px-3 text-center whitespace-nowrap bg-slate-950/20">
+                      {(() => {
+                        const cleanKey1 = String(row.id || '').toLowerCase();
+                        const cleanKey2 = String(row.voucherNo || '').toLowerCase();
+                        const cleanKey3 = String(row.sampleId || '').toLowerCase();
+                        const resp = questionnaireResponses[cleanKey1] || questionnaireResponses[cleanKey2] || questionnaireResponses[cleanKey3] ||
+                                     questionnaireResponses[row.id] || questionnaireResponses[row.voucherNo] || questionnaireResponses[row.sampleId];
+                        const st = resp?.status;
+                        const isAccepted = st === 'Accepted';
+                        const isCompleted = st === 'Completed' || st === 'Submitted';
+                        const isClarification = st === 'Clarification Required';
+                        const isRejected = st === 'Rejected';
+                        const isDraft = st === 'Draft';
+                        const isPushed = resp?.is_pushed || resp?.isPushed;
 
-                          const buttonClass = isAccepted
-                            ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30'
-                            : isRejected
-                            ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40 hover:bg-rose-600/30'
-                            : isClarification
-                            ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40 hover:bg-amber-600/30'
-                            : isCompleted
-                            ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30'
-                            : isDraft
-                            ? 'bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700'
-                            : 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-500/60 shadow-indigo-600/20';
+                        const buttonClass = isAccepted
+                          ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-600/30'
+                          : isRejected
+                          ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40 hover:bg-rose-600/30'
+                          : isClarification
+                          ? 'bg-amber-600/20 text-amber-300 border border-amber-500/40 hover:bg-amber-600/30'
+                          : isCompleted
+                          ? 'bg-blue-600/20 text-blue-300 border border-blue-500/40 hover:bg-blue-600/30'
+                          : isDraft
+                          ? 'bg-slate-800 text-slate-300 border border-slate-700 hover:bg-slate-700'
+                          : 'bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/40 shadow-sm';
 
-                          return (
-                            <div className="flex items-center justify-center gap-1.5 flex-wrap">
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenQuestionnaireFor(row);
-                                }}
-                                className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm ${buttonClass}`}
-                                title="Open Required Data Questionnaire"
-                              >
-                                <FileText className="h-3.5 w-3.5" />
-                                <span>Questionnaire</span>
-                              </button>
-                              {st && (
-                                <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded border ${
-                                  st === 'Accepted'
-                                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
-                                    : st === 'Clarification Required'
-                                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                                    : st === 'Rejected'
-                                    ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
-                                    : st === 'Submitted'
-                                    ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
-                                    : 'bg-slate-800 text-slate-400 border-slate-700'
-                                }`}>
-                                  {st === 'Clarification Required' ? 'Clarification' : st}
-                                </span>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </td>
-                    )}
+                        return (
+                          <div className="flex items-center justify-center gap-1.5 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenQuestionnaireFor(row);
+                              }}
+                              className={`inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm ${buttonClass}`}
+                              title="Open Required Data Questionnaire"
+                            >
+                              <FileText className="h-3.5 w-3.5" />
+                              <span>Questionnaire</span>
+                            </button>
+                            {st ? (
+                              <span className={`inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded border ${
+                                st === 'Accepted'
+                                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                  : st === 'Clarification Required'
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                                  : st === 'Rejected'
+                                  ? 'bg-rose-500/20 text-rose-300 border-rose-500/40'
+                                  : st === 'Submitted'
+                                  ? 'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                                  : 'bg-slate-800 text-slate-400 border-slate-700'
+                              }`}>
+                                {st === 'Clarification Required' ? 'Clarification' : st}
+                              </span>
+                            ) : isPushed ? (
+                              <span className="inline-flex items-center gap-1 text-[9px] font-bold px-1.5 py-0.5 rounded border bg-indigo-500/20 text-indigo-300 border-indigo-500/40">
+                                Pushed
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -1125,8 +1130,10 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
           transaction={openQuestionnaireFor}
           engagementId={selectedAuditFilter || 'eng-101'}
           currentUser={currentUser}
-          isDistributorWorkflow={true}
+          isDistributorWorkflow={isDistributor}
           currencyMode={currencyMode}
+          selectedDistributor={selectedDistributor}
+          selectedClient={selectedClient}
           onClose={() => {
             setOpenQuestionnaireFor(null);
             fetchQuestionnaireResponses();

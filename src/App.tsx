@@ -477,7 +477,9 @@ export default function App() {
           if (targetVoucher) {
             setTargetVoucherNo(targetVoucher);
           }
-          if (tab === 'sampling_review' || tab === 'sampling') {
+          if (tab === 'sampling') {
+            setActiveTab('engagement_workspace');
+          } else if (tab === 'sampling_review') {
             setActiveTab('sampling_review');
           } else if (tab === 'engagement_workspace') {
             setActiveTab('engagement_workspace');
