@@ -1809,64 +1809,76 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   // POST /api/sampling/required-data/push - Push questionnaire to distributor
   app.post('/api/sampling/required-data/push', express.json(), authenticateRequest, async (req: any, res: any) => {
     try {
-      const { engagementId, sampleId, voucherNo, distributorId, distributorName, questions } = req.body;
+      const { engagementId, sampleId, voucherNo, distributorId, distributorName, questions, items } = req.body;
       const supabase = getSupabaseServerClient();
       const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
-      const targetSampleId = cleanStr(sampleId);
-      const targetVoucherNo = cleanStr(voucherNo);
+
+      const targetDistributor = distributorName || distributorId || 'Distributor';
+      const itemsToPush = Array.isArray(items) && items.length > 0
+        ? items
+        : [{ sampleId, voucherNo, questions }];
 
       const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
-      let existingRecord = existing?.find(d => {
-        let parsed = d.details;
-        if (typeof parsed === 'string') {
-           try { parsed = JSON.parse(parsed); } catch(e) {}
-        }
-        const sId = cleanStr(parsed?.sample_id);
-        const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo);
-        return (targetSampleId && (sId === targetSampleId || vNo === targetSampleId)) || 
-               (targetVoucherNo && (vNo === targetVoucherNo || sId === targetVoucherNo));
-      });
 
-      const pushDetails = {
-        engagement_id: engagementId || 'eng-101',
-        sample_id: sampleId,
-        voucher_no: voucherNo || '',
-        voucherNo: voucherNo || '',
-        distributor_id: distributorId || distributorName || '',
-        isPushed: true,
-        pushedAt: new Date().toISOString(),
-        pushedBy: req.user?.email || 'Auditor',
-        pushedTo: distributorName || distributorId || 'Distributor',
-        status: 'Pending Submission',
-        updated_at: new Date().toISOString()
-      };
+      for (const item of itemsToPush) {
+        const itemSampleId = item.sampleId || item.id;
+        const itemVoucherNo = item.voucherNo || item.voucher_no || itemSampleId;
+        const targetSampleId = cleanStr(itemSampleId);
+        const targetVoucherNo = cleanStr(itemVoucherNo);
+        if (!targetSampleId && !targetVoucherNo) continue;
 
-      if (existingRecord) {
-        let parsed = existingRecord.details;
-        if (typeof parsed === 'string') {
-          try { parsed = JSON.parse(parsed); } catch(e) {}
-        }
-        const updated = {
-          ...parsed,
-          ...pushDetails,
-          status: parsed.status === 'Draft' || !parsed.status ? 'Pending Submission' : parsed.status
-        };
-        await supabase.from('system_audit_logs').update({ details: JSON.stringify(updated) }).eq('id', existingRecord.id);
-      } else {
-        await supabase.from('system_audit_logs').insert({
-          event_type: 'REQUIRED_DATA_RESP',
-          target_user_email: req.user?.email || 'unknown',
-          ip_address: req.ip || '127.0.0.1',
-          details: JSON.stringify({
-            ...pushDetails,
-            notes: '',
-            uploadedFiles: [],
-            itemResponses: {},
-            clarificationHistory: [],
-            created_by: req.user?.email || 'unknown',
-            created_at: new Date().toISOString(),
-          })
+        let existingRecord = existing?.find(d => {
+          let parsed = d.details;
+          if (typeof parsed === 'string') {
+             try { parsed = JSON.parse(parsed); } catch(e) {}
+          }
+          const sId = cleanStr(parsed?.sample_id);
+          const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo);
+          return (targetSampleId && (sId === targetSampleId || vNo === targetSampleId)) || 
+                 (targetVoucherNo && (vNo === targetVoucherNo || sId === targetVoucherNo));
         });
+
+        const pushDetails = {
+          engagement_id: engagementId || 'eng-101',
+          sample_id: itemSampleId,
+          voucher_no: itemVoucherNo || '',
+          voucherNo: itemVoucherNo || '',
+          distributor_id: distributorId || distributorName || '',
+          isPushed: true,
+          pushedAt: new Date().toISOString(),
+          pushedBy: req.user?.email || 'Auditor',
+          pushedTo: targetDistributor,
+          status: 'Pending Submission',
+          updated_at: new Date().toISOString()
+        };
+
+        if (existingRecord) {
+          let parsed = existingRecord.details;
+          if (typeof parsed === 'string') {
+            try { parsed = JSON.parse(parsed); } catch(e) {}
+          }
+          const updated = {
+            ...parsed,
+            ...pushDetails,
+            status: parsed.status === 'Draft' || !parsed.status ? 'Pending Submission' : parsed.status
+          };
+          await supabase.from('system_audit_logs').update({ details: JSON.stringify(updated) }).eq('id', existingRecord.id);
+        } else {
+          await supabase.from('system_audit_logs').insert({
+            event_type: 'REQUIRED_DATA_RESP',
+            target_user_email: req.user?.email || 'unknown',
+            ip_address: req.ip || '127.0.0.1',
+            details: JSON.stringify({
+              ...pushDetails,
+              notes: '',
+              uploadedFiles: [],
+              itemResponses: {},
+              clarificationHistory: [],
+              created_by: req.user?.email || 'unknown',
+              created_at: new Date().toISOString(),
+            })
+          });
+        }
       }
 
       // Also create an audit log event
@@ -1876,9 +1888,10 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         ip_address: req.ip || '127.0.0.1',
         details: JSON.stringify({
           engagementId,
-          sampleId,
-          voucherNo,
-          distributor: distributorName || distributorId,
+          sampleId: itemsToPush.length === 1 ? (itemsToPush[0].sampleId || itemsToPush[0].voucherNo) : undefined,
+          voucherNo: itemsToPush.length === 1 ? itemsToPush[0].voucherNo : undefined,
+          itemCount: itemsToPush.length,
+          distributor: targetDistributor,
           questionCount: Array.isArray(questions) ? questions.length : 0,
           pushedBy: req.user?.email,
           timestamp: new Date().toISOString()
@@ -1887,17 +1900,26 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
 
       // Dispatch notification to Distributor
       try {
+        const isMultiple = itemsToPush.length > 1;
+        const notifTitle = isMultiple
+          ? `New Required Data Questionnaires (${itemsToPush.length} Items)`
+          : `New Required Data Questionnaire: Voucher #${itemsToPush[0].voucherNo || itemsToPush[0].sampleId}`;
+        const notifMsg = isMultiple
+          ? `Auditor has prepared and pushed the required data questionnaires for ${itemsToPush.length} General Ledger transactions. Please review the questions and provide required documentation.`
+          : `Auditor has prepared and pushed the required data questionnaire for Voucher #${itemsToPush[0].voucherNo || itemsToPush[0].sampleId}. Please review the questions and provide required documentation.`;
+
         await dispatchNotification({
-          target_organization: distributorName || distributorId || 'Distributor',
+          target_organization: targetDistributor,
           target_role: 'Distributor',
           category: 'System',
-          title: `New Required Data Questionnaire: Voucher #${voucherNo || sampleId}`,
-          message: `Auditor has prepared and pushed the required data questionnaire for Voucher #${voucherNo || sampleId}. Please review the questions and provide required documentation.`,
+          title: notifTitle,
+          message: notifMsg,
           metadata: {
-            voucherNo,
-            sampleId,
+            voucherNo: !isMultiple ? itemsToPush[0].voucherNo : undefined,
+            sampleId: !isMultiple ? itemsToPush[0].sampleId : undefined,
+            itemCount: itemsToPush.length,
             engagementId: engagementId || 'eng-101',
-            distributorName: distributorName || distributorId,
+            distributorName: targetDistributor,
             linkTab: 'engagement_workspace',
             targetRole: 'Distributor',
             action: 'Pushed'
@@ -1907,7 +1929,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         console.warn('Error sending push notification:', notifPushErr);
       }
 
-      res.json({ success: true, message: 'Questionnaire pushed to distributor successfully' });
+      res.json({ success: true, message: `Questionnaire pushed to ${targetDistributor} successfully`, count: itemsToPush.length });
     } catch (err: any) {
       console.error('Error pushing questionnaire:', err);
       res.status(500).json({ success: false, error: err.message });

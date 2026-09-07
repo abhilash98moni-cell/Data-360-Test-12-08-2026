@@ -20,7 +20,8 @@ import {
   HelpCircle,
   ChevronDown,
   Info,
-  Check
+  Check,
+  Send
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { UserSession } from './AuthModal';
@@ -128,10 +129,61 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   }, [targetVoucherNo, records]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isUploading, setIsUploading] = useState<boolean>(false);
+  const [isPushing, setIsPushing] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [accountFilter, setAccountFilter] = useState<string>('ALL');
   const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+
+  const targetDistributorName = (selectedDistributor && selectedDistributor !== 'All Distributors')
+    ? selectedDistributor
+    : (activePopulation?.distributorName || 'Distributor');
+
+  const handlePushToDistributor = async () => {
+    if (records.length === 0) {
+      showToast('error', `No transaction records found to push. Please upload or select a General Ledger population first.`);
+      return;
+    }
+
+    setIsPushing(true);
+    try {
+      const items = records.map(r => ({
+        sampleId: r.id,
+        voucherNo: r.voucherNo || r.id,
+        accountDescription: r.accountDescription,
+        amount: r.debit || r.credit || r.balance
+      }));
+
+      const res = await fetch('/api/sampling/required-data/push', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': currentUser?.email || ''
+        },
+        body: JSON.stringify({
+          engagementId: selectedAuditFilter || 'eng-101',
+          distributorId: targetDistributorName,
+          distributorName: targetDistributorName,
+          clientName: selectedClient,
+          items
+        })
+      });
+
+      const data = await res.json();
+      if (data.success) {
+        await fetchQuestionnaireResponses();
+        window.dispatchEvent(new CustomEvent('notification-updated'));
+        showToast('success', `Questionnaire and required data successfully pushed to ${targetDistributorName} (${items.length} transactions synced)!`);
+      } else {
+        showToast('error', data.error || `Failed to push questionnaire to ${targetDistributorName}.`);
+      }
+    } catch (err: any) {
+      console.error('Error pushing questionnaire to distributor:', err);
+      showToast('error', `Error pushing questionnaire to ${targetDistributorName}. Please try again.`);
+    } finally {
+      setIsPushing(false);
+    }
+  };
 
   // Mapping Modal State
   const [showMappingModal, setShowMappingModal] = useState<boolean>(false);
@@ -558,6 +610,22 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
               <RefreshCw className={`h-3.5 w-3.5 text-slate-400 ${isLoading ? 'animate-spin' : ''}`} />
               <span>Sync DB</span>
             </button>
+
+            {!isDistributor && (
+              <button
+                onClick={handlePushToDistributor}
+                disabled={isPushing}
+                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                title={`Push questionnaire and required data to ${targetDistributorName}`}
+              >
+                {isPushing ? (
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Send className="h-3.5 w-3.5" />
+                )}
+                <span>Push to {targetDistributorName}</span>
+              </button>
+            )}
 
             {!isDistributor && onNavigateToSamplingReview && (
               <button
