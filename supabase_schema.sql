@@ -181,4 +181,49 @@ VALUES
     ('e.rostova@logistics-global.com', '$2a$10$e7x...samplehash', 'Elena Rostova', 'distributor', 'Global Logistics Corp')
 ON CONFLICT (email) DO NOTHING;
 
+
+-- 8. Audit Reports Table (Reporting Module)
+CREATE TABLE IF NOT EXISTS public.audit_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id VARCHAR(255) UNIQUE,
+    report_type VARCHAR(100),
+    distributor_id VARCHAR(255) NOT NULL,
+    distributor_name VARCHAR(255),
+    client_id VARCHAR(255),
+    client_name VARCHAR(255),
+    audit_id VARCHAR(255),
+    template_id VARCHAR(100),
+    template_version VARCHAR(50),
+    report_version VARCHAR(50),
+    status VARCHAR(50) DEFAULT 'DRAFT',
+    created_by VARCHAR(255),
+    created_by_name VARCHAR(255),
+    created_by_email VARCHAR(255),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    finalized_by VARCHAR(255),
+    finalized_at TIMESTAMP WITH TIME ZONE,
+    docx_file_id VARCHAR(255),
+    pdf_file_id VARCHAR(255),
+    google_drive_file_id VARCHAR(255),
+    google_drive_folder_id VARCHAR(255),
+    google_drive_file_url VARCHAR(1024),
+    last_drive_sync_at TIMESTAMP WITH TIME ZONE,
+    report_content JSONB DEFAULT '{}'::jsonb,
+    overview JSONB DEFAULT '{}'::jsonb,
+    findings JSONB DEFAULT '[]'::jsonb,
+    metadata JSONB DEFAULT '{}'::jsonb
+);
+
+CREATE INDEX IF NOT EXISTS idx_audit_reports_distributor ON public.audit_reports(distributor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_reports_status ON public.audit_reports(status);
+
+ALTER TABLE public.audit_reports ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Allow all access to audit_reports" ON public.audit_reports;
+CREATE POLICY "Allow all access to audit_reports" ON public.audit_reports
+    FOR ALL
+    USING (true)
+    WITH CHECK (true);
+
 -- Done!
