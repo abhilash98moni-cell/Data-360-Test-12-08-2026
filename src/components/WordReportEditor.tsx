@@ -1298,125 +1298,149 @@ export const WordReportEditor: React.FC<WordReportEditorProps> = ({
         </button>
 
         {/* Center Paper Canvas Layout */}
-        <div className="flex-1 overflow-y-auto bg-slate-300 py-10 px-4 flex justify-center custom-scrollbar">
-          {/* Standard Word-like Document Sheet (Letter / A4 Proportion) */}
+        <div 
+          className="flex-1 overflow-y-auto py-8 px-4 flex justify-center custom-scrollbar"
+          style={{ backgroundColor: "#e2e8f0" }}
+        >
+          {/* Global Content Styles for Word Editor Pages */}
+          <style>{`
+            .word-editor-content {
+              outline: none;
+              font-family: Calibri, Arial, sans-serif;
+              font-size: 11pt;
+              line-height: 1.6;
+              color: #1e293b;
+            }
+            .word-editor-content h1 {
+              font-size: 20pt;
+              font-weight: bold;
+              color: #0f172a;
+              margin-top: 1.5rem;
+              margin-bottom: 0.75rem;
+              border-bottom: 1.5px solid #0f172a;
+              padding-bottom: 0.35rem;
+            }
+            .word-editor-content h2 {
+              font-size: 15pt;
+              font-weight: bold;
+              color: #1e293b;
+              margin-top: 1.25rem;
+              margin-bottom: 0.5rem;
+            }
+            .word-editor-content h3 {
+              font-size: 12.5pt;
+              font-weight: 600;
+              color: #334155;
+              margin-top: 1rem;
+              margin-bottom: 0.4rem;
+            }
+            .word-editor-content h4 {
+              font-size: 11.5pt;
+              font-weight: 600;
+              color: #475569;
+              margin-top: 0.75rem;
+              margin-bottom: 0.35rem;
+            }
+            .word-editor-content p {
+              margin-bottom: 0.85rem;
+            }
+            .word-editor-content ul {
+              list-style-type: disc;
+              padding-left: 1.75rem;
+              margin-bottom: 0.85rem;
+            }
+            .word-editor-content ol {
+              list-style-type: decimal;
+              padding-left: 1.75rem;
+              margin-bottom: 0.85rem;
+            }
+            .word-editor-content table {
+              width: 100%;
+              border-collapse: collapse;
+              margin: 1rem 0;
+              font-size: 10pt;
+            }
+            .word-editor-content th, .word-editor-content td {
+              border: 1px solid #cbd5e1;
+              padding: 8px 10px;
+              text-align: left;
+            }
+            .word-editor-content th {
+              background-color: #f8fafc;
+              font-weight: bold;
+              color: #0f172a;
+            }
+            .word-editor-content hr {
+              border: 0;
+              border-top: 1px solid #e2e8f0;
+              margin: 1.5rem 0;
+            }
+            .word-editor-content a {
+              color: #2563eb;
+              text-decoration: underline;
+            }
+            .word-page-break {
+              page-break-after: always;
+              break-after: page;
+              margin: 28px -48px !important;
+              padding: 10px 0 !important;
+              background-color: #f1f5f9;
+              border-top: 2px dashed #94a3b8 !important;
+              border-bottom: 2px dashed #94a3b8 !important;
+              text-align: center;
+              color: #64748b;
+              font-size: 11px;
+              font-weight: bold;
+              letter-spacing: 1.5px;
+              user-select: none;
+            }
+          `}</style>
+
+          {/* Standard Word-like Document Pages Column (Letter / 8.5in x 11in) */}
           <div
-            className="w-full max-w-[860px] bg-white text-slate-900 shadow-2xl rounded-sm border border-slate-300 transition-transform duration-200"
+            className="flex flex-col items-center gap-8 pb-16 transition-transform duration-200"
             style={{
               transform: `scale(${zoomLevel / 100})`,
               transformOrigin: "top center",
-              minHeight: "1100px",
             }}
           >
-            {/* Page Header (Printed Margin Decoration) */}
-            <div className="px-12 pt-8 pb-4 border-b border-slate-200 flex items-center justify-between text-[11px] text-slate-500 select-none">
-              <span className="font-bold tracking-wider text-slate-700 uppercase">
-                DISTRIBUTOR AUDIT REPORT — STRICTLY CONFIDENTIAL
-              </span>
-              <span>Global Compliance Investigations</span>
-            </div>
+            {sections.map((sec, idx) => (
+              <div
+                key={sec.id}
+                ref={(el) => {
+                  sectionRefs.current[sec.id] = el;
+                }}
+                className={`document-page relative bg-white text-slate-900 border border-slate-300 rounded-[2px] shrink-0 flex flex-col justify-between transition-all duration-200 ${
+                  activeSectionId === sec.id
+                    ? "ring-2 ring-indigo-500/50 shadow-2xl"
+                    : "hover:border-slate-400"
+                }`}
+                style={{
+                  width: "816px", // 8.5 inches at 96 DPI (Letter size)
+                  minHeight: "1056px", // 11 inches at 96 DPI (Letter size)
+                  boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+                }}
+                onClick={() => setActiveSectionId(sec.id)}
+              >
+                {/* Page Header (Running Header on Top Margin) */}
+                <div className="px-16 pt-7 pb-3 border-b border-slate-200 flex items-center justify-between text-[11px] text-slate-500 select-none shrink-0">
+                  <span className="font-bold tracking-wider text-slate-700 uppercase">
+                    DISTRIBUTOR AUDIT REPORT — STRICTLY CONFIDENTIAL
+                  </span>
+                  <div className="flex items-center gap-2 text-slate-400">
+                    <span className="text-[10px] tracking-tight">Letter (8.5″ × 11″)</span>
+                    <span>•</span>
+                    <span className="text-slate-600 font-medium">Global Compliance Investigations</span>
+                  </div>
+                </div>
 
-            {/* Document Content Sections */}
-            <div className="p-12 md:p-16 space-y-12">
-              <style>{`
-                .word-editor-content {
-                  outline: none;
-                  font-family: Calibri, Arial, sans-serif;
-                  font-size: 11pt;
-                  line-height: 1.6;
-                  color: #1e293b;
-                }
-                .word-editor-content h1 {
-                  font-size: 20pt;
-                  font-weight: bold;
-                  color: #0f172a;
-                  margin-top: 1.5rem;
-                  margin-bottom: 0.75rem;
-                  border-bottom: 1.5px solid #0f172a;
-                  padding-bottom: 0.35rem;
-                }
-                .word-editor-content h2 {
-                  font-size: 15pt;
-                  font-weight: bold;
-                  color: #1e293b;
-                  margin-top: 1.25rem;
-                  margin-bottom: 0.5rem;
-                }
-                .word-editor-content h3 {
-                  font-size: 12.5pt;
-                  font-weight: 600;
-                  color: #334155;
-                  margin-top: 1rem;
-                  margin-bottom: 0.4rem;
-                }
-                .word-editor-content h4 {
-                  font-size: 11.5pt;
-                  font-weight: 600;
-                  color: #475569;
-                  margin-top: 0.75rem;
-                  margin-bottom: 0.35rem;
-                }
-                .word-editor-content p {
-                  margin-bottom: 0.85rem;
-                }
-                .word-editor-content ul {
-                  list-style-type: disc;
-                  padding-left: 1.75rem;
-                  margin-bottom: 0.85rem;
-                }
-                .word-editor-content ol {
-                  list-style-type: decimal;
-                  padding-left: 1.75rem;
-                  margin-bottom: 0.85rem;
-                }
-                .word-editor-content table {
-                  width: 100%;
-                  border-collapse: collapse;
-                  margin: 1rem 0;
-                  font-size: 10pt;
-                }
-                .word-editor-content th, .word-editor-content td {
-                  border: 1px solid #cbd5e1;
-                  padding: 8px 10px;
-                  text-align: left;
-                }
-                .word-editor-content th {
-                  background-color: #f8fafc;
-                  font-weight: bold;
-                  color: #0f172a;
-                }
-                .word-editor-content hr {
-                  border: 0;
-                  border-top: 1px solid #e2e8f0;
-                  margin: 1.5rem 0;
-                }
-                .word-editor-content a {
-                  color: #2563eb;
-                  text-decoration: underline;
-                }
-                .word-page-break {
-                  page-break-after: always;
-                }
-              `}</style>
-
-              {sections.map((sec, idx) => (
-                <div
-                  key={sec.id}
-                  ref={(el) => {
-                    sectionRefs.current[sec.id] = el;
-                  }}
-                  className={`group relative rounded-lg transition-all duration-200 ${
-                    activeSectionId === sec.id
-                      ? "ring-2 ring-indigo-500/40 bg-indigo-50/10 p-2"
-                      : "hover:bg-slate-50/50 p-2"
-                  }`}
-                  onClick={() => setActiveSectionId(sec.id)}
-                >
+                {/* Page Content with 1-inch Printable Margins */}
+                <div className="px-16 py-6 flex-1 flex flex-col justify-start">
                   {/* Section Top Control Header (Auditor Toolbar) */}
-                  <div className="flex items-center justify-between pb-2 mb-3 border-b border-slate-200 select-none">
+                  <div className="flex items-center justify-between pb-2 mb-4 border-b border-slate-200 select-none">
                     <div className="flex items-center gap-2">
                       <span className="px-2 py-0.5 bg-slate-100 border border-slate-300 rounded text-[11px] font-bold text-slate-700">
-                        Section {idx + 1}
+                        Page {idx + 1} • Section {idx + 1}
                       </span>
                       {editingSectionId === sec.id ? (
                         <div className="flex items-center gap-1.5">
@@ -1468,7 +1492,7 @@ export const WordReportEditor: React.FC<WordReportEditorProps> = ({
 
                     {/* Section Move / Delete / Add Below actions */}
                     {!readOnly && (
-                      <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
                         <button
                           onClick={() => handleMoveSection(idx, "up")}
                           disabled={idx === 0}
@@ -1504,39 +1528,43 @@ export const WordReportEditor: React.FC<WordReportEditorProps> = ({
                   </div>
 
                   {/* Section Editable Content */}
-                  <SectionContentItem
-                    id={sec.id}
-                    content={documentData[sec.id] || ""}
-                    onChange={onUpdateSectionContent}
-                    readOnly={readOnly}
-                  />
+                  <div className="flex-1 flex flex-col">
+                    <SectionContentItem
+                      id={sec.id}
+                      content={documentData[sec.id] || ""}
+                      onChange={onUpdateSectionContent}
+                      readOnly={readOnly}
+                    />
+                  </div>
                 </div>
-              ))}
 
-              {/* Bottom Quick Section Creator */}
-              {!readOnly && (
-                <div className="pt-6 border-t-2 border-dashed border-slate-200 text-center select-none">
-                  <button
-                    onClick={() => handleOpenAddSectionModal(sections.length - 1)}
-                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-slate-100 hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 border border-slate-300 hover:border-indigo-300 rounded-lg text-sm font-semibold transition-all shadow-sm"
-                  >
-                    <Plus className="w-4 h-4 text-indigo-500" />
-                    <span>+ Add Section at End of Report</span>
-                  </button>
-                  <p className="text-xs text-slate-400 mt-2">
-                    Auditors have full authority to add unlimited sections, appendices, and customized headings.
-                  </p>
+                {/* Page Footer (Running Footer on Bottom Margin) */}
+                <div className="px-16 py-4 border-t border-slate-200 text-[10.5px] text-slate-500 flex items-center justify-between select-none shrink-0">
+                  <span className="truncate max-w-[560px]">
+                    Business Confidential; Not for Distribution Without Approval from Global Compliance Investigations
+                  </span>
+                  <span className="font-semibold text-slate-700 whitespace-nowrap ml-4">
+                    Page {idx + 1} of {sections.length}
+                  </span>
                 </div>
-              )}
-            </div>
+              </div>
+            ))}
 
-            {/* Document Printed Footer */}
-            <div className="px-12 py-6 border-t border-slate-200 text-[11px] text-slate-400 flex items-center justify-between select-none">
-              <span>
-                Business Confidential; Not for Distribution Without Approval from Global Compliance Investigations
-              </span>
-              <span>Audit Working Paper</span>
-            </div>
+            {/* Bottom Quick Section / Page Creator */}
+            {!readOnly && (
+              <div className="w-[816px] py-4 text-center select-none flex flex-col items-center">
+                <button
+                  onClick={() => handleOpenAddSectionModal(sections.length - 1)}
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-600 border border-slate-300 hover:border-indigo-400 rounded-lg text-sm font-semibold transition-all shadow-md hover:shadow-lg"
+                >
+                  <Plus className="w-4 h-4 text-indigo-500" />
+                  <span>+ Add New Page / Section</span>
+                </button>
+                <p className="text-xs text-slate-500 mt-2 font-medium">
+                  Auditors have full authority to add unlimited sections, appendices, and customized pages.
+                </p>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1546,7 +1574,7 @@ export const WordReportEditor: React.FC<WordReportEditorProps> = ({
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
             <span className="font-semibold text-slate-300">{sections.length}</span>
-            <span>Sections</span>
+            <span>Pages ({sections.length} Sections)</span>
           </div>
           <span>•</span>
           <div className="flex items-center gap-1.5">
