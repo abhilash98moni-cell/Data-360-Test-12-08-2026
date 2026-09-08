@@ -3535,6 +3535,55 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         return src;
       };
 
+      // Helper to identify seeded/mock files or test templates
+      const SEEDED_MOCK_FILE_IDS = new Set([
+        'file-101', 'file-102', 'file-103', 'file-104', 'file-105', 'file-106', 'file-108', 'file-109',
+        'file-201', 'file-202', 'file-203', 'file-204', 'file-205', 'file-206', 'file-207',
+        'file-301', 'file-303', 'file-401', 'file-402', 'file-503', 'file-507',
+        'file-601', 'file-602', 'file-603', 'file-604', 'file-605',
+        'file-uuid-SalesTesti', 'file-uuid-EmployeeDi', 'file-uuid-3rdPartyDi'
+      ]);
+
+      const SEEDED_MOCK_EVIDENCE_IDS = new Set([
+        'EVD-101-ORG', 'EVD-102-AGR', 'EVD-103-BM', 'EVD-104-EMP', 'EVD-105-ABC', 'EVD-106-TEP',
+        'EVD-108-AGR', 'EVD-109-ART', 'EVD-201-COA', 'EVD-202-TB', 'EVD-203-SLS', 'EVD-204-SFD',
+        'EVD-205-BNK', 'EVD-206-DBN', 'EVD-207-GL', 'EVD-301-GOV', 'EVD-303-CUST', 'EVD-401-VND',
+        'EVD-402-EXP', 'EVD-503-CONF', 'EVD-507-FPD', 'EVD-601-ISO', 'EVD-602-DEC', 'EVD-603-COI',
+        'EVD-604-LIT', 'EVD-605-CRM'
+      ]);
+
+      const isMockOrSeededFile = (file: any): boolean => {
+        if (!file) return true;
+        const fId = String(file.id || file.googleDriveFileId || file.google_drive_file_id || file.storageId || '').trim();
+        const evId = String(file.evidenceId || file.evidence_id || '').trim();
+        const name = String(file.fileName || file.file_name || file.name || '').trim();
+        const lowerName = name.toLowerCase();
+
+        if (SEEDED_MOCK_FILE_IDS.has(fId) || SEEDED_MOCK_EVIDENCE_IDS.has(evId)) return true;
+        if (file.isAutoCaptured === true) return true;
+        if (fId.startsWith('file-uuid-')) return true;
+        if (file.driveUrl && String(file.driveUrl).includes('mock')) return true;
+        if (/^file-[1-6]\d{2}$/.test(fId)) return true;
+
+        if (lowerName === 'sales testing template.xlsx' ||
+            lowerName === 'employee disbursement & reimbursement testing.xlsx' ||
+            lowerName === '3rd party disbursements testing template.xlsx') {
+          return true;
+        }
+        return false;
+      };
+
+      const isHistoricalTestRecord = (recordOrFile: any, aId?: string, cName?: string, dName?: string): boolean => {
+        const audit = String(aId || recordOrFile.auditId || recordOrFile.audit_id || '').trim().toLowerCase();
+        const client = String(cName || recordOrFile.clientName || recordOrFile.client_name || '').trim().toLowerCase();
+        const dist = String(dName || recordOrFile.distributorName || recordOrFile.distributor_name || '').trim().toLowerCase();
+        const fName = String(recordOrFile.fileName || recordOrFile.file_name || recordOrFile.name || '').trim().toLowerCase();
+
+        if (audit === 'testaudit' || client === 'testclient' || dist === 'testdist') return true;
+        if (['test.xlsx', 'test_gl.xlsx', 'test_upload.xlsx', 'midwest_gl_test.xlsx'].includes(fName)) return true;
+        return false;
+      };
+
       // 1. Fetch standalone EVIDENCE_FILE records from both Supabase and disk database store
       let evidenceLogs: any[] = [];
       try {
@@ -3559,20 +3608,43 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         console.warn('dbStore fetch error for evidence logs:', err);
       }
 
-      let dbRecords = evidenceLogs.map((row: any) => {
+      let dbRecords: any[] = [];
+      evidenceLogs.forEach((row: any) => {
         let r = row.details || {};
         if (typeof r === 'string') {
           try { r = JSON.parse(r); } catch (e) {}
         }
+        if (!r) return;
+
+        const rowAuditId = r.audit_id || r.auditId;
+        const rowClient = r.client_name || r.client;
+        const rowDistributor = r.distributor_name || r.distributor;
+
+        // Fallback fix: records without a valid engagement/audit identifier must NOT default; exclude them instead.
+        if (!rowAuditId || typeof rowAuditId !== 'string' || !rowAuditId.trim() || rowAuditId === 'undefined' || rowAuditId === 'null') {
+          return;
+        }
+        if (!rowClient || typeof rowClient !== 'string' || !rowClient.trim() || rowClient === 'undefined' || rowClient === 'null') {
+          return;
+        }
+        if (!rowDistributor || typeof rowDistributor !== 'string' || !rowDistributor.trim() || rowDistributor === 'undefined' || rowDistributor === 'null') {
+          return;
+        }
+
+        // Exclude seeded mock files, test templates, and historical test/demo records
+        if (isMockOrSeededFile(r) || isHistoricalTestRecord(r, rowAuditId, rowClient, rowDistributor)) {
+          return;
+        }
+
         const uploader = resolveUploaderRole(r, row, 'Distributor');
         const cleanSource = resolveSanitizedSource(r.source, r);
 
-        return {
+        dbRecords.push({
           id: row.id,
-          clientName: r.client_name || 'Apex Electronics Corp',
-          auditId: r.audit_id || 'eng-101',
+          clientName: rowClient,
+          auditId: rowAuditId,
           auditCode: r.audit_code || 'AUD-2026-001',
-          distributorName: r.distributor_name || 'Midwest Trading Co.',
+          distributorName: rowDistributor,
           requestRef: r.requirement_ref || r.request_item_id || '1.1',
           requestTitle: r.requirement_title || 'Audit Requirement',
           section: r.section || 'General Requirements',
@@ -3595,10 +3667,10 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
           source: cleanSource,
           samplingEnabled: r.samplingEnabled,
           samplingStatus: r.samplingStatus,
-          recordCount: r.recordCount,
+          recordCount: r.recordCount || r.records_count,
           totalValue: r.totalValue,
           glMapping: r.glMapping
-        };
+        });
       });
 
       // 2. Fetch authoritative IRL_STATE and IRL_DISTRIBUTOR_STATE to merge all questionnaire evidence
@@ -3637,6 +3709,21 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       const existingFileIds = new Set(dbRecords.map(r => r.googleDriveFileId).filter(Boolean));
 
       Array.from(latestStates.values()).forEach(state => {
+         const stateAuditId = state.auditId || state.audit_id;
+         const stateClient = state.client || state.clientName;
+         const stateDistributor = state.distributor || state.distributorName;
+
+         // Fallback fix: Must have valid engagement/client/distributor, do NOT default to eng-101
+         if (!stateAuditId || typeof stateAuditId !== 'string' || !stateAuditId.trim() || stateAuditId === 'undefined' || stateAuditId === 'null') {
+           return;
+         }
+         if (!stateClient || typeof stateClient !== 'string' || !stateClient.trim() || stateClient === 'undefined' || stateClient === 'null') {
+           return;
+         }
+         if (!stateDistributor || typeof stateDistributor !== 'string' || !stateDistributor.trim() || stateDistributor === 'undefined' || stateDistributor === 'null') {
+           return;
+         }
+
          const requests = state.requests || [];
          requests.forEach((reqItem: any) => {
             const files = [...(reqItem.uploadedFiles || reqItem.files || [])];
@@ -3658,6 +3745,11 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
                const gId = file.googleDriveFileId || file.storageId || file.id;
                if (!gId || existingFileIds.has(gId)) return; // Deduplicate
 
+               // Exclude seeded mock IRL files, templates, and historical test records
+               if (isMockOrSeededFile(file) || isHistoricalTestRecord(file, stateAuditId, stateClient, stateDistributor)) {
+                 return;
+               }
+
                const fUploader = resolveUploaderRole(file, null, 'Distributor');
                const fCleanSource = resolveSanitizedSource(file.source, {
                  requirement_ref: reqItem.refNumber || reqItem.id,
@@ -3666,10 +3758,10 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
                dbRecords.push({
                  id: file.evidenceId || file.id || gId || `EVD-${Math.random()}`,
-                 clientName: state.client || 'Apex Electronics Corp',
-                 auditId: state.auditId || 'eng-101',
+                 clientName: stateClient,
+                 auditId: stateAuditId,
                  auditCode: state.auditCode || 'AUD-2026-001',
-                 distributorName: state.distributor || 'Midwest Trading Co.',
+                 distributorName: stateDistributor,
                  requestRef: reqItem.refNumber || reqItem.id || '1.1',
                  requestTitle: reqItem.title || 'Audit Requirement',
                  section: reqItem.category || 'General Requirements',
@@ -3726,8 +3818,21 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         }
         if (!details) return;
 
-        const respDistributor = details.distributor_id || details.distributorName || 'Midwest Trading Co.';
-        const respAuditId = details.engagement_id || details.auditId || 'eng-101';
+        const respDistributor = details.distributor_id || details.distributorName || details.distributor;
+        const respAuditId = details.engagement_id || details.auditId || details.audit_id;
+        const respClient = details.clientName || details.client_name || details.client;
+
+        // Fallback fix: Records without valid identifiers must NOT default to eng-101; exclude them instead.
+        if (!respAuditId || typeof respAuditId !== 'string' || !respAuditId.trim() || respAuditId === 'undefined' || respAuditId === 'null') {
+          return;
+        }
+        if (!respClient || typeof respClient !== 'string' || !respClient.trim() || respClient === 'undefined' || respClient === 'null') {
+          return;
+        }
+        if (!respDistributor || typeof respDistributor !== 'string' || !respDistributor.trim() || respDistributor === 'undefined' || respDistributor === 'null') {
+          return;
+        }
+
         const respVoucher = details.voucher_no || details.voucherNo || details.sample_id || 'Sample';
         let unifiedStatus = 'PENDING_REVIEW';
         if (details.status === 'Accepted') unifiedStatus = 'ACCEPTED';
@@ -3750,14 +3855,19 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
           const gId = file.googleDriveFileId || file.storageId || file.id;
           if (!gId || existingFileIds.has(gId)) return;
 
+          // Exclude seeded mock files, templates, and historical test records
+          if (isMockOrSeededFile(file) || isHistoricalTestRecord(file, respAuditId, respClient, respDistributor)) {
+            return;
+          }
+
           const fUploader = resolveUploaderRole(file, row, 'Distributor');
           const fCleanSource = 'Sampling Testing';
 
           dbRecords.push({
             id: file.evidenceId || file.id || gId,
-            clientName: details.clientName || 'Apex Electronics Corp',
+            clientName: respClient,
             auditId: respAuditId,
-            auditCode: 'AUD-2026-001',
+            auditCode: details.auditCode || details.audit_code || 'AUD-2026-001',
             distributorName: respDistributor,
             requestRef: `VOUCHER-${respVoucher}`,
             requestTitle: `Sampling Evidence - Voucher #${respVoucher}`,
@@ -3776,7 +3886,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
             reviewedBy: details.reviewedBy,
             reviewedDate: details.updated_at,
             documentUsage: 'SAMPLING_EVIDENCE',
-            auditPeriod: 'FY 2025-26',
+            auditPeriod: details.auditPeriod || 'FY 2025-26',
             source: fCleanSource,
             samplingEnabled: true,
             samplingStatus: 'ADDED',
@@ -3868,8 +3978,8 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
       const record = {
         id: row.id,
-        clientName: data.client_name || 'Apex Electronics Corp',
-        auditId: data.audit_id || 'eng-101',
+        clientName: data.client_name,
+        auditId: data.audit_id,
         auditCode: data.audit_code || 'AUD-2026-001',
         distributorName: data.distributor_name,
         requestRef: data.requirement_ref || data.request_item_id || '1.1',
