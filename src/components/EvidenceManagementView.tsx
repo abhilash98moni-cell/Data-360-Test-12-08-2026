@@ -49,6 +49,7 @@ interface EvidenceVersionHistoryItem {
   version: number;
   fileName: string;
   fileSizeMB: number;
+  uploader?: string;
   uploadedBy: string;
   uploadedDate: string;
   status: string;
@@ -877,7 +878,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                 <th className="py-3.5 px-4">Evidence Document</th>
                 <th className="py-3.5 px-4">Source</th>
                 <th className="py-3.5 px-4">Distributor Entity</th>
-                <th className="py-3.5 px-4">Uploader & Date</th>
+                <th className="py-3.5 px-4">Uploader</th>
                 <th className="py-3.5 px-4">Version</th>
                 <th className="py-3.5 px-4">Review Status</th>
                 <th className="py-3.5 px-4 text-right">Actions</th>
@@ -941,7 +942,9 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
 
                       <td className="py-3.5 px-4">
                         <span className="px-2.5 py-1 bg-slate-950 text-slate-300 rounded text-[10px] font-bold border border-slate-800 uppercase tracking-wider">
-                          {item.source || (item.uploadedBy?.toLowerCase().includes('auditor') ? 'Auditor Upload' : 'Distributor Upload')}
+                          {item.source && !item.source.toLowerCase().includes('auditor') && !item.source.toLowerCase().includes('distributor')
+                            ? item.source
+                            : 'Direct Upload'}
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-slate-300">
@@ -952,8 +955,16 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                       </td>
 
                       <td className="py-3.5 px-4">
-                        <p className="text-slate-200 font-medium">{item.uploadedBy}</p>
-                        <p className="text-[10px] text-slate-400">{item.uploadedDate}</p>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold tracking-wide ${
+                          (item.uploader === 'Auditor' || (!item.uploader && item.uploadedBy?.toLowerCase().includes('auditor')))
+                            ? 'bg-indigo-500/10 text-indigo-300 border border-indigo-500/30'
+                            : 'bg-emerald-500/10 text-emerald-300 border border-emerald-500/30'
+                        }`}>
+                          {(item.uploader === 'Auditor' || (!item.uploader && item.uploadedBy?.toLowerCase().includes('auditor'))) ? 'Auditor' : 'Distributor'}
+                        </span>
+                        {item.uploadedDate && (
+                          <p className="text-[10px] text-slate-400 mt-1">{item.uploadedDate}</p>
+                        )}
                       </td>
 
                       <td className="py-3.5 px-4">
@@ -1264,7 +1275,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                       <span className="text-slate-700">&bull;</span>
                       <span className="uppercase">{selectedRecord.fileType.split('/')[1] || selectedRecord.fileType}</span>
                       <span className="text-slate-700">&bull;</span>
-                      <span>Uploaded by <strong className="text-slate-200 font-sans font-semibold">{selectedRecord.uploadedBy}</strong></span>
+                      <span>Uploaded by <strong className="text-slate-200 font-sans font-semibold">{selectedRecord.uploader || (selectedRecord.uploadedBy?.toLowerCase().includes('auditor') ? 'Auditor' : 'Distributor')}</strong></span>
                       <span className="text-slate-700">&bull;</span>
                       <span>{selectedRecord.uploadedDate}</span>
                     </div>
@@ -1448,7 +1459,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                             </div>
 
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-2 text-[11px] text-slate-400 mt-2.5 pt-2 border-t border-slate-800/60">
-                              <div>Uploaded by: <span className="text-slate-200 font-medium">{vh.uploadedBy}</span></div>
+                              <div>Uploaded by: <span className="text-slate-200 font-medium">{vh.uploader || (vh.uploadedBy?.toLowerCase().includes('auditor') ? 'Auditor' : 'Distributor')}</span></div>
                               <div>Upload date: <span className="text-slate-200 font-medium">{vh.uploadedDate}</span></div>
                               <div>File size: <span className="text-slate-200 font-medium">{vh.fileSizeMB} MB</span></div>
                             </div>

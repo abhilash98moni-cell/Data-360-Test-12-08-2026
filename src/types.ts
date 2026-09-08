@@ -120,6 +120,8 @@ export interface EvidenceRecord {
   googleDriveFolderId?: string;
   version: number;
   hash?: string;
+  uploader?: 'Auditor' | 'Distributor' | string;
+  uploaderRole?: string;
   uploadedBy: string;
   source?: string;
   uploadedDate: string;
