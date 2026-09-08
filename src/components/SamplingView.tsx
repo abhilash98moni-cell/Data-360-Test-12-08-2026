@@ -137,6 +137,65 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   const [expandedRowIds, setExpandedRowIds] = useState<Set<string>>(new Set());
   const [fullModalRecord, setFullModalRecord] = useState<any | null>(null);
   const [previewDoc, setPreviewDoc] = useState<any | null>(null);
+  const [acceptanceDetailsModalRecord, setAcceptanceDetailsModalRecord] = useState<any | null>(null);
+  const [auditHistoryModalRecord, setAuditHistoryModalRecord] = useState<any | null>(null);
+  const [expandedItemAcceptance, setExpandedItemAcceptance] = useState<Set<string>>(new Set());
+  const [expandedRecordHistory, setExpandedRecordHistory] = useState<Set<string>>(new Set());
+
+  const toggleItemAcceptance = (key: string) => {
+    setExpandedItemAcceptance(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const toggleRecordHistory = (id: string) => {
+    setExpandedRecordHistory(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const getTransactionHistory = (rec: any) => {
+    const qResp = rec?.questionnaireResponse;
+    const rawHistory: any[] = Array.isArray(qResp?.clarificationHistory) ? qResp.clarificationHistory : [];
+    if (rawHistory.length > 0) {
+      return rawHistory;
+    }
+    const fallback: any[] = [];
+    const decisionDate = qResp?.auditorDecisionAt || qResp?.updated_at;
+    const auditorEmail = qResp?.auditorEmail || 'auditor@data360.io';
+    const submitDate = qResp?.created_at || rec?.date;
+    const submitUser = qResp?.pushedBy || 'Distributor';
+
+    if (submitDate) {
+      fallback.push({
+        id: `init_${rec?.id || 'sub'}`,
+        action: 'Submitted',
+        role: 'Distributor',
+        by: submitUser,
+        timestamp: submitDate,
+        message: qResp?.notes || qResp?.distributorRemarks || 'Initial questionnaire response and evidence uploaded.'
+      });
+    }
+
+    if (decisionDate) {
+      fallback.push({
+        id: `acc_${rec?.id || 'acc'}`,
+        action: 'Evidence Accepted',
+        role: 'Auditor',
+        by: auditorEmail,
+        timestamp: decisionDate,
+        message: 'Evidence reviewed, verified, and accepted by auditor.'
+      });
+    }
+
+    return fallback;
+  };
 
   const toggleRowExpand = (id: string) => {
     setExpandedRowIds(prev => {
@@ -894,7 +953,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
     const itemResponses = qResp?.itemResponses || {};
     const generalFiles: any[] = Array.isArray(qResp?.uploadedFiles) ? qResp.uploadedFiles : [];
     const generalRemarks = qResp?.notes || qResp?.distributorRemarks || '';
-    const history: any[] = Array.isArray(qResp?.clarificationHistory) ? qResp.clarificationHistory : [];
+    const history: any[] = getTransactionHistory(rec);
     const auditorEmail = qResp?.auditorEmail || 'auditor@data360.io';
     const decisionDate = qResp?.auditorDecisionAt || qResp?.updated_at;
 
@@ -907,7 +966,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       <div className="bg-slate-900/95 border border-indigo-500/30 rounded-2xl p-6 shadow-2xl space-y-6 text-left">
         {/* Header bar */}
         <div className="flex items-center justify-between flex-wrap gap-4 pb-4 border-b border-slate-800">
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <div className="flex items-center gap-3">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400" />
@@ -920,15 +979,39 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                 {rec.testingReference || rec.voucherNo || rec.id}
               </span>
             </div>
-            <p className="text-xs text-slate-400">
-              Reviewed &amp; accepted by <strong className="text-slate-200">{auditorEmail}</strong>
-              {decisionDate && <span> • {new Date(decisionDate).toLocaleString()}</span>}
+            
+            <div className="flex items-center gap-2 pt-1 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setAcceptanceDetailsModalRecord(rec)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                title="View who accepted the evidence and acceptance date/time"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>View Acceptance Details</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAuditHistoryModalRecord(rec)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/30 hover:bg-amber-900/40 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                title="View transaction audit history trail"
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>View Audit History</span>
+                {history.length > 0 && (
+                  <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded-full text-[10px] font-mono">
+                    {history.length}
+                  </span>
+                )}
+              </button>
+
               {totalDocsCount > 0 && (
-                <span className="ml-2 px-2 py-0.5 bg-slate-800 text-slate-300 rounded text-[10px] font-mono">
+                <span className="px-2 py-1 bg-slate-800/80 text-slate-300 rounded-lg text-[11px] font-mono border border-slate-700/60">
                   {totalDocsCount} document{totalDocsCount === 1 ? '' : 's'} attached
                 </span>
               )}
-            </p>
+            </div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -1078,16 +1161,45 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                       )}
                     </div>
 
-                    {/* Review Decision Info */}
-                    <div className="p-2 bg-emerald-950/30 border border-emerald-900/40 rounded-lg flex items-center justify-between text-[11px] text-slate-400 flex-wrap gap-2">
-                      <div className="flex items-center gap-1.5 text-emerald-400 font-semibold">
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Accepted by {itemAuditor}</span>
-                      </div>
-                      {itemDecisionDate && (
-                        <span className="text-slate-500 font-mono">
-                          {new Date(itemDecisionDate).toLocaleString()}
-                        </span>
+                    {/* Review Decision Info / Acceptance Details */}
+                    <div className="pt-1">
+                      {!expandedItemAcceptance.has(qKey + rec.id) ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleItemAcceptance(qKey + rec.id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                          title="View who accepted the evidence and acceptance date/time"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>View Acceptance Details</span>
+                        </button>
+                      ) : (
+                        <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl space-y-2">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 uppercase">
+                                Evidence Accepted
+                              </span>
+                              <span className="text-xs text-slate-300">
+                                Accepted by: <strong className="text-emerald-300 font-mono">{itemAuditor}</strong>
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              {itemDecisionDate && (
+                                <span className="text-xs text-slate-400 font-mono">
+                                  {new Date(itemDecisionDate).toLocaleString()}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => toggleItemAcceptance(qKey + rec.id)}
+                                className="text-[11px] text-slate-400 hover:text-slate-200 underline cursor-pointer"
+                              >
+                                Hide
+                              </button>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
                   </div>
@@ -1151,35 +1263,90 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
           </div>
         )}
 
-        {/* Clarification & Review History Trail */}
-        {history.length > 0 && (
-          <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4 space-y-3">
-            <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-amber-400" />
-              Clarification &amp; Audit Review History Trail ({history.length})
-            </h4>
-            <div className="divide-y divide-slate-800/60 border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
-              {history.map((h: any, i: number) => (
-                <div key={i} className="p-3 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                  <div className="space-y-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        h.role === 'Auditor' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-emerald-500/20 text-emerald-300'
-                      }`}>
-                        {h.role || 'User'}
-                      </span>
-                      <strong className="text-slate-200">{h.action || 'Updated'}</strong>
-                    </div>
-                    {h.message && <p className="text-slate-400 mt-1 italic">&ldquo;{h.message}&rdquo;</p>}
-                  </div>
-                  <div className="text-[10px] text-slate-500 font-mono shrink-0">
-                    {h.timestamp ? new Date(h.timestamp).toLocaleString() : ''}
-                  </div>
-                </div>
-              ))}
+        {/* Audit Review History Section with View Audit History Button */}
+        <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="space-y-0.5">
+              <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                <Clock className="w-4 h-4 text-amber-400" />
+                Audit Review History Trail
+              </h4>
+              <p className="text-[11px] text-slate-500">
+                Chronological trail of submissions, rejections, clarifications, resubmissions, acceptance, and timestamps for this transaction.
+              </p>
             </div>
+            <button
+              type="button"
+              onClick={() => toggleRecordHistory(rec.id)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-800 hover:bg-slate-750 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm"
+              title="Toggle audit history trail for this specific transaction"
+            >
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span>{expandedRecordHistory.has(rec.id) ? 'Hide Audit History' : 'View Audit History'}</span>
+              {history.length > 0 && (
+                <span className="px-1.5 py-0.5 bg-amber-500/20 text-amber-300 text-[10px] rounded-full font-mono">
+                  {history.length}
+                </span>
+              )}
+            </button>
           </div>
-        )}
+
+          {expandedRecordHistory.has(rec.id) && (
+            <div className="space-y-2 pt-2 border-t border-slate-800/80">
+              {history.length === 0 ? (
+                <div className="p-3 bg-slate-900/50 border border-slate-800 rounded-lg text-xs text-slate-400 text-center">
+                  No prior history trail entries recorded for this transaction.
+                </div>
+              ) : (
+                <div className="divide-y divide-slate-800/60 border border-slate-800 rounded-lg overflow-hidden bg-slate-900/50">
+                  {history.map((h: any, i: number) => {
+                    const action = h.action || 'Updated';
+                    const isAccepted = action.toLowerCase().includes('accept');
+                    const isClarification = action.toLowerCase().includes('clarif');
+                    const isRejected = action.toLowerCase().includes('reject');
+                    const isSubmit = action.toLowerCase().includes('submit');
+
+                    const actionBadgeClass = isAccepted
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                      : isClarification
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                      : isRejected
+                      ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                      : isSubmit
+                      ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                      : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30';
+
+                    return (
+                      <div key={i} className="p-3 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 hover:bg-slate-900/80 transition-colors">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${actionBadgeClass}`}>
+                              {action}
+                            </span>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              h.role === 'Auditor' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-800 text-slate-300'
+                            }`}>
+                              {h.role || 'User'}
+                            </span>
+                            {h.by && (
+                              <span className="text-slate-300 font-mono text-[11px]">
+                                ({h.by})
+                              </span>
+                            )}
+                          </div>
+                          {h.message && <p className="text-slate-400 italic text-[11px]">&ldquo;{h.message}&rdquo;</p>}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono shrink-0">
+                          {h.timestamp ? new Date(h.timestamp).toLocaleString() : ''}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </div>
     );
   };
@@ -1392,16 +1559,16 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                 </td>
                 )}
                 <td className="py-2.5 px-4 bg-slate-900/40 text-center">
-                  <div className="flex flex-col items-center gap-1.5 min-w-[170px]">
+                  <div className="flex flex-col items-center gap-1.5 min-w-[190px]">
                     <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                       Accepted
                     </span>
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1 flex-wrap justify-center">
                       <button
                         type="button"
                         onClick={() => toggleRowExpand(rec.id)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all border ${
+                        className={`px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all border ${
                           expandedRowIds.has(rec.id)
                             ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
                             : 'bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border-slate-700'
@@ -1409,18 +1576,28 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                         title="View full accepted questionnaire details, distributor responses, uploaded evidence, and audit decision"
                       >
                         <FileText className="w-3 h-3 text-indigo-400" />
-                        <span>{expandedRowIds.has(rec.id) ? 'Hide Details' : 'View Details'}</span>
+                        <span>{expandedRowIds.has(rec.id) ? 'Hide' : 'Details'}</span>
                         {expandedRowIds.has(rec.id) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                       </button>
 
                       <button
                         type="button"
-                        onClick={() => setFullModalRecord(rec)}
-                        className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors border border-slate-700"
-                        title="Open complete read-only questionnaire modal"
+                        onClick={() => setAcceptanceDetailsModalRecord(rec)}
+                        className="px-2 py-1 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                        title="View who accepted the evidence and acceptance date/time"
                       >
-                        <ExternalLink className="w-3 h-3 text-indigo-400" />
-                        <span>Modal</span>
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        <span>Acceptance</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setAuditHistoryModalRecord(rec)}
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-amber-300 hover:text-amber-200 border border-amber-500/30 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                        title="View audit history trail for this specific transaction"
+                      >
+                        <Clock className="w-3 h-3 text-amber-400" />
+                        <span>History</span>
                       </button>
                     </div>
                   </div>
@@ -1926,6 +2103,234 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
           isReviewMode={true}
         />
       )}
+
+      {/* Acceptance Details Modal */}
+      {acceptanceDetailsModalRecord && (() => {
+        const qResp = acceptanceDetailsModalRecord.questionnaireResponse;
+        const auditorEmail = qResp?.auditorEmail || 'auditor@data360.io';
+        const decisionDate = qResp?.auditorDecisionAt || qResp?.updated_at;
+        const itemResponses = qResp?.itemResponses || {};
+        const questions = getQuestionsForRecord(acceptanceDetailsModalRecord);
+        const refId = acceptanceDetailsModalRecord.testingReference || acceptanceDetailsModalRecord.voucherNo || acceptanceDetailsModalRecord.id;
+
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-950/60">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
+                    <CheckCircle2 className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      Evidence Acceptance Details
+                    </h3>
+                    <p className="text-xs text-slate-400 font-mono">
+                      Transaction Ref: {refId}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAcceptanceDetailsModalRecord(null)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto space-y-5">
+                <div className="p-4 bg-emerald-950/30 border border-emerald-800/40 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                      Audit Review Decision
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      Evidence Accepted
+                    </span>
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-1">
+                    <div className="space-y-1">
+                      <p className="text-[11px] uppercase font-bold text-slate-400">Accepted By</p>
+                      <p className="text-sm font-semibold text-white font-mono flex items-center gap-1.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                        {auditorEmail}
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <p className="text-[11px] uppercase font-bold text-slate-400">Acceptance Date &amp; Time</p>
+                      <p className="text-sm font-semibold text-white font-mono flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                        {decisionDate ? new Date(decisionDate).toLocaleString() : 'N/A'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {questions.length > 0 && (
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Requirement-Level Acceptance Breakdown
+                    </h4>
+                    <div className="space-y-2.5">
+                      {questions.map((q: any) => {
+                        const qKey = q.question_key || q.id;
+                        const itemResp = itemResponses[qKey];
+                        const itemAuditor = itemResp?.auditorDecisionBy || auditorEmail;
+                        const itemDate = itemResp?.auditorDecisionAt || decisionDate;
+
+                        return (
+                          <div key={qKey} className="p-3 bg-slate-950/60 border border-slate-800 rounded-xl flex items-center justify-between gap-3 text-xs">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-semibold text-slate-200 truncate">{q.question_text}</p>
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                Verified and accepted by: <span className="text-slate-300 font-mono">{itemAuditor}</span>
+                              </p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <span className="inline-block text-[10px] text-slate-400 font-mono">
+                                {itemDate ? new Date(itemDate).toLocaleDateString() : ''}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-4 border-t border-slate-800 bg-slate-950/40 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setAcceptanceDetailsModalRecord(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Transaction Audit History Trail Modal */}
+      {auditHistoryModalRecord && (() => {
+        const history: any[] = getTransactionHistory(auditHistoryModalRecord);
+        const refId = auditHistoryModalRecord.testingReference || auditHistoryModalRecord.voucherNo || auditHistoryModalRecord.id;
+
+        return (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+              <div className="flex items-center justify-between p-5 border-b border-slate-800 bg-slate-950/60">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
+                    <Clock className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white flex items-center gap-2">
+                      Transaction Audit History Trail
+                    </h3>
+                    <p className="text-xs text-slate-400 font-mono">
+                      Transaction Ref: {refId} ({history.length} events)
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setAuditHistoryModalRecord(null)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto">
+                {history.length === 0 ? (
+                  <div className="p-8 text-center bg-slate-950/40 rounded-xl border border-slate-800 text-slate-400 text-xs">
+                    No prior history entries recorded for this transaction.
+                  </div>
+                ) : (
+                  <div className="relative pl-6 space-y-6 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-800">
+                    {history.map((h: any, i: number) => {
+                      const action = h.action || 'Updated';
+                      const isAccepted = action.toLowerCase().includes('accept');
+                      const isClarification = action.toLowerCase().includes('clarif');
+                      const isRejected = action.toLowerCase().includes('reject');
+                      const isSubmit = action.toLowerCase().includes('submit');
+
+                      const badgeClass = isAccepted
+                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                        : isClarification
+                        ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                        : isRejected
+                        ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                        : isSubmit
+                        ? 'bg-blue-500/20 text-blue-300 border-blue-500/30'
+                        : 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30';
+
+                      const dotClass = isAccepted
+                        ? 'bg-emerald-400 ring-emerald-500/30'
+                        : isClarification
+                        ? 'bg-amber-400 ring-amber-500/30'
+                        : isRejected
+                        ? 'bg-rose-400 ring-rose-500/30'
+                        : isSubmit
+                        ? 'bg-blue-400 ring-blue-500/30'
+                        : 'bg-indigo-400 ring-indigo-500/30';
+
+                      return (
+                        <div key={i} className="relative group">
+                          <div className={`absolute -left-6 top-1 w-3 h-3 rounded-full ring-4 ${dotClass}`} />
+                          <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3.5 space-y-1.5 shadow-sm">
+                            <div className="flex items-center justify-between flex-wrap gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${badgeClass}`}>
+                                  {action}
+                                </span>
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                                  h.role === 'Auditor' ? 'bg-indigo-500/20 text-indigo-300' : 'bg-slate-800 text-slate-300'
+                                }`}>
+                                  {h.role || 'User'}
+                                </span>
+                                {h.by && (
+                                  <span className="text-slate-300 font-mono text-[11px]">
+                                    ({h.by})
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[11px] text-slate-400 font-mono">
+                                {h.timestamp ? new Date(h.timestamp).toLocaleString() : ''}
+                              </span>
+                            </div>
+                            {h.message && (
+                              <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/60 p-2 rounded-lg border border-slate-800/80">
+                                &ldquo;{h.message}&rdquo;
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              <div className="p-4 border-t border-slate-800 bg-slate-950/40 flex justify-end">
+                <button
+                  type="button"
+                  onClick={() => setAuditHistoryModalRecord(null)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Supporting Evidence File Preview Modal */}
       {previewDoc && (
