@@ -35,6 +35,12 @@ import { UserSession } from "./AuthModal";
 
 import { ReportMetadata } from "../types";
 import { ReportPreview, generateReportHTML } from "./ReportPreview";
+import {
+  WordReportEditor,
+  DEFAULT_REPORT_SECTIONS,
+  getDefaultSectionContent,
+  ReportSectionItem,
+} from "./WordReportEditor";
 
 import { getDistributorsForClient } from "../data/clientsAndDistributors";
 
@@ -586,17 +592,6 @@ const DocumentEditor = ({
   );
 };
 
-const REPORT_SECTIONS = [
-  { id: "executiveSummary", label: "Executive Summary" },
-  { id: "summaryOfFindings", label: "Summary of Findings" },
-  { id: "detailedFindings", label: "Detailed Findings & Recommendations" },
-  { id: "scopeAndProcedures", label: "Scope & Procedures Performed" },
-  { id: "distributorOverview", label: "Distributor Overview" },
-  { id: "appendixA", label: "Appendix A — Criteria for Significant Findings" },
-  { id: "appendixB", label: "Appendix B — Limitations & Other Information" },
-  { id: "appendixC", label: "Appendix C — Distribution List" },
-];
-
 export const ReportingView: React.FC<ReportingViewProps> = ({
   currentUser,
   selectedClient,
@@ -604,6 +599,7 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
 }) => {
   const [reports, setReports] = useState<ReportMetadata[]>([]);
   const [activeReport, setActiveReport] = useState<ReportMetadata | null>(null);
+  const [activeSections, setActiveSections] = useState<ReportSectionItem[]>(DEFAULT_REPORT_SECTIONS);
   const [isCreating, setIsCreating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isFinalizing, setIsFinalizing] = useState(false);
@@ -635,14 +631,27 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
             'x-user-organization': currentUser?.organization || ''
          }
       });
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error);
+
+      const text = await res.text();
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        console.warn("Non-JSON API response from /api/reports:", text.slice(0, 100));
+        return;
+      }
+
+      if (!data.success) {
+        console.warn("Fetch reports error:", data.error);
+        return;
+      }
 
       if (data.reports) {
         const formattedReports = data.reports.map((row: any) => ({
           id: row.id,
           reportId: row.report_id,
           clientId: row.client_id,
+          distributorId: row.distributor_name || row.distributor_id || selectedDistributor,
           auditId: row.audit_id,
           reportType: row.report_type,
           templateId: row.template_id,
@@ -655,16 +664,28 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
           updatedAt: row.updated_at,
           finalizedAt: row.finalized_at,
           finalizedBy: row.finalized_by,
+          findings: row.findings || [],
+          sections: row.overview?.sections || DEFAULT_REPORT_SECTIONS,
           overview: {
             ...row.overview,
+            sections: row.overview?.sections || DEFAULT_REPORT_SECTIONS,
             documentData: row.report_content || row.overview?.documentData || {}
           }
         })) as ReportMetadata[];
         setReports(formattedReports);
+        setDbError("");
       }
     } catch (err: any) {
       console.error("Failed to fetch reports", err);
-      setDbError("Database error: " + (err.message || String(err)));
+      const msg = err?.message || String(err);
+      if (
+        !msg.includes("Unexpected token") &&
+        !msg.includes("<!DOCTYPE") &&
+        !msg.includes("<html") &&
+        !msg.includes("is not valid JSON")
+      ) {
+        setDbError(msg);
+      }
     }
   };
 
@@ -676,125 +697,28 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
 
   useEffect(() => {
     if (activeReport) {
-      if (activeReport.overview?.documentData) {
-        setDocumentData(activeReport.overview.documentData);
-      } else {
-        // Initialize rich text from structured data on first open
-        setDocumentData({
-          executiveSummary: `<h1>Executive Summary</h1>
-<p>Global Compliance Investigations (“GCI”), in conjunction with regional management, identified XX (“XX” or “the Distributor”) for a desktop assessment in FY25. EY conducted this assessment at the direction of GCI. The scope and nature of the procedures were developed by GCI and completed at the direction of GCI utilizing EY resources. Assessment procedures were performed from May XX, 20XX to March XX, 20XX and included testing of judgmentally selected transactions and interviews with the Distributor and XX personnel.</p>`,
+      const reportSections =
+        activeReport.overview?.sections ||
+        (activeReport as any).sections ||
+        DEFAULT_REPORT_SECTIONS;
+      setActiveSections(reportSections);
 
-          summaryOfFindings: `<h1>Summary of Findings</h1>
-<h3>Significant Findings<sup>1</sup></h3>
-<ol><li>Lack of contracts, due diligence and prior XX approvals for sub-distributor onboarding.</li></ol>
-<h3>Other Findings</h3>
-<ol start="2"><li>Lack of adequate supporting documentation for third-party disbursements, Employee Reimbursement and Sales & Other Income are classified as below:</li></ol>
-<ul>
-<li>Third-party disbursement – USD XX</li>
-<li>Employee disbursement and reimbursement – USD XX</li>
-<li>Sales and other income - USD XX</li>
-</ul>
-<ol start="3"><li>Lack of written policies regarding employee expense reimbursement, and payment management.</li></ol>`,
+      const existingData =
+        activeReport.overview?.documentData ||
+        (activeReport as any).report_content ||
+        {};
 
-          detailedFindings: `<h1>Detailed Findings and Recommendations</h1>
-<ol>
-<li>
-<p><strong>Finding: <u>Lack of contracts, due diligence and prior XX approvals for sub-distributor onboarding.</u></strong></p>
-<p>As per the distributor’s agreement, the contract requires that any sub-distributor be pre-approved by XX, subject to documented due diligence, enter into written contract with the Distributor, and agree in writing to comply with all the terms of the XX offer, with audit and inspection rights. XX did not provide evidence demonstrating that due diligence was conducted at the time of onboarding the sub-distributor and documents evidencing prior approvals from XX were obtained for the onboarding of the sub-distributor. However, the approval process followed, including XX involvement and oversight, has not been formally documented.</p>
-<p>Based on discussions with Distributor personnel, there are no contracts with the distributors.</p>
-<p><em>Applicable Contract Section reference:</em> Section 3.2</p>
-<p>Recommended Actions:</p>
-<p><u>XX</u> – Recommunicate</p>
-<p>Owner(s) and Due Date: TBD.</p>
-<p><u>Distributor</u> – The distributor should</p>
-<p>Owner(s) and Due Date: TBD.</p>
-<hr />
-</li>
-</ol>
-<ol start="4">
-<li>
-<p><strong>Finding: <u>Lack of adequate supporting documentation for third-party disbursements, Employee Disbursement & Reimbursement and Sales & Other Income totaling USD XX (USD 5,36,625).</u></strong></p>
-<p>Seventeen of the thirty transactions assessed, totaling USD XX,classified as third-party disbursements USD XX, Employee Disbursement & Reimbursement USD XX and Sales & Other Income USD XX lacking adequate supporting documentation. The details of each of the seventeen transactions are included in the table below:</p>
-<table style="width:100%; border-collapse: collapse; margin-top: 10px; margin-bottom: 10px;">
-<thead><tr><th style="border: 1px solid #cbd5e1; padding: 8px; background-color: #f1f5f9;">Third Party Name</th><th style="border: 1px solid #cbd5e1; padding: 8px; background-color: #f1f5f9;">Transaction description</th><th style="border: 1px solid #cbd5e1; padding: 8px; background-color: #f1f5f9;">Amount</th><th style="border: 1px solid #cbd5e1; padding: 8px; background-color: #f1f5f9;">Supporting Documentation Not Provided</th></tr></thead>
-<tbody><tr><td style="border: 1px solid #cbd5e1; padding: 8px;">ABCD</td><td style="border: 1px solid #cbd5e1; padding: 8px;">Office maintenance expenses</td><td style="border: 1px solid #cbd5e1; padding: 8px;">USD XX</td><td style="border: 1px solid #cbd5e1; padding: 8px;"><ol><li>Contract / Agreement</li><li>Period of work performed</li><li>Approvals</li></ol></td></tr></tbody>
-</table>
-<p>Based on discussions with Distributor personnel:</p>
-<ul><li>Contract / Agreement were not provided because there is no formal framework agreement in place with the supplier.</li></ul>
-<p><em>Applicable Contract Section reference:</em> Section: 13.8</p>
-<p>Recommended Actions:</p>
-<p><u>XX</u> – Communicate key accounting and record-keeping requirements to the distributor.</p>
-<ul><li>Owner(s) and Due Date: TBD.</li></ul>
-<p><u>Distributor</u> – Adequate supporting documentation and business rationale must be maintained for all transactions involving HCP interaction. Supporting documentation must be maintained for all XX-related transactions (e.g., purchase order; contract; documented approval; invoice; proof of payment; and proof of service).</p>
-<ul><li>Owner(s) and Due Date: TBD.</li></ul>
-<hr />
-</li>
-<li>
-<p><strong>Finding: <u>Lack of written policies regarding approvals, expenses allowed travel & expenses and payment management</u></strong></p>
-<p>Based on discussions with Distributor personnel, XX does not have written policies or procedures regarding approvals, travel & expense and payment management.</p>
-<ul><li>As it relates to payment management, the Distributor</li></ul>
-<p><em>Applicable Contract Section reference:</em> N/A</p>
-<p>Recommended Actions:</p>
-<p><u>XX</u> – Consider providing the distributor with guidance on developing policies and procedures for employee reimbursements.</p>
-<ul><li>Owner(s) and Due Date: TBD.</li></ul>
-<p><u>Distributor</u> – Consider developing detailed policies and procedures for employee reimbursements containing designation wise threshold and the approval matrix.</p>
-<ul><li>Owner(s) and Due Date: TBD</li></ul>
-<hr />
-</li>
-</ol>`,
-
-          scopeAndProcedures: `<h1>Scope & Procedures Performed</h1>
-<p>The planned scope of the assessment procedures covered July 1, 2024, through June 30, 2025 (“Assessment Period”), unless otherwise noted. The scope of the assessment focused on potential improper payments to HCPs either directly or through third parties. As a result, it excluded quality and other requirements of the distributor agreement that are not directly related to payments to health care providers.</p>
-<p>The findings in this report are based on assertions made by individuals and/or contained in documents provided by the distributor and/or internal XX systems; these documents and assertions have not been tested for veracity and accuracy. The procedures that were performed were advisory in nature and do not constitute an audit nor other attest services as defined by the Association of International Certified Professional Accountants (“AICPA”). Further, they do not constitute an audit of the Distributor’s historical financial statements in accordance with generally accepted auditing standards, nor do they constitute an examination of prospective financial statements or an examination or review of a compliance program in accordance with standards established by the AICPA.</p>
-<p>This report and any related workplans and documents are intended solely for the information and use of XX and are not intended to be, and should not be, used by other parties.</p>`,
-
-          distributorOverview: `<h1>Distributor Overview</h1>
-<table style="width:100%; border-collapse: collapse;">
-  <tbody>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Distributor Name</th><td style="padding: 8px; border: 1px solid #cbd5e1;">XX</td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Location</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Number of Employees</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Current XX Contract(s)</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Key XX Contact(s)</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">XX Products Sold to the Distributor</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Sales by XX to the Distributor</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Services Performed for XX</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Sales Territories</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Percent of Business Related to XX</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Gross Margin</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Inventory (as of January 2022 per Channel Connect)</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:40%; text-align: left; padding: 8px; border: 1px solid #cbd5e1;">Accounts Receivable (as of January 2022 per SAP)</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-  </tbody>
-</table>
-<p><br></p>`,
-
-          appendixA: `<h1>Appendix A: Criteria for Significant Findings</h1>
-<p>Significant findings are defined as one or more of the following:</p>
-<ol>
-<li>Significant violation of law, regulation, or Company policy in any geography, particularly in relation to any government healthcare program;</li>
-<li>Lack of cooperation, transparency and/or honesty;</li>
-<li>Fraudulent conduct, such as falsification of records;</li>
-<li>Significant violation of compliance terms in distributor contract;</li>
-<li>Any matter that could cause serious risk or reputational damage to XX or its stakeholders;</li>
-<li>Findings that in the judgment of the General Counsel (or designee) or Chief Ethics & Compliance Officer (CECO) constitute serious misconduct;</li>
-</ol>`,
-
-          appendixB: `<h1>Appendix B: Limitations and Other Information</h1>
-<h3>Limitations</h3>
-<ol><li>The Distributor does not maintain separate accounting records for its business with XX. All expenses and disbursements at the time of booking are tagged to specific XX employees. Therefore, since there are no formal segregated books and records, as an alternative, the Distributor provided the expenses that were associated with employees that cater to XX's XX business. This process of segregation could not be verified/confirmed.</li></ol>
-<h3>Other Information</h3>
-<ol><li>Exchange rate used in this report: </li></ol>`,
-
-          appendixC: `<h1>Appendix C: Distribution List</h1>
-<table style="width:100%; border-collapse: collapse;">
-  <tbody>
-    <tr><th style="width:50%; text-align: left; padding: 8px; border: 1px solid #cbd5e1; background-color: #f1f5f9;">Regional/OU Management</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-    <tr><th style="width:50%; text-align: left; padding: 8px; border: 1px solid #cbd5e1; background-color: #f1f5f9;">Local Management</th><td style="padding: 8px; border: 1px solid #cbd5e1;"></td></tr>
-  </tbody>
-</table>
-<p><br></p>`,
-        });
-      }
+      const initialData: Record<string, string> = { ...existingData };
+      reportSections.forEach((sec) => {
+        if (!initialData[sec.id]) {
+          initialData[sec.id] = getDefaultSectionContent(
+            sec.id,
+            activeReport.distributorId || selectedDistributor,
+            activeReport.overview
+          );
+        }
+      });
+      setDocumentData(initialData);
     }
   }, [activeReport, selectedDistributor]);
 
@@ -822,13 +746,41 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
       console.warn("Could not fetch real distributor ID", e);
     }
 
-    const actualDistributorId = realDistributorId || selectedDistributor;
+    const actualDistributorId = realDistributorId || selectedDistributor || "dist-general";
+    const actualDistributorName = selectedDistributor || "General Distributor";
+    const actualClientId = selectedClient || "Apex Client";
 
     const newId = crypto.randomUUID();
+    const initialOverview = {
+      name: actualDistributorName,
+      location: "",
+      employees: "",
+      contracts: "",
+      contacts: "",
+      products: "",
+      sales: "",
+      services: "",
+      territories: "",
+      percentBusiness: "",
+      grossMargin: "",
+      inventory: "",
+      accountsReceivable: "",
+      sections: DEFAULT_REPORT_SECTIONS,
+    };
+
+    const initialDocData: Record<string, string> = {};
+    DEFAULT_REPORT_SECTIONS.forEach((sec) => {
+      initialDocData[sec.id] = getDefaultSectionContent(
+        sec.id,
+        selectedDistributor,
+        initialOverview
+      );
+    });
+
     const newReport: ReportMetadata = {
       id: newId,
-      clientId: selectedClient,
-      distributorId: selectedDistributor,
+      clientId: actualClientId,
+      distributorId: actualDistributorName,
       auditId: newReportAuditId,
       reportType: "Distributor Audit Report",
       templateId: newReportTemplate,
@@ -838,46 +790,34 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
       createdBy: currentUser.email,
       createdAt: new Date().toISOString(),
       findings: [],
+      sections: DEFAULT_REPORT_SECTIONS,
       overview: {
-        name: selectedDistributor,
-        location: "",
-        employees: "",
-        contracts: "",
-        contacts: "",
-        products: "",
-        sales: "",
-        services: "",
-        territories: "",
-        percentBusiness: "",
-        grossMargin: "",
-        inventory: "",
-        accountsReceivable: "",
+        ...initialOverview,
+        documentData: initialDocData,
       },
     };
 
     try {
       const payload = {
-
-          id: newId,
-          report_id: `rep-${Date.now()}`,
-          client_id: newReport.clientId,
-          client_name: newReport.clientId,
-          distributor_id: actualDistributorId,
-          distributor_name: selectedDistributor,
-          audit_id: newReport.auditId,
-          report_type: newReport.reportType,
-          template_id: newReport.templateId,
-          template_version: newReport.templateVersion,
-          report_version: newReport.reportVersion,
-          status: newReport.status,
-          created_by: currentUser.id,
-          created_by_email: currentUser.email,
-          created_by_name: currentUser.full_name,
-          created_at: newReport.createdAt,
-          findings: newReport.findings,
-          overview: newReport.overview,
-          report_content: {}
-        
+        id: newId,
+        report_id: `rep-${Date.now()}`,
+        client_id: actualClientId,
+        client_name: actualClientId,
+        distributor_id: actualDistributorId,
+        distributor_name: actualDistributorName,
+        audit_id: newReport.auditId || `AUD-${Date.now().toString().slice(-4)}`,
+        report_type: newReport.reportType,
+        template_id: newReport.templateId || "general-template",
+        template_version: newReport.templateVersion,
+        report_version: newReport.reportVersion,
+        status: newReport.status,
+        created_by: currentUser.id || currentUser.email,
+        created_by_email: currentUser.email,
+        created_by_name: currentUser.full_name || "Auditor",
+        created_at: newReport.createdAt,
+        findings: newReport.findings || [],
+        overview: newReport.overview,
+        report_content: initialDocData
       };
       const res = await fetch('/api/reports', {
          method: 'POST',
@@ -890,6 +830,8 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
 
+      setActiveSections(DEFAULT_REPORT_SECTIONS);
+      setDocumentData(initialDocData);
       setReports([newReport, ...reports]);
       setIsCreating(false);
       setActiveReport(newReport);
@@ -912,6 +854,7 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
 
     const updatedOverview = {
       ...activeReport.overview,
+      sections: activeSections,
       documentData: documentData,
       ...(asFinal && { finalizedAt: new Date().toISOString() }),
     };
@@ -946,8 +889,9 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
       setSuccessMessage(asFinal ? "Report finalized!" : "Draft saved successfully.");
       setTimeout(() => setSuccessMessage(""), 3000);
 
-      const updatedReport = {
+      const updatedReport: ReportMetadata = {
         ...activeReport,
+        sections: activeSections,
         overview: updatedOverview,
         status,
         reportVersion: version,
@@ -1017,6 +961,7 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
     if (!report) return;
 
     const docData = report.overview?.documentData || documentData;
+    const currentSections = report.overview?.sections || activeSections || DEFAULT_REPORT_SECTIONS;
     
     const printWindow = window.open("", "_blank");
     if (!printWindow) {
@@ -1024,7 +969,7 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
       return;
     }
 
-    const htmlContent = generateReportHTML(report, docData, REPORT_SECTIONS, true);
+    const htmlContent = generateReportHTML(report, docData, currentSections, true);
 
     printWindow.document.open();
     printWindow.document.write(htmlContent);
@@ -1045,23 +990,25 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
       return (
         <div className="fixed inset-0 z-50 w-full h-full flex flex-col bg-slate-950 text-slate-200 overflow-hidden">
           {/* Header */}
-          <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900 shrink-0">
-            <button
-              onClick={() => {
-                setActiveReport(null);
-                setIsPreview(false);
-              }}
-              className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors"
-            >
-              <ArrowLeft className="h-5 w-5" /> Back to Reports
-            </button>
-            <h1 className="text-lg font-bold text-white">Report Preview</h1>
+          <div className="flex items-center justify-between px-6 py-3.5 border-b border-slate-800 bg-slate-900 shrink-0">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => setIsPreview(false)}
+                className="flex items-center gap-2 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-lg text-xs font-medium border border-slate-700 transition-colors"
+              >
+                <ArrowLeft className="h-4 w-4" /> Back to Word Editor
+              </button>
+              <div className="h-4 w-px bg-slate-800"></div>
+              <h1 className="text-sm font-bold text-white">
+                {activeReport.distributorId} — Report Preview
+              </h1>
+            </div>
             <div className="flex items-center gap-3">
               <button
                 onClick={() => handleDownload("pdf", activeReport)}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 font-medium"
+                className="bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg flex items-center gap-2 text-xs font-medium transition-colors shadow-sm"
               >
-                <Download className="h-4 w-4" /> Download
+                <Download className="h-4 w-4" /> Download / Print PDF
               </button>
             </div>
           </div>
@@ -1071,7 +1018,7 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
             <ReportPreview 
               documentData={documentData} 
               activeReport={activeReport} 
-              sections={REPORT_SECTIONS} 
+              sections={activeSections} 
             />
           </div>
         </div>
@@ -1080,132 +1027,51 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
 
     return (
       <div className={`h-screen flex flex-col bg-slate-950 text-slate-200 overflow-hidden ${isFullScreen ? "fixed inset-0 z-50 w-full h-full" : ""}`}>
-        {/* Header */}
-        <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-900 shrink-0">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => setActiveReport(null)}
-              className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </button>
-            <div>
-              <h1 className="text-lg font-bold text-white">
-                Reporting Workspace
-              </h1>
-              <div className="flex items-center gap-3 text-xs text-slate-400 mt-1">
-                <span>{activeReport.distributorId}</span>
-                <span>•</span>
-                <span>
-                  Status:{" "}
-                  <strong
-                    className={isLocked ? "textmerald-400" : "text-amber-400"}
-                  >
-                    {activeReport.status === "FINAL" ? "Final" : "Draft"}
-                  </strong>
-                </span>
-                {isSaving && (
-                  <span className="text-slate-500 ml-2">Saving...</span>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            {successMessage && (
-              <div className="textmerald-400 text-sm mr-2">
-                {successMessage}
-              </div>
-            )}
-
-            {!isLocked && (
-              <div className="flex items-center gap-3 mr-2">
-                <button
-                  onClick={() => saveReport(false)}
-                  disabled={isSaving}
-                  className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white text-sm font-medium rounded-lg transition-colors border border-slate-700"
-                >
-                  <Save className="h-4 w-4" />{" "}
-                  {isSaving ? "Saving..." : "Save Draft"}
-                </button>
-                <button
-                  onClick={() => setShowFinalizeModal(true)}
-                  disabled={isFinalizing}
-                  className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  <CheckCircle className="h-4 w-4" /> Finalize Report
-                </button>
-              </div>
-            )}
-
-            <div className="flex items-center bg-slate-900 border border-slate-700 rounded-lg overflow-hidden shadow-sm">
-              <button
-                onClick={() => setIsFullScreen(!isFullScreen)}
-                title={isFullScreen ? "Exit Full Screen" : "Full Screen"}
-                className="p-2.5 text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-              >
-                {isFullScreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
-              </button>
-              <div className="w-px h-5 bg-slate-700"></div>
-              <button
-                onClick={() => setIsPreview(!isPreview)}
-                title={
-                  isPreview && !isLocked ? "Edit Report" : "Preview Report"
-                }
-                className={`p-2.5 transition-colors ${isPreview && !isLocked ? "bg-indigo-600 text-white" : "text-slate-300 hover:text-white hover:bg-slate-800"}`}
-              >
-                <Eye className="h-4 w-4" />
-              </button>
-              <div className="w-px h-5 bg-slate-700"></div>
-              <button
-                onClick={() => handleDownload("pdf")}
-                title="Download Report"
-                className="p-2.5 text-slate-300 hover:text-white hover:bg-slate-800 transition-colors"
-              >
-                <Download className="h-4 w-4" />
-              </button>
-              {currentUser?.role !== "Distributor" && !currentUser?.role?.includes("Distributor") && (
-                <>
-                  <div className="w-px h-5 bg-slate-700"></div>
-                  <button
-                    onClick={() => setDeleteTargetId(activeReport.id)}
-                    title="Delete Report"
-                    className="p-2.5 text-rose-400 hover:text-white hover:bg-rose-500 transition-colors"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Workspace Body */}
-        <div className="flex flex-1 overflow-hidden">
-          {/* Main Document Area */}
-          <div className="flex-1 flex flex-col overflow-hidden">
-            <DocumentEditor
-              documentData={documentData}
-              sections={REPORT_SECTIONS}
-              onChangeSection={handleUpdateSection}
-              readOnly={isLocked}
-            />
-          </div>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <WordReportEditor
+            report={activeReport}
+            sections={activeSections}
+            documentData={documentData}
+            onUpdateSections={(newSecs) => {
+              setActiveSections(newSecs);
+              if (activeReport) {
+                setActiveReport((prev) => prev ? {
+                  ...prev,
+                  sections: newSecs,
+                  overview: {
+                    ...prev.overview,
+                    sections: newSecs
+                  }
+                } : null);
+              }
+            }}
+            onUpdateSectionContent={handleUpdateSection}
+            onSaveDraft={() => saveReport(false)}
+            onFinalize={() => setShowFinalizeModal(true)}
+            isSaving={isSaving}
+            isFinalizing={isFinalizing}
+            readOnly={isLocked}
+            onBack={() => setActiveReport(null)}
+            onDownload={handleDownload}
+            onTogglePreview={() => setIsPreview(true)}
+            isPreview={isPreview}
+          />
         </div>
 
         {/* Modals */}
         {showFinalizeModal && (
-          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
             <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 shadow-2xl">
               <h3 className="text-xl font-bold text-white mb-2">
                 Finalize Report
               </h3>
-              <p className="text-slate-300 mb-6">
-                Are you sure you want to finalize this report?
+              <p className="text-slate-300 mb-6 text-sm">
+                Are you sure you want to finalize this audit report? Once finalized, the document will be sealed as Version 1.0 and published for distributor review.
               </p>
               <div className="flex gap-3 justify-end">
                 <button
                   onClick={() => setShowFinalizeModal(false)}
-                  className="px-5 py-2.5 rounded-lg font-medium text-slate-300 hover:bg-slate-800 transition-colors"
+                  className="px-5 py-2.5 rounded-lg font-medium text-slate-300 hover:bg-slate-800 transition-colors text-sm"
                   disabled={isFinalizing}
                 >
                   Cancel
@@ -1213,8 +1079,9 @@ export const ReportingView: React.FC<ReportingViewProps> = ({
                 <button
                   onClick={handleFinalizeConfirm}
                   disabled={isFinalizing}
-                  className="px-5 py-2.5 rounded-lg font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition-colors"
+                  className="px-5 py-2.5 rounded-lg font-medium bg-emerald-600 hover:bg-emerald-500 text-white transition-colors text-sm flex items-center gap-2"
                 >
+                  <CheckCircle className="h-4 w-4" />
                   {isFinalizing ? "Finalizing..." : "Finalize Report"}
                 </button>
               </div>

@@ -118,6 +118,15 @@ export const generateReportHTML = (
         ul, ol { padding-left: 1.5rem; margin-bottom: 1rem; }
         hr { display: none; }
         img { max-width: 100%; height: auto; }
+        .word-page-break {
+          page-break-after: always;
+          break-after: page;
+          height: 0;
+          margin: 0;
+          padding: 0;
+          border: none !important;
+          visibility: hidden;
+        }
 
         /* Detailed findings bordered boxes */
         .section-detailedFindings > ol {

@@ -458,6 +458,7 @@ export interface DistributorOverview {
   inventory: string;
   accountsReceivable: string;
   documentData?: Record<string, string>;
+  sections?: { id: string; label: string }[];
 }
 
 export interface ReportMetadata {
@@ -480,4 +481,5 @@ export interface ReportMetadata {
   findings: ReportFinding[];
   overview: DistributorOverview;
   documentData?: Record<string, string>;
+  sections?: { id: string; label: string }[];
 }
