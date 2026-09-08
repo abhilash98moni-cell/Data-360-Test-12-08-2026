@@ -5686,7 +5686,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   app.post('/api/reports', authenticateRequest, async (req: any, res: any) => {
     try {
       const supabase = getSupabaseServerClient();
-      const report = req.body;
+      const report = { ...req.body };
       if (!report || !report.report_id) {
         return res.status(400).json({ success: false, error: 'Invalid report data provided' });
       }
@@ -5696,6 +5696,13 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       if (!report.client_id) {
         report.client_id = report.client_name || 'client-general';
       }
+      if (report.id && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(report.id)) {
+        delete report.id;
+      }
+      report.findings = report.findings || [];
+      report.overview = report.overview || {};
+      report.report_content = report.report_content || {};
+
       const { data, error } = await supabase.from('audit_reports').insert([report]).select();
       if (error) {
         console.error('Supabase create report error:', error);

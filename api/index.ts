@@ -47,7 +47,8 @@ function getGeminiClient(): GoogleGenAI | null {
 }
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 
 // Health check endpoint
@@ -3592,6 +3593,169 @@ app.post('/api/copilot/chat', async (req, res) => {
   return res.json({
     success: true,
     text: aiReply
+  });
+});
+
+// ====================================================================
+// Reports API (CRUD) - Production Serverless & Supabase Persisted
+// ====================================================================
+app.get('/api/reports', async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    let query = supabase.from('audit_reports').select('*').order('created_at', { ascending: false });
+    
+    const session = authenticateRequestSession(req);
+    const role = (req.headers['x-user-role'] as string) || session.role || '';
+    const org = (req.headers['x-user-organization'] as string) || session.org || '';
+    
+    if (role === 'Distributor' || role.includes('Distributor')) {
+      query = query.eq('status', 'FINAL').eq('distributor_name', org || req.query.distributor);
+    } else if (req.query.distributor && req.query.distributor !== 'All Distributors' && req.query.distributor !== 'all') {
+      query = query.or(`distributor_name.eq."${req.query.distributor}",distributor_id.eq."${req.query.distributor}"`);
+    }
+    
+    const { data, error } = await query;
+    if (error) {
+      console.error('Supabase fetch reports error:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+    res.json({ success: true, reports: data || [] });
+  } catch (err: any) {
+    console.error('API /api/reports GET error:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to fetch reports' });
+  }
+});
+
+app.post('/api/reports', async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    const report = { ...req.body };
+    if (!report || !report.report_id) {
+      return res.status(400).json({ success: false, error: 'Invalid report data provided' });
+    }
+    if (!report.distributor_id) {
+      report.distributor_id = report.distributor_name || 'dist-general';
+    }
+    if (!report.client_id) {
+      report.client_id = report.client_name || 'client-general';
+    }
+    // Ensure valid UUID for id column if present, or let postgres generate it
+    if (report.id && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(report.id)) {
+      delete report.id;
+    }
+    report.findings = report.findings || [];
+    report.overview = report.overview || {};
+    report.report_content = report.report_content || {};
+
+    const { data, error } = await supabase.from('audit_reports').insert([report]).select();
+    if (error) {
+      console.error('Supabase create report error:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+    res.json({ success: true, report: data?.[0] });
+  } catch (err: any) {
+    console.error('API /api/reports POST error:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to create report' });
+  }
+});
+
+app.put('/api/reports/:id', async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    const updates = { ...req.body };
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'Report ID is required' });
+    }
+    updates.updated_at = new Date().toISOString();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    let updateQuery = supabase.from('audit_reports').update(updates);
+    if (isUuid) {
+      updateQuery = updateQuery.eq('id', id);
+    } else {
+      updateQuery = updateQuery.eq('report_id', id);
+    }
+    const { data, error } = await updateQuery.select();
+    if (error) {
+      console.error('Supabase update report error:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+    res.json({ success: true, report: data?.[0] });
+  } catch (err: any) {
+    console.error('API /api/reports PUT error:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to update report' });
+  }
+});
+
+app.delete('/api/reports/:id', async (req: any, res: any) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    const { id } = req.params;
+    if (!id) {
+      return res.status(400).json({ success: false, error: 'Report ID is required' });
+    }
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    let deleteQuery = supabase.from('audit_reports').delete();
+    if (isUuid) {
+      deleteQuery = deleteQuery.eq('id', id);
+    } else {
+      deleteQuery = deleteQuery.eq('report_id', id);
+    }
+    const { error } = await deleteQuery;
+    if (error) {
+      console.error('Supabase delete report error:', error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('API /api/reports DELETE error:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete report' });
+  }
+});
+
+// Finalize report endpoint
+app.post('/api/reporting/finalize', async (req: any, res: any) => {
+  try {
+    const { report, userEmail, userName } = req.body;
+    if (!report || !report.id) {
+      return res.status(400).json({ success: false, error: 'Missing report data' });
+    }
+    
+    const supabase = getSupabaseServerClient();
+    const session = authenticateRequestSession(req);
+    const { error } = await supabase.from('audit_reports').update({
+      status: 'FINAL',
+      report_version: '1.0',
+      finalized_by: userEmail || session.email || 'Auditor',
+      finalized_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    }).eq('id', report.id);
+
+    if (error) {
+      return res.status(500).json({ success: false, error: error.message });
+    }
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Finalize error:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to finalize report' });
+  }
+});
+
+// Catch-all API 404 handler to prevent returning HTML
+app.all('/api/*', (req: any, res: any) => {
+  res.status(404).json({
+    success: false,
+    error: `API route not found: ${req.method} ${req.originalUrl || req.url}`
+  });
+});
+
+// API Error handler to ensure JSON error responses instead of HTML
+app.use((err: any, req: any, res: any, next: any) => {
+  console.error('API Serverless Error:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: err?.message || 'Internal Server Error'
   });
 });
 
