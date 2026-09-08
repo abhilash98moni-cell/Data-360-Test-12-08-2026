@@ -612,7 +612,7 @@ app.post('/api/gdrive/test-connection', async (req, res) => {
 });
 
 // Upload file to Google Drive (Data360_Test folder hierarchy)
-app.post('/api/storage/upload', upload.single('file'), async (req, res) => {
+app.post('/api/storage/upload', upload.single('file'), async (req: any, res: any) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -621,13 +621,38 @@ app.post('/api/storage/upload', upload.single('file'), async (req, res) => {
     const {
       clientName = 'XYZ',
       auditName = 'XYZ Distributor Audit 2026',
-      distributorName = 'Test Distributor A',
+      distributorName: clientDistributorName = 'Test Distributor A',
       requirementId = 'IRL-2.3',
-      uploadedBy = 'User',
-      isReferenceMaterial = 'false'
+      uploadedBy = req.headers['x-user-name'] || 'User',
+      isReferenceMaterial = 'false',
+      documentType = 'EVIDENCE',
+      documentUsage = 'EVIDENCE',
+      auditPeriod = 'FY 2025-26',
+      uploaderRole = ''
     } = req.body;
 
+    const rawRoleCheck = String(uploaderRole || req.body.role || req.headers['x-user-role'] || '').toLowerCase();
+    const rawUserCheck = String(uploadedBy || req.headers['x-user-name'] || req.headers['x-user-email'] || '').toLowerCase();
+    const isDistributorRole = rawRoleCheck.includes('distributor') || rawUserCheck.includes('distributor');
+    const resolvedUploaderRole: 'Auditor' | 'Distributor' = isDistributorRole ? 'Distributor' : 'Auditor';
+    const targetDistributor = isDistributorRole ? (req.headers['x-user-organization'] || clientDistributorName) : (clientDistributorName || req.headers['x-user-organization']);
+
     const isRef = isReferenceMaterial === 'true' || isReferenceMaterial === true;
+
+    let parsedUsage = ['EVIDENCE'];
+    try {
+      if (Array.isArray(documentUsage)) {
+        parsedUsage = documentUsage;
+      } else if (typeof documentUsage === 'string') {
+        if (documentUsage.startsWith('[')) {
+          parsedUsage = JSON.parse(documentUsage);
+        } else {
+          parsedUsage = documentUsage.split(',').map(s => s.trim()).filter(Boolean);
+        }
+      }
+    } catch (e) {
+      parsedUsage = [documentUsage];
+    }
 
     const metadata = await storageService.uploadFile(
       req.file.buffer,
@@ -636,26 +661,101 @@ app.post('/api/storage/upload', upload.single('file'), async (req, res) => {
       {
         clientName,
         auditName,
-        distributorName,
+        distributorName: targetDistributor,
         requirementId,
         uploadedBy,
         isReferenceMaterial: isRef
       }
     );
 
+    let versionNum = 1;
+    const supabase = getSupabaseServerClient();
+    const targetAuditId = auditName || req.body.auditId || 'eng-101';
+
+    try {
+      const { data: existingRecords } = await supabase
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'EVIDENCE_FILE')
+        .order('created_at', { ascending: false });
+
+      const filtered = (existingRecords || []).filter(r => 
+        r.details?.distributor_name === targetDistributor && 
+        r.details?.requirement_ref === requirementId
+      );
+      if (filtered.length > 0) {
+        const maxVer = Math.max(...filtered.map(r => Number(r.details?.version || 1)));
+        versionNum = maxVer + 1;
+      }
+    } catch (e) {
+      console.warn('Evidence version check note:', e);
+    }
+
+    const newEvidenceRow = {
+      client_name: clientName,
+      audit_id: targetAuditId,
+      audit_code: req.body.auditCode || 'AUD-2026-001',
+      distributor_name: targetDistributor,
+      requirement_ref: requirementId,
+      requirement_title: req.body.requirementTitle || `Requirement ${requirementId}`,
+      section: req.body.section || 'General Requirements',
+      file_name: metadata.fileName,
+      file_size_mb: metadata.fileSizeMB,
+      file_type: req.file.mimetype,
+      google_drive_file_id: metadata.googleDriveFileId,
+      google_drive_folder_id: metadata.googleDriveFolderId,
+      storage_path: metadata.folderPath,
+      version: versionNum,
+      uploader: resolvedUploaderRole,
+      uploader_role: resolvedUploaderRole,
+      uploaded_by: resolvedUploaderRole,
+      source: req.body.source && !req.body.source.toLowerCase().includes('auditor') && !req.body.source.toLowerCase().includes('distributor')
+        ? req.body.source
+        : (documentType === 'SAMPLING_POPULATION' ? 'Sampling Register' : 'Direct Upload'),
+      uploaded_at: new Date().toISOString(),
+      status: 'AVAILABLE',
+      review_status: 'PENDING_REVIEW',
+      audit_period: auditPeriod,
+      document_type: documentType,
+      document_usage: parsedUsage
+    };
+
+    try {
+      await supabase.from('system_audit_logs').insert({
+        event_type: 'EVIDENCE_FILE',
+        target_user_email: `${clientName}::${targetDistributor}`,
+        details: newEvidenceRow,
+        created_at: new Date().toISOString()
+      }).select().single();
+    } catch (err: any) {
+      console.warn('Supabase evidence insert warning:', err);
+    }
+
+    try {
+      await dbStore.insertAuditLog({
+        event_type: 'EVIDENCE_FILE',
+        target_user_email: `${clientName}::${targetDistributor}`,
+        user_role: resolvedUploaderRole,
+        details: newEvidenceRow,
+        created_at: new Date().toISOString()
+      });
+    } catch (e) {
+      console.warn('Local dbStore backup warning:', e);
+    }
+
     if (!isRef) {
       try {
         await dispatchNotification({
           target_role: 'Auditor',
-          target_organization: distributorName,
+          target_organization: targetDistributor,
           category: 'Evidence Uploaded',
           title: `Evidence Uploaded: ${requirementId || metadata.fileName}`,
-          message: `Distributor ${distributorName} uploaded evidence file "${metadata.fileName}" for ${requirementId || 'Audit Requirement'}.`,
+          message: `Distributor ${targetDistributor} uploaded evidence file "${metadata.fileName}" for ${requirementId || 'Audit Requirement'}.`,
           link_tab: 'evidence_management',
           metadata: {
             requirementId,
             fileName: metadata.fileName,
-            distributorName,
+            distributorName: targetDistributor,
             clientName,
             targetRole: 'Auditor',
             action: 'Uploaded',
@@ -2571,36 +2671,108 @@ app.get('/api/evidence', async (req: any, res: any) => {
       auditPeriod
     } = req.query as Record<string, string>;
 
-    const isDistributor = (req.headers['x-user-role'] || '').toLowerCase().includes('distributor');
+    const rawRole = (req.headers['x-user-role'] as string || '').toLowerCase();
+    const isDistributor = rawRole.includes('distributor');
     const effectiveDistributor = distributor || distributorId;
-    const targetDistributor = isDistributor ? (req.headers['x-user-organization'] || req.headers['x-user-org']) : (effectiveDistributor && effectiveDistributor !== 'All Distributors' ? effectiveDistributor : undefined);
+    const targetDistributor = isDistributor ? (req.headers['x-user-organization'] as string || req.headers['x-user-org'] as string) : (effectiveDistributor && effectiveDistributor !== 'All Distributors' ? effectiveDistributor : undefined);
 
     const supabase = getSupabaseServerClient();
-    const { data, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_FILE').order('created_at', { ascending: false });
 
-    if (error) {
-      return res.status(500).json({ success: false, error: 'Database query failed' });
+    // Helper to accurately resolve uploader identity: 'Auditor' vs 'Distributor'
+    const resolveUploaderRole = (rDetails: any, parentRow?: any, fallback: 'Auditor' | 'Distributor' = 'Distributor'): 'Auditor' | 'Distributor' => {
+      const role = String(rDetails?.uploader || rDetails?.uploader_role || rDetails?.uploaderRole || parentRow?.user_role || '').toLowerCase();
+      if (role.includes('distributor')) return 'Distributor';
+      if (role.includes('auditor') || role.includes('audit')) return 'Auditor';
+
+      const uBy = String(rDetails?.uploaded_by || rDetails?.uploadedBy || parentRow?.user_name || parentRow?.user_email || '').toLowerCase();
+      if (uBy.includes('distributor')) return 'Distributor';
+      if (uBy.includes('auditor') || uBy.includes('jenkins') || uBy.includes('sarah') || uBy.includes('apex') || uBy.includes('lead')) return 'Auditor';
+
+      const src = String(rDetails?.source || '').toLowerCase();
+      if (src.includes('distributor')) return 'Distributor';
+      if (src.includes('auditor')) return 'Auditor';
+
+      const docType = String(rDetails?.document_type || rDetails?.documentType || '').toLowerCase();
+      if (docType.includes('sampling_population') || docType.includes('population')) return 'Auditor';
+
+      const ref = String(rDetails?.requirement_ref || rDetails?.requestRef || '').toLowerCase();
+      if (ref === 'sampling' || ref === 'gl-pop-01') return 'Auditor';
+
+      return fallback;
+    };
+
+    // Helper to sanitize source so uploader info is NEVER placed into the source column
+    const resolveSanitizedSource = (rawSource: string | undefined, rDetails: any): string => {
+      const src = rawSource ? String(rawSource).trim() : '';
+      if (!src || src === 'Auditor Upload' || src === 'Distributor Upload' || src.toLowerCase().includes('auditor') || src.toLowerCase().includes('distributor')) {
+        const docType = String(rDetails?.document_type || rDetails?.documentType || '').toLowerCase();
+        const ref = String(rDetails?.requirement_ref || rDetails?.requestRef || '').toLowerCase();
+        const sec = String(rDetails?.section || '').toLowerCase();
+
+        if (docType.includes('sampling_population') || ref === 'sampling' || ref === 'gl-pop-01') {
+          return 'Sampling Register';
+        }
+        if (sec.includes('sampling') || ref.includes('voucher') || ref.includes('sample')) {
+          return 'Sampling Testing';
+        }
+        if (ref.startsWith('irl') || sec.includes('information request')) {
+          return 'Information Request (IRL)';
+        }
+        return 'Direct Upload';
+      }
+      return src;
+    };
+
+    // 1. Fetch standalone EVIDENCE_FILE records from both Supabase and disk database store
+    let evidenceLogs: any[] = [];
+    try {
+      const { data, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_FILE').order('created_at', { ascending: false });
+      if (!error && Array.isArray(data)) {
+        evidenceLogs = [...data];
+      }
+    } catch (err) {
+      console.warn('Supabase query error for EVIDENCE_FILE, using resilient dbStore:', err);
     }
 
-    let dbRecords = (data || []).map((row) => {
-      const r = row.details || {};
+    try {
+      const localLogs = await dbStore.getAuditLogs('EVIDENCE_FILE');
+      const seenLogIds = new Set(evidenceLogs.map((l: any) => l.id));
+      for (const log of localLogs) {
+        if (!seenLogIds.has(log.id)) {
+          evidenceLogs.push(log);
+          seenLogIds.add(log.id);
+        }
+      }
+    } catch (err) {
+      console.warn('dbStore fetch error for evidence logs:', err);
+    }
+
+    let dbRecords = evidenceLogs.map((row: any) => {
+      let r = row.details || {};
+      if (typeof r === 'string') {
+        try { r = JSON.parse(r); } catch (e) {}
+      }
+      const uploader = resolveUploaderRole(r, row, 'Distributor');
+      const cleanSource = resolveSanitizedSource(r.source, r);
+
       return {
         id: row.id,
         clientName: r.client_name || 'Apex Electronics Corp',
         auditId: r.audit_id || 'eng-101',
         auditCode: r.audit_code || 'AUD-2026-001',
-        distributorName: r.distributor_name,
+        distributorName: r.distributor_name || 'Midwest Trading Co.',
         requestRef: r.requirement_ref || r.request_item_id || '1.1',
         requestTitle: r.requirement_title || 'Audit Requirement',
         section: r.section || 'General Requirements',
-        fileName: r.file_name,
+        fileName: r.file_name || 'Evidence_Document.pdf',
         fileSizeMB: Number(r.file_size_mb || 1.0),
         fileType: r.file_type || 'application/pdf',
-        googleDriveFileId: r.google_drive_file_id || r.storage_path,          
+        googleDriveFileId: r.google_drive_file_id || r.storage_path || row.id,          
         googleDriveFolderId: r.google_drive_folder_id,
         version: r.version || 1,
-        uploadedBy: r.uploaded_by,
-        uploadedDate: r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : new Date().toLocaleString(),
+        uploader: uploader,
+        uploadedBy: uploader,
+        uploadedDate: r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : (r.uploadedDate || new Date().toLocaleString()),
         status: r.review_status || r.status || 'PENDING_REVIEW',
         reviewerComment: r.reviewer_comment,
         reviewedBy: r.reviewed_by,          
@@ -2608,33 +2780,248 @@ app.get('/api/evidence', async (req: any, res: any) => {
         aiStatus: r.ai_status,          
         documentUsage: r.document_usage || 'GENERAL_EVIDENCE',
         auditPeriod: r.audit_period || 'FY 2025-26',
-        source: r.source || 'Distributor Upload',
+        source: cleanSource,
         samplingEnabled: r.samplingEnabled,
         samplingStatus: r.samplingStatus,
-        recordCount: r.recordCount,
+        recordCount: r.recordCount || r.records_count,
         totalValue: r.totalValue,
         glMapping: r.glMapping
       };
     });
 
+    // 2. Fetch authoritative IRL_STATE and IRL_DISTRIBUTOR_STATE to merge all questionnaire evidence
+    let stateData: any[] = [];
+    try {
+      const { data } = await supabase.from('system_audit_logs').select('*').in('event_type', ['IRL_DISTRIBUTOR_STATE', 'IRL_STATE']).order('created_at', { ascending: false });
+      if (Array.isArray(data)) stateData = [...data];
+    } catch (e) {}
+
+    try {
+      const localStates1 = await dbStore.getAuditLogs('IRL_DISTRIBUTOR_STATE');
+      const localStates2 = await dbStore.getAuditLogs('IRL_STATE');
+      const seenStateIds = new Set(stateData.map((s: any) => s.id));
+      [...localStates1, ...localStates2].forEach((s: any) => {
+        if (!seenStateIds.has(s.id)) {
+          stateData.push(s);
+          seenStateIds.add(s.id);
+        }
+      });
+    } catch (e) {}
+
+    const latestStates = new Map<string, any>();
+    stateData.forEach(row => {
+       let state = row.details;
+       if (typeof state === 'string') {
+         try { state = JSON.parse(state); } catch (e) {}
+       }
+       if (state && state.client && state.distributor) {
+          const key = `${state.client}::${state.distributor}`;
+          if (!latestStates.has(key)) {
+             latestStates.set(key, state);
+          }
+       }
+    });
+
+    const existingFileIds = new Set(dbRecords.map(r => r.googleDriveFileId).filter(Boolean));
+
+    Array.from(latestStates.values()).forEach(state => {
+       const requests = state.requests || [];
+       requests.forEach((reqItem: any) => {
+          const files = [...(reqItem.uploadedFiles || reqItem.files || [])];
+          if (reqItem.subQuestionResponses && typeof reqItem.subQuestionResponses === 'object') {
+            Object.values(reqItem.subQuestionResponses).forEach((sub: any) => {
+              if (sub && Array.isArray(sub.uploadedFiles)) {
+                files.push(...sub.uploadedFiles);
+              }
+            });
+          }
+          
+          // Map the questionnaire's reviewerStatus to the centralized status
+          let unifiedStatus = 'PENDING_REVIEW';
+          if (reqItem.reviewerStatus === 'Accepted') unifiedStatus = 'ACCEPTED';
+          else if (reqItem.reviewerStatus === 'Rejected') unifiedStatus = 'REJECTED';
+          else if (reqItem.reviewerStatus === 'Clarification Required') unifiedStatus = 'CLARIFICATION_REQUIRED';
+
+          files.forEach((file: any) => {
+             const gId = file.googleDriveFileId || file.storageId || file.id;
+             if (!gId || existingFileIds.has(gId)) return; // Deduplicate
+
+             const fUploader = resolveUploaderRole(file, null, 'Distributor');
+             const fCleanSource = resolveSanitizedSource(file.source, {
+               requirement_ref: reqItem.refNumber || reqItem.id,
+               section: reqItem.category || 'Information Request (IRL)'
+             });
+
+             dbRecords.push({
+               id: file.evidenceId || file.id || gId || `EVD-${Math.random()}`,
+               clientName: state.client || 'Apex Electronics Corp',
+               auditId: state.auditId || 'eng-101',
+               auditCode: state.auditCode || 'AUD-2026-001',
+               distributorName: state.distributor || 'Midwest Trading Co.',
+               requestRef: reqItem.refNumber || reqItem.id || '1.1',
+               requestTitle: reqItem.title || 'Audit Requirement',
+               section: reqItem.category || 'General Requirements',
+               fileName: file.fileName || file.name || 'Evidence_File.pdf',
+               fileSizeMB: Number(file.fileSizeMB || (typeof file.size === 'string' ? file.size.replace(' MB','') : file.size) || 1.0),
+               fileType: file.fileType || 'application/pdf',
+               googleDriveFileId: gId,
+               googleDriveFolderId: file.folderPath || file.googleDriveFolderId,
+               version: file.version || 1,
+               uploader: fUploader,
+               uploadedBy: fUploader,
+               uploadedDate: file.uploadDate || file.uploadedDate || new Date().toLocaleString(),
+               status: unifiedStatus,
+               reviewerComment: reqItem.reviewerComment || file.reviewerComment,
+               reviewedBy: reqItem.reviewedBy || file.reviewedBy,
+               reviewedDate: reqItem.lastUpdated || file.reviewedDate,
+               aiStatus: file.aiStatus,
+               documentUsage: file.documentUsage || 'GENERAL_EVIDENCE',
+               recordCount: file.recordCount || 0,
+               totalValue: file.totalValue || 0,
+               auditPeriod: state.auditPeriod || 'FY 2025-26',
+               source: fCleanSource,
+               samplingEnabled: file.samplingEnabled || false,
+               samplingStatus: file.samplingStatus || undefined,
+               glMapping: file.glMapping || file.mappedData || {}
+             });
+             existingFileIds.add(gId);
+          });
+       });
+    });
+
+    // 3. Fetch Sampling Questionnaire responses (REQUIRED_DATA_RESP) to merge testing evidence
+    let respLogs: any[] = [];
+    try {
+      const { data } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP').order('created_at', { ascending: false });
+      if (Array.isArray(data)) respLogs = [...data];
+    } catch (e) {}
+
+    try {
+      const localResp = await dbStore.getAuditLogs('REQUIRED_DATA_RESP');
+      const seenRespIds = new Set(respLogs.map((r: any) => r.id));
+      localResp.forEach((r: any) => {
+        if (!seenRespIds.has(r.id)) {
+          respLogs.push(r);
+          seenRespIds.add(r.id);
+        }
+      });
+    } catch (e) {}
+
+    respLogs.forEach((row: any) => {
+      let details = row.details;
+      if (typeof details === 'string') {
+        try { details = JSON.parse(details); } catch (e) {}
+      }
+      if (!details) return;
+
+      const respDistributor = details.distributor_id || details.distributorName || 'Midwest Trading Co.';
+      const respAuditId = details.engagement_id || details.auditId || 'eng-101';
+      const respVoucher = details.voucher_no || details.voucherNo || details.sample_id || 'Sample';
+      let unifiedStatus = 'PENDING_REVIEW';
+      if (details.status === 'Accepted') unifiedStatus = 'ACCEPTED';
+      else if (details.status === 'Rejected') unifiedStatus = 'REJECTED';
+      else if (details.status === 'Clarification Required') unifiedStatus = 'CLARIFICATION_REQUIRED';
+
+      const genFiles = Array.isArray(details.uploadedFiles) ? details.uploadedFiles : [];
+      const itemFiles: any[] = [];
+      if (details.itemResponses && typeof details.itemResponses === 'object') {
+        Object.entries(details.itemResponses).forEach(([qId, qVal]: [string, any]) => {
+          if (qVal && Array.isArray(qVal.files)) {
+            qVal.files.forEach((f: any) => {
+              itemFiles.push({ ...f, questionId: qId });
+            });
+          }
+        });
+      }
+
+      [...genFiles, ...itemFiles].forEach((file: any) => {
+        const gId = file.googleDriveFileId || file.storageId || file.id;
+        if (!gId || existingFileIds.has(gId)) return;
+
+        const fUploader = resolveUploaderRole(file, row, 'Distributor');
+        const fCleanSource = 'Sampling Testing';
+
+        dbRecords.push({
+          id: file.evidenceId || file.id || gId,
+          clientName: details.clientName || 'Apex Electronics Corp',
+          auditId: respAuditId,
+          auditCode: 'AUD-2026-001',
+          distributorName: respDistributor,
+          requestRef: `VOUCHER-${respVoucher}`,
+          requestTitle: `Sampling Evidence - Voucher #${respVoucher}`,
+          section: 'Sampling Testing',
+          fileName: file.fileName || file.name || 'Evidence_Document.pdf',
+          fileSizeMB: Number(file.fileSizeMB || (typeof file.size === 'string' ? file.size.replace(' MB','') : file.size) || 1.0),
+          fileType: file.fileType || file.type || 'application/pdf',
+          googleDriveFileId: gId,
+          googleDriveFolderId: file.folderPath || file.googleDriveFolderId,
+          version: file.version || 1,
+          uploader: fUploader,
+          uploadedBy: fUploader,
+          uploadedDate: file.uploadDate || file.uploadedDate || new Date().toLocaleString(),
+          status: unifiedStatus,
+          reviewerComment: details.auditorReviewNotes || details.clarificationMessage,
+          reviewedBy: details.reviewedBy,
+          reviewedDate: details.updated_at,
+          documentUsage: 'SAMPLING_EVIDENCE',
+          auditPeriod: 'FY 2025-26',
+          source: fCleanSource,
+          samplingEnabled: true,
+          samplingStatus: 'ADDED',
+          aiStatus: undefined,
+          recordCount: 0,
+          totalValue: 0,
+          glMapping: {}
+        });
+        existingFileIds.add(gId);
+      });
+    });
+
+    // Server-side tenant isolation
     if (targetDistributor && targetDistributor !== 'All Distributors') {
       dbRecords = dbRecords.filter(r => r.distributorName === targetDistributor);
     }
+
     if (client && client !== 'All Clients') {
       dbRecords = dbRecords.filter(r => r.clientName === client);
     }
+
     if (auditId && auditId !== 'All Audits') {
       dbRecords = dbRecords.filter(r => r.auditId === auditId);
     }
+
     if (status && status !== 'All') {
       const allowedStatuses = status.toUpperCase().split(',').map(s => s.trim().replace(/\s+/g, '_'));
-      dbRecords = dbRecords.filter(r => allowedStatuses.includes((r.status || '').toUpperCase().replace(/\s+/g, '_')));
+      dbRecords = dbRecords.filter(r => {
+         const rStat = (r.status || '').toUpperCase().replace(/\s+/g, '_');
+         return allowedStatuses.includes(rStat);
+      });
     }
+
     if (documentUsage) {
-      dbRecords = dbRecords.filter(r => Array.isArray(r.documentUsage) ? r.documentUsage.includes(documentUsage) : (r.documentUsage || '').includes(documentUsage));
+      dbRecords = dbRecords.filter(r => {
+        if (Array.isArray(r.documentUsage)) {
+           return r.documentUsage.includes(documentUsage);
+        }
+        return r.documentUsage === documentUsage || (r.documentUsage || '').includes(documentUsage);
+      });
     }
+    
     if (auditPeriod) {
       dbRecords = dbRecords.filter(r => r.auditPeriod === auditPeriod);
+    }
+
+    // Local search filter if search term provided
+    if (search && search.trim().length > 0) {
+      const q = search.trim().toLowerCase();
+      dbRecords = dbRecords.filter(r => 
+        (r.fileName && r.fileName.toLowerCase().includes(q)) ||
+        (r.requestRef && r.requestRef.toLowerCase().includes(q)) ||
+        (r.requestTitle && r.requestTitle.toLowerCase().includes(q)) ||
+        (r.distributorName && r.distributorName.toLowerCase().includes(q)) ||
+        (r.id && r.id.toLowerCase().includes(q)) ||
+        (r.reviewerComment && r.reviewerComment.toLowerCase().includes(q))
+      );
     }
 
     return res.json({
@@ -2643,62 +3030,226 @@ app.get('/api/evidence', async (req: any, res: any) => {
       records: dbRecords
     });
   } catch (err: any) {
+    console.error('Error in GET /api/evidence:', err);
+    return res.status(500).json({ success: false, error: err.message || 'Failed to fetch evidence records' });
+  }
+});
+
+// GET /api/evidence/:id - Get single evidence details from Supabase DB
+app.get('/api/evidence/:id', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const supabase = getSupabaseServerClient();
+    const { data: row, error } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+
+    if (error || !row) {
+      return res.status(404).json({ success: false, error: 'Evidence record not found in database' });
+    }
+
+    const data = row.details || {};
+
+    const record = {
+      id: row.id,
+      clientName: data.client_name || 'Apex Electronics Corp',
+      auditId: data.audit_id || 'eng-101',
+      auditCode: data.audit_code || 'AUD-2026-001',
+      distributorName: data.distributor_name,
+      requestRef: data.requirement_ref || data.request_item_id || '1.1',
+      requestTitle: data.requirement_title || 'Audit Requirement',
+      section: data.section || 'General Requirements',
+      fileName: data.file_name,
+      fileSizeMB: Number(data.file_size_mb || 1.0),
+      fileType: data.file_type || 'application/pdf',
+      googleDriveFileId: data.google_drive_file_id || data.storage_path,
+      googleDriveFolderId: data.google_drive_folder_id,
+      version: data.version || 1,
+      uploader: (data.uploader || data.uploader_role || data.uploaded_by || '').toLowerCase().includes('auditor') ? 'Auditor' : 'Distributor',
+      uploadedBy: (data.uploader || data.uploader_role || data.uploaded_by || '').toLowerCase().includes('auditor') ? 'Auditor' : 'Distributor',
+      source: data.source && !data.source.toLowerCase().includes('auditor') && !data.source.toLowerCase().includes('distributor') ? data.source : 'Direct Upload',
+      uploadedDate: data.uploaded_at ? new Date(data.uploaded_at).toLocaleString() : new Date().toLocaleString(),
+      status: data.review_status || data.status || 'PENDING_REVIEW',
+      reviewerComment: data.reviewer_comment,
+      reviewedBy: data.reviewed_by,
+      reviewedDate: data.reviewed_at ? new Date(data.reviewed_at).toLocaleString() : undefined,
+      aiStatus: data.ai_status,
+      aiSummary: data.ai_summary,
+      aiFlags: data.ai_flags,
+      aiRiskScore: data.ai_risk_score,
+      aiExtractedData: data.ai_extracted_data,
+      aiAnalysisTimestamp: data.ai_analysis_timestamp
+    };
+
+    return res.json({ success: true, record });
+  } catch (err: any) {
     return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-app.post('/api/evidence/upload', async (req, res) => {
-  const { auditId, requestRef, fileName, fileSizeMB, fileType, uploadedBy, distributorName } = req.body;
-  const dist = distributorName || 'Midwest Trading Co.';
-
-  const evidenceRecord = {
-    id: `ev-${Date.now()}`,
-    auditId: auditId || 'eng-001',
-    auditCode: 'AUD-2026-001',
-    distributorName: dist,
-    requestRef: requestRef || '1.1',
-    requestTitle: 'Corporate Registration & Business License',
-    fileName: fileName || 'Document.pdf',
-    fileSizeMB: fileSizeMB || 2.4,
-    fileType: fileType || 'application/pdf',
-    version: 1,
-    hash: `sha256_${Math.random().toString(36).substring(2, 12)}`,
-    uploadedBy: uploadedBy || 'David Vance',
-    uploadedDate: new Date().toISOString().replace('T', ' ').substring(0, 16),
-    status: 'Pending Review'
-  };
-
+// GET /api/evidence/:id/history - Get version & review history for an evidence item
+app.get('/api/evidence/:id/history', async (req: any, res: any) => {
   try {
-    await dispatchNotification({
-      target_role: 'Auditor',
-      target_organization: dist,
-      category: 'Evidence Uploaded',
-      title: `Evidence Uploaded: ${requestRef || fileName}`,
-      message: `Distributor ${dist} uploaded evidence file "${fileName}" for ${requestRef || 'Audit Requirement'}.`,
-      link_tab: 'evidence_management',
-      metadata: {
-        requirementId: requestRef,
-        fileName,
-        distributorName: dist,
-        targetRole: 'Auditor',
-        action: 'Uploaded',
-        linkTab: 'evidence_management'
-      }
-    });
-  } catch (e) {
-    console.warn('Upload notification error:', e);
-  }
+    const { id } = req.params;
+    const supabase = getSupabaseServerClient();
+    const { data: targetLog } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
 
-  return res.json({
-    success: true,
-    evidence: evidenceRecord,
-    message: 'File successfully stored and indexed in evidence vault'
-  });
+    if (!targetLog) {
+      return res.json({ success: true, count: 0, history: [] });
+    }
+    const targetRecord = targetLog.details || {};
+
+    const reqRef = targetRecord.requirement_ref || targetRecord.request_item_id;
+    const distName = targetRecord.distributor_name;
+    const auditId = targetRecord.audit_id;
+
+    let query = supabase
+      .from('system_audit_logs')
+      .select('*')
+      .eq('event_type', 'EVIDENCE_FILE');
+
+    const { data: historyRows, error } = await query.order('created_at', { ascending: true });
+
+    if (error || !historyRows) {
+      return res.json({ success: true, count: 0, history: [] });
+    }
+    
+    const filteredData = historyRows.filter(r => {
+      const d = r.details || {};
+      let match = d.distributor_name === distName && d.requirement_ref === reqRef;
+      if (auditId) match = match && d.audit_id === auditId;
+      return match;
+    });
+
+    const historyList = filteredData.map(row => {
+      const r = row.details || {};
+      return {
+        id: row.id,
+        version: r.version || 1,
+        fileName: r.file_name,
+        fileSizeMB: Number(r.file_size_mb || 1.0),
+        uploader: (r.uploader || r.uploader_role || r.uploaded_by || '').toLowerCase().includes('auditor') ? 'Auditor' : 'Distributor',
+        uploadedBy: (r.uploader || r.uploader_role || r.uploaded_by || '').toLowerCase().includes('auditor') ? 'Auditor' : 'Distributor',
+        uploadedDate: r.uploaded_at ? new Date(r.uploaded_at).toLocaleString() : new Date().toLocaleString(),
+        status: r.review_status || r.status || 'PENDING_REVIEW',
+        reviewerComment: r.reviewer_comment,
+        reviewedBy: r.reviewed_by,
+        reviewedDate: r.reviewed_at ? new Date(r.reviewed_at).toLocaleString() : undefined
+      };
+    });
+
+    return res.json({
+      success: true,
+      count: historyList.length,
+      history: historyList
+    });
+  } catch (err: any) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-app.post(['/api/evidence/:id/status', '/api/evidence/:id/review'], async (req, res) => {
+// PATCH /api/evidence/:id/usage - Update document usage
+app.patch('/api/evidence/:id/usage', async (req: any, res: any) => {
+  try {
+    const { id } = req.params;
+    const { documentUsage, samplingEnabled } = req.body;
+
+    const supabase = getSupabaseServerClient();
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+    let existingLog = null;
+    if (isUuid) {
+      const { data: log, error: fetchErr } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      if (!fetchErr) {
+        existingLog = log;
+      }
+    }
+
+    if (!existingLog) {
+      const { data: stateLogs } = await supabase.from('system_audit_logs')
+          .select('*')
+          .eq('event_type', 'IRL_DISTRIBUTOR_STATE')
+          .order('created_at', { ascending: false });
+          
+      let foundStateLog = null;
+      let foundFile = null;
+      if (stateLogs) {
+        for (const sl of stateLogs) {
+          const reqs = sl.details?.requests || [];
+          for (const rq of reqs) {
+            const files = rq.uploadedFiles || rq.files || [];
+            for (const f of files) {
+              const fId = f.evidenceId || f.id || f.googleDriveFileId || f.storageId;
+              if (fId === id) {
+                foundStateLog = sl;
+                foundFile = f;
+                break;
+              }
+            }
+            if (foundStateLog) break;
+          }
+          if (foundStateLog) break;
+        }
+      }
+      
+      if (foundStateLog && foundFile) {
+         if (documentUsage) foundFile.documentUsage = documentUsage;
+         if (samplingEnabled !== undefined) {
+           foundFile.samplingEnabled = samplingEnabled;
+           if (samplingEnabled) {
+             foundFile.samplingAddedAt = new Date().toISOString();
+             foundFile.samplingAddedBy = req.headers['x-user-email'] || 'Auditor';
+             foundFile.samplingSourceDocumentId = id;
+             foundFile.samplingStatus = "AVAILABLE";
+           } else {
+             delete foundFile.samplingAddedAt;
+             delete foundFile.samplingAddedBy;
+             delete foundFile.samplingSourceDocumentId;
+             delete foundFile.samplingStatus;
+           }
+         }
+         const { error: updateErr } = await supabase.from('system_audit_logs').update({ details: foundStateLog.details }).eq('id', foundStateLog.id);
+         if (updateErr) {
+           return res.status(500).json({ success: false, error: updateErr.message });
+         }
+         return res.json({ success: true, message: 'Document usage updated successfully within state log' });
+      }
+      
+      return res.status(404).json({ success: false, error: 'Record not found for ID: ' + id });
+    }
+
+    const details = existingLog.details || {};
+    if (documentUsage) {
+      details.document_usage = documentUsage;
+    }
+    
+    if (samplingEnabled !== undefined) {
+      details.samplingEnabled = samplingEnabled;
+      if (samplingEnabled) {
+        details.samplingAddedAt = new Date().toISOString();
+        details.samplingAddedBy = req.headers['x-user-email'] || 'Auditor';
+        details.samplingSourceDocumentId = id;
+        details.samplingStatus = "AVAILABLE";
+      } else {
+        delete details.samplingAddedAt;
+        delete details.samplingAddedBy;
+        delete details.samplingSourceDocumentId;
+        delete details.samplingStatus;
+      }
+    }
+
+    const { error: updateErr } = await supabase.from('system_audit_logs').update({ details }).eq('id', id);
+    if (updateErr) {
+      return res.status(500).json({ success: false, error: updateErr.message });
+    }
+
+    res.json({ success: true, message: 'Document usage updated successfully' });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post(['/api/evidence/:id/status', '/api/evidence/:id/review'], async (req: any, res: any) => {
   const { id } = req.params;
-  const { status, reviewerComment, reviewedBy, distributorName } = req.body;
+  const { status, comment, reviewerComment, reviewedBy, distributorName } = req.body;
+  const activeComment = comment || reviewerComment || '';
 
   try {
     const formattedStatus = (status || 'Accepted').toUpperCase();
@@ -2712,8 +3263,8 @@ app.post(['/api/evidence/:id/status', '/api/evidence/:id/review'], async (req, r
     const notifMsg = formattedStatus.includes('ACCEPT')
       ? `Auditor accepted evidence ${id}.`
       : formattedStatus.includes('CLARIF')
-      ? `Auditor requested clarification on evidence ${id}: "${reviewerComment || ''}"`
-      : `Evidence ${id} was rejected. Reason: "${reviewerComment || ''}"`;
+      ? `Auditor requested clarification on evidence ${id}: "${activeComment}"`
+      : `Evidence ${id} was rejected. Reason: "${activeComment}"`;
 
     await dispatchNotification({
       target_role: 'Distributor',
@@ -2725,7 +3276,7 @@ app.post(['/api/evidence/:id/status', '/api/evidence/:id/review'], async (req, r
       metadata: {
         evidenceId: id,
         status,
-        comment: reviewerComment,
+        comment: activeComment,
         targetRole: 'Distributor',
         linkTab: 'evidence_management'
       }
@@ -2738,7 +3289,7 @@ app.post(['/api/evidence/:id/status', '/api/evidence/:id/review'], async (req, r
     success: true,
     id,
     status,
-    reviewerComment,
+    reviewerComment: activeComment,
     reviewedBy: reviewedBy || 'Sarah Jenkins',
     reviewedDate: new Date().toISOString().replace('T', ' ').substring(0, 16),
     message: `Evidence ${id} updated to status ${status}`
