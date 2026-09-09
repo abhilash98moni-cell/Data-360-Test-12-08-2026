@@ -116,11 +116,187 @@ export class GoogleDriveStorageService implements StorageService {
       if (fileId) {
         const safePath = path.join(this.uploadsDir, fileId.replace(/[/\\?%*:|"<>]/g, '_'));
         fs.writeFileSync(safePath, buffer);
-        fs.writeFileSync(`${safePath}.meta.json`, JSON.stringify({ fileName, mimeType, fileId }));
+        fs.writeFileSync(`${safePath}.meta.json`, JSON.stringify({ fileName, mimeType, fileId, additionalKeys }));
       }
     } catch (err: any) {
       console.warn('Disk storage save notice:', err.message);
     }
+  }
+
+  public async resolveBinary(fileId: string, fallbackFileName?: string): Promise<{ buffer: Buffer; fileName: string; mimeType: string } | null> {
+    if (!fileId && !fallbackFileName) return null;
+
+    // 1. Check in-memory store
+    if (fileId && this.binaryBufferStore.has(fileId)) {
+      return this.binaryBufferStore.get(fileId)!;
+    }
+    if (fallbackFileName && this.binaryBufferStore.has(fallbackFileName)) {
+      return this.binaryBufferStore.get(fallbackFileName)!;
+    }
+
+    // 2. Direct local file path check
+    if (fileId) {
+      try {
+        const safePath = path.join(this.uploadsDir, fileId.replace(/[/\\?%*:|"<>]/g, '_'));
+        if (fs.existsSync(safePath) && fs.statSync(safePath).isFile()) {
+          const buffer = fs.readFileSync(safePath);
+          let fileName = fallbackFileName || `Document_${fileId}.pdf`;
+          let mimeType = 'application/octet-stream';
+          const metaPath = `${safePath}.meta.json`;
+          if (fs.existsSync(metaPath)) {
+            try {
+              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+              if (meta.fileName) fileName = meta.fileName;
+              if (meta.mimeType) mimeType = meta.mimeType;
+            } catch (e) {}
+          }
+          const entry = { buffer, fileName, mimeType };
+          this.binaryBufferStore.set(fileId, entry);
+          return entry;
+        }
+      } catch (err: any) {
+        console.warn('Direct file lookup notice:', err.message);
+      }
+    }
+
+    // 3. Scan uploads directory meta files for matches
+    try {
+      if (fs.existsSync(this.uploadsDir)) {
+        const files = fs.readdirSync(this.uploadsDir);
+        for (const f of files) {
+          if (f.endsWith('.meta.json')) {
+            const metaPath = path.join(this.uploadsDir, f);
+            try {
+              const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
+              const binFilePath = metaPath.replace(/\.meta\.json$/, '');
+              const matches = 
+                (fileId && (meta.fileId === fileId || meta.googleDriveFileId === fileId)) ||
+                (fileId && meta.fileName && meta.fileName.toLowerCase() === fileId.toLowerCase()) ||
+                (fallbackFileName && meta.fileName && meta.fileName.toLowerCase() === fallbackFileName.toLowerCase()) ||
+                (Array.isArray(meta.additionalKeys) && (
+                  (fileId && meta.additionalKeys.includes(fileId)) ||
+                  (fallbackFileName && meta.additionalKeys.includes(fallbackFileName))
+                ));
+              if (matches && fs.existsSync(binFilePath) && fs.statSync(binFilePath).isFile()) {
+                const buffer = fs.readFileSync(binFilePath);
+                const entry = {
+                  buffer,
+                  fileName: meta.fileName || fallbackFileName || fileId,
+                  mimeType: meta.mimeType || 'application/octet-stream'
+                };
+                if (fileId) this.binaryBufferStore.set(fileId, entry);
+                if (fallbackFileName) this.binaryBufferStore.set(fallbackFileName, entry);
+                return entry;
+              }
+            } catch (e) {}
+          }
+        }
+      }
+    } catch (scanErr: any) {
+      console.warn('Uploads directory scan notice:', scanErr.message);
+    }
+
+    // 4. Check persistent database: REQUIRED_DATA_RESP logs (contains uploaded files with dataUrl or googleDriveFileId)
+    try {
+      const client = getSupabaseServerClient();
+      const { data: respLogs } = await client
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'REQUIRED_DATA_RESP')
+        .order('created_at', { ascending: false });
+
+      if (respLogs) {
+        for (const log of respLogs) {
+          const det = log.details || {};
+          const allDocs: any[] = [];
+          if (Array.isArray(det.uploadedFiles)) allDocs.push(...det.uploadedFiles);
+          if (Array.isArray(det.generalFiles)) allDocs.push(...det.generalFiles);
+          if (det.itemResponses && typeof det.itemResponses === 'object') {
+            Object.values(det.itemResponses).forEach((item: any) => {
+              if (item && Array.isArray(item.files)) {
+                allDocs.push(...item.files);
+              }
+            });
+          }
+
+          for (const doc of allDocs) {
+            if (!doc) continue;
+            const docMatches =
+              (fileId && (doc.id === fileId || doc.googleDriveFileId === fileId)) ||
+              (fileId && doc.name && doc.name.toLowerCase() === fileId.toLowerCase()) ||
+              (fallbackFileName && doc.name && doc.name.toLowerCase() === fallbackFileName.toLowerCase());
+
+            if (docMatches) {
+              // If doc has dataUrl containing base64 content:
+              if (doc.dataUrl && typeof doc.dataUrl === 'string' && doc.dataUrl.includes('base64,')) {
+                const base64Data = doc.dataUrl.split('base64,')[1];
+                if (base64Data) {
+                  const buffer = Buffer.from(base64Data, 'base64');
+                  const mimeType = doc.type || (doc.dataUrl.split(';')[0]?.replace('data:', '')) || 'application/octet-stream';
+                  const fileName = doc.name || fallbackFileName || fileId;
+                  this.saveBinaryBuffer(fileId, fileName, mimeType, buffer, [doc.id, doc.googleDriveFileId].filter(Boolean));
+                  return { buffer, fileName, mimeType };
+                }
+              }
+
+              // If doc has googleDriveFileId pointing to a disk upload:
+              if (doc.googleDriveFileId) {
+                const safeDiskPath = path.join(this.uploadsDir, doc.googleDriveFileId.replace(/[/\\?%*:|"<>]/g, '_'));
+                if (fs.existsSync(safeDiskPath) && fs.statSync(safeDiskPath).isFile()) {
+                  const buffer = fs.readFileSync(safeDiskPath);
+                  const fileName = doc.name || fallbackFileName || fileId;
+                  const mimeType = doc.type || 'application/octet-stream';
+                  const entry = { buffer, fileName, mimeType };
+                  this.saveBinaryBuffer(fileId, fileName, mimeType, buffer, [doc.id, doc.googleDriveFileId]);
+                  return entry;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (respErr: any) {
+      console.warn('REQUIRED_DATA_RESP binary resolution notice:', respErr.message);
+    }
+
+    // 5. Check persistent database: EVIDENCE_FILE logs
+    try {
+      const client = getSupabaseServerClient();
+      const { data: evLogs } = await client
+        .from('system_audit_logs')
+        .select('*')
+        .eq('event_type', 'EVIDENCE_FILE')
+        .order('created_at', { ascending: false });
+
+      if (evLogs) {
+        for (const log of evLogs) {
+          const d = log.details || {};
+          const evMatches =
+            (fileId && (log.id === fileId || d.google_drive_file_id === fileId || d.file_hash === fileId)) ||
+            (fileId && d.file_name && d.file_name.toLowerCase() === fileId.toLowerCase()) ||
+            (fallbackFileName && d.file_name && d.file_name.toLowerCase() === fallbackFileName.toLowerCase());
+
+          if (evMatches) {
+            const candidateDriveId = d.google_drive_file_id || d.file_hash;
+            if (candidateDriveId) {
+              const safeDiskPath = path.join(this.uploadsDir, candidateDriveId.replace(/[/\\?%*:|"<>]/g, '_'));
+              if (fs.existsSync(safeDiskPath) && fs.statSync(safeDiskPath).isFile()) {
+                const buffer = fs.readFileSync(safeDiskPath);
+                const fileName = d.file_name || fallbackFileName || fileId;
+                const mimeType = d.file_type || 'application/octet-stream';
+                const entry = { buffer, fileName, mimeType };
+                this.saveBinaryBuffer(fileId, fileName, mimeType, buffer, [log.id, candidateDriveId]);
+                return entry;
+              }
+            }
+          }
+        }
+      }
+    } catch (evErr: any) {
+      console.warn('EVIDENCE_FILE binary resolution notice:', evErr.message);
+    }
+
+    return null;
   }
 
   private getBinaryBuffer(fileId: string): { buffer: Buffer; fileName: string; mimeType: string } | null {
@@ -767,10 +943,10 @@ startxref
       }
     }
 
-    // 2. Check temporary local binary cache (speedup for same container execution)
-    const stored = this.getBinaryBuffer(googleDriveFileId) || this.getBinaryBuffer(targetDriveFileId);
-    if (stored) {
-      return stored;
+    // 2. Authoritative local/persistent storage resolution (disk uploads, metadata, audit logs)
+    const resolvedBinary = await this.resolveBinary(targetDriveFileId, fileName) || await this.resolveBinary(googleDriveFileId, fallbackFileName);
+    if (resolvedBinary) {
+      return resolvedBinary;
     }
 
     // 3. Fallback for pre-seeded demo/mock files
@@ -787,33 +963,9 @@ startxref
          mimeType: mimeType.includes('pdf') || mimeType === 'application/octet-stream' ? 'application/pdf' : mimeType
       };
     }
-    
-    // 4. Fallback for Excel files to avoid download errors in demo mode
-    console.log('Fallback checking fileName:', fileName); 
-    if (fileName && (fileName.toLowerCase().endsWith('.xlsx') || fileName.toLowerCase().endsWith('.xls') || fileName.toLowerCase().endsWith('.csv'))) {
-      const workbook = XLSX.utils.book_new();
-      const mockData = [
-        { ID: 'TX-1001', Date: '2026-01-15', Entity: 'Test Vendor A', Description: 'Consulting Services', Amount: 5000 },
-        { ID: 'TX-1002', Date: '2026-01-22', Entity: 'Employee B', Description: 'Travel Reimbursement', Amount: 1250 },
-        { ID: 'TX-1003', Date: '2026-02-05', Entity: 'Test Vendor C', Description: 'Software License', Amount: 3400 }
-      ];
-      const worksheet = XLSX.utils.json_to_sheet(mockData);
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Transactions');
-      
-      const isCsv = fileName.toLowerCase().endsWith('.csv');
-      const outBuffer = isCsv 
-          ? Buffer.from(XLSX.write(workbook, { type: 'string', bookType: 'csv' }))
-          : XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-          
-      return {
-         buffer: outBuffer,
-         fileName,
-         mimeType: isCsv ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      };
-    }
 
-    // 5. For user-uploaded documents that cannot be retrieved, throw a clear error instead of generating dummy text
-    throw new Error(`Requested document binary for '${googleDriveFileId}' was not found in Google Drive storage. fileName was: ${fileName} fallbackFileName was: ${fallbackFileName}`);
+    // 4. If not found in any source, throw clear error
+    throw new Error(`Requested document binary for '${googleDriveFileId}' was not found in storage. fileName was: ${fileName}`);
   }
 
   public async getFileMetadata(googleDriveFileId: string): Promise<FileMetadata | null> {

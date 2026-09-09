@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { UserSession } from '../types';
 import { CurrencyMode, formatFinancialAmount } from '../utils/currencyFormatter';
+import { DocumentViewerModal } from './DocumentViewerModal';
 
 export interface UploadedDocument {
   id: string;
@@ -64,36 +65,67 @@ export interface ClarificationHistoryItem {
 }
 
 export interface QuestionnaireProps {
-  transaction: any;
-  engagementId: string | undefined;
-  currentUser: UserSession | null;
+  transaction?: any;
+  engagementId?: string;
+  currentUser?: UserSession | null;
   onClose: () => void;
   isReviewMode?: boolean;
   isDistributorWorkflow?: boolean;
   currencyMode?: CurrencyMode | string;
   selectedDistributor?: string;
+  distributorName?: string;
   selectedClient?: string;
+  targetSampleId?: string;
+  targetVoucherNo?: string;
+  targetClassification?: string;
+  isOpen?: boolean;
+  isAuditor?: boolean;
+  isDistributor?: boolean;
+  onRefresh?: () => void;
 }
 
-export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
-  transaction,
-  engagementId,
-  currentUser,
-  onClose,
-  isReviewMode = false,
-  isDistributorWorkflow = false,
-  currencyMode = 'INR',
-  selectedDistributor,
-  selectedClient
-}) => {
+export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) => {
+  const {
+    transaction,
+    engagementId,
+    currentUser,
+    onClose,
+    isReviewMode = false,
+    isDistributorWorkflow = false,
+    currencyMode = 'INR',
+    selectedDistributor,
+    distributorName,
+    selectedClient
+  } = props;
+
   const activeCurrency: CurrencyMode = currencyMode === 'USD' ? 'USD' : 'INR';
   const isDistributor = isDistributorWorkflow || currentUser?.role?.includes('Distributor') || currentUser?.role === 'Distributor';
   const isAuditor = !isDistributor;
-  const isReadOnly = Boolean(isReviewMode);
 
-  const targetSampleId = String(transaction?.id || transaction?.sampleId || transaction?.voucherNo || 'TX-1');
-  const targetVoucherNo = String(transaction?.voucherNo || transaction?.id || '');
-  const activeDistributor = selectedDistributor || transaction?.distributor || currentUser?.organization || 'Distributor';
+  const targetSampleId = String(
+    props.targetSampleId || transaction?.sampleId || transaction?.id || transaction?.voucherNo || ''
+  );
+  const targetVoucherNo = String(
+    props.targetVoucherNo || transaction?.voucherNo || transaction?.testingReference || transaction?.id || ''
+  );
+  const activeDistributor =
+    selectedDistributor || distributorName || transaction?.distributor || currentUser?.organization || 'Distributor';
+
+  // Overall status
+  const initialStatus =
+    transaction?.questionnaireResponse?.status ||
+    (transaction?.testingStatus === 'Tested' ? 'Accepted' : (transaction?.questionnaireStatus || 'Draft'));
+  const [status, setStatus] = useState<string>(initialStatus);
+
+  const isEvidenceAccepted =
+    status === 'Accepted' ||
+    transaction?.testingStatus === 'Tested' ||
+    transaction?.questionnaireStatus === 'Accepted' ||
+    transaction?.questionnaireResponse?.status === 'Accepted' ||
+    transaction?.questionnaireResponse?.reviewDecision === 'Approved' ||
+    transaction?.questionnaireResponse?.reviewDecision === 'Accepted';
+
+  const isReadOnly = Boolean(isReviewMode) || isEvidenceAccepted;
 
   // State Management
   const [loading, setLoading] = useState<boolean>(true);
@@ -101,12 +133,18 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Overall status
-  const [status, setStatus] = useState<string>('Draft');
-  const [isPushed, setIsPushed] = useState<boolean>(false);
-  const [pushedAt, setPushedAt] = useState<string | null>(null);
-  const [pushedBy, setPushedBy] = useState<string | null>(null);
-  const [pushedTo, setPushedTo] = useState<string | null>(null);
+  const [isPushed, setIsPushed] = useState<boolean>(
+    Boolean(transaction?.pushedAt || transaction?.questionnaireResponse?.isPushed || initialStatus !== 'Draft')
+  );
+  const [pushedAt, setPushedAt] = useState<string | null>(
+    transaction?.pushedAt || transaction?.questionnaireResponse?.pushedAt || null
+  );
+  const [pushedBy, setPushedBy] = useState<string | null>(
+    transaction?.pushedBy || transaction?.questionnaireResponse?.pushedBy || null
+  );
+  const [pushedTo, setPushedTo] = useState<string | null>(
+    transaction?.questionnaireResponse?.pushedTo || activeDistributor
+  );
 
   // Questions created by Auditor
   const [questions, setQuestions] = useState<any[]>([]);
@@ -155,10 +193,9 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
         { headers }
       );
       const qData = await qRes.json();
+      let loadedQuestions: any[] = [];
       if (qData.success && Array.isArray(qData.questions)) {
-        setQuestions(qData.questions);
-      } else {
-        setQuestions([]);
+        loadedQuestions = qData.questions;
       }
 
       // 2. Fetch existing responses
@@ -167,19 +204,76 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
         { headers }
       );
       const rData = await rRes.json();
+      let resp: any = null;
       if (rData.success && Array.isArray(rData.responses) && rData.responses.length > 0) {
-        const resp = rData.responses[0];
-        setStatus(resp.status || 'Draft');
-        setIsPushed(resp.isPushed === true || resp.isPushed === 'true');
-        setPushedAt(resp.pushedAt || null);
-        setPushedBy(resp.pushedBy || null);
-        setPushedTo(resp.pushedTo || null);
-        setGeneralNotes(resp.notes || '');
+        resp = rData.responses[0];
+      } else if (transaction?.questionnaireResponse) {
+        resp = transaction.questionnaireResponse;
+      }
+
+      if (resp) {
+        const respStatus = resp.status || (transaction?.testingStatus === 'Tested' ? 'Accepted' : (transaction?.questionnaireStatus || 'Draft'));
+        setStatus(respStatus);
+        const pushedFlag = resp.isPushed === true || resp.isPushed === 'true' || respStatus !== 'Draft';
+        setIsPushed(pushedFlag);
+        setPushedAt(resp.pushedAt || transaction?.pushedAt || null);
+        setPushedBy(resp.pushedBy || transaction?.pushedBy || null);
+        setPushedTo(resp.pushedTo || activeDistributor);
+        setGeneralNotes(resp.notes || resp.distributorRemarks || '');
         setGeneralFiles(resp.uploadedFiles || []);
         setItemResponses(resp.itemResponses || {});
         setActiveClarificationMessage(resp.clarificationMessage || '');
         setClarificationHistory(resp.clarificationHistory || []);
+      } else if (transaction?.questionnaireStatus) {
+        setStatus(transaction.questionnaireStatus);
       }
+
+      // Fallback: If no questions returned by endpoint, fetch from general questions
+      if (loadedQuestions.length === 0) {
+        try {
+          const generalQRes = await fetch(
+            `/api/sampling/questions?auditId=${encodeURIComponent(engagementId || 'eng-101')}&sampleId=${encodeURIComponent(targetSampleId)}&voucherNo=${encodeURIComponent(targetVoucherNo)}&distributorId=${encodeURIComponent(activeDistributor)}`,
+            { headers }
+          );
+          if (generalQRes.ok) {
+            const genData = await generalQRes.json();
+            if (genData.success && Array.isArray(genData.questions) && genData.questions.length > 0) {
+              loadedQuestions = genData.questions.map((q: any) => ({
+                id: q.question_id || q.id,
+                dbId: q.dbId,
+                question_id: q.question_id || q.id,
+                question_text: q.question_text || q.text,
+                testing_classification: q.testing_classification || q.contextClass,
+                required: q.required !== undefined ? q.required : true,
+                scope: q.scope || 'transaction',
+                help_text: q.help_text || ''
+              }));
+            }
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      // Reconcile any items present in resp.itemResponses that might not be in loadedQuestions
+      if (resp && resp.itemResponses) {
+        Object.keys(resp.itemResponses).forEach((qKey) => {
+          const alreadyExists = loadedQuestions.some(
+            q => String(q.dbId || q.question_id || q.id) === String(qKey) || String(q.question_text) === String(qKey)
+          );
+          if (!alreadyExists) {
+            loadedQuestions.push({
+              id: qKey,
+              question_id: qKey,
+              question_text: qKey,
+              required: true,
+              scope: 'transaction'
+            });
+          }
+        });
+      }
+
+      setQuestions(loadedQuestions);
     } catch (err: any) {
       console.error('Failed to load questionnaire data:', err);
       setErrorMessage('Could not load questionnaire details. Please try again.');
@@ -1421,9 +1515,21 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
         {/* Modal Footer Controls */}
         <div className="px-6 py-4 border-t border-slate-800 bg-slate-950/90 flex items-center justify-between gap-4 shrink-0 flex-wrap">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-500">
-              {isPushed ? `Pushed to ${activeDistributor}` : 'Not pushed to distributor yet'}
-            </span>
+            {status === 'Accepted' || isEvidenceAccepted ? (
+              <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                Evidence Accepted • Final Review Verified
+              </span>
+            ) : isPushed || status === 'Submitted' || status === 'Clarification Required' ? (
+              <span className="text-xs text-indigo-300 flex items-center gap-1.5">
+                <Check className="w-3.5 h-3.5 text-indigo-400" />
+                Pushed to {activeDistributor}{pushedAt ? ` (${new Date(pushedAt).toLocaleDateString()})` : ''}
+              </span>
+            ) : (
+              <span className="text-xs text-slate-500">
+                Not pushed to distributor yet
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-2.5">
@@ -1676,63 +1782,10 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
       )}
 
       {/* Document Preview Modal */}
-      {previewDoc && (
-        <div className="fixed inset-0 z-70 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
-            <div className="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {getFileIcon(previewDoc.name)}
-                <span className="text-sm font-bold text-white truncate max-w-md">{previewDoc.name}</span>
-                <span className="text-xs text-slate-500">({previewDoc.size})</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleDownloadFile(previewDoc)}
-                  className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-bold flex items-center gap-1"
-                >
-                  <Download className="h-3 w-3" /> Download
-                </button>
-                <button onClick={() => setPreviewDoc(null)} className="text-slate-400 hover:text-white p-1">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-            </div>
-
-            <div className="flex-1 p-4 bg-slate-950 flex items-center justify-center overflow-auto min-h-[300px]">
-              {previewDoc.type.includes('image') || previewDoc.name.match(/\.(jpg|jpeg|png|webp|gif)$/i) ? (
-                <img 
-                  src={previewDoc.dataUrl || previewDoc.url} 
-                  alt={previewDoc.name} 
-                  className="max-h-[60vh] max-w-full object-contain rounded"
-                  referrerPolicy="no-referrer"
-                />
-              ) : previewDoc.type.includes('pdf') || previewDoc.name.endsWith('.pdf') ? (
-                <iframe 
-                  src={previewDoc.dataUrl || previewDoc.url} 
-                  title={previewDoc.name}
-                  className="w-full h-[60vh] rounded border border-slate-800"
-                />
-              ) : (
-                <div className="text-center space-y-3 p-8">
-                  <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto">
-                    {getFileIcon(previewDoc.name)}
-                  </div>
-                  <h4 className="text-sm font-bold text-slate-200">{previewDoc.name}</h4>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                    Direct browser preview is not supported for this file type ({previewDoc.type || 'binary'}). You can download and open it on your device.
-                  </p>
-                  <button
-                    onClick={() => handleDownloadFile(previewDoc)}
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
-                  >
-                    <Download className="h-4 w-4" /> Download File
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <DocumentViewerModal
+        doc={previewDoc}
+        onClose={() => setPreviewDoc(null)}
+      />
 
     </div>
   );

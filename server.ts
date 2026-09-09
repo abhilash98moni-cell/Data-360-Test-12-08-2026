@@ -1401,11 +1401,15 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
             return false;
           }
           if (sampleId || voucherNo) {
-            const target = cleanStr(sampleId || voucherNo);
+            const targets = [cleanStr(sampleId), cleanStr(voucherNo)].filter(Boolean);
             const qSample = cleanStr(q.sample_id);
             const qVoucher = cleanStr(q.voucher_no || q.voucherNo);
             if (q.scope === 'transaction' || qSample || qVoucher) {
-              return qSample === target || qVoucher === target;
+              const matches = targets.some(t => 
+                (qSample && (qSample === t || qSample.endsWith(t) || t.endsWith(qSample))) ||
+                (qVoucher && (qVoucher === t || qVoucher.endsWith(t) || t.endsWith(qVoucher)))
+              );
+              return matches;
             }
           }
           return true;
@@ -1549,8 +1553,10 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
              return false;
            }
            if (sampleId || voucherNo) {
-             const s = cleanStr(sampleId || voucherNo);
-             return cleanStr(r.sample_id) === s || cleanStr(r.voucher_no) === s || cleanStr(r.voucherNo) === s;
+             const sVals = [cleanStr(sampleId), cleanStr(voucherNo)].filter(Boolean);
+             const rVals = [cleanStr(r.sample_id), cleanStr(r.sampleId), cleanStr(r.voucher_no), cleanStr(r.voucherNo)].filter(Boolean);
+             const hasMatch = sVals.some(s => rVals.includes(s) || rVals.some(r => r.endsWith(s) || s.endsWith(r)));
+             if (!hasMatch) return false;
            }
            return true;
         });

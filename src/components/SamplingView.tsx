@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus,  
-  ArrowLeft, Search, Filter, CheckCircle2, AlertTriangle, 
+  ArrowLeft, Search, Filter, CheckCircle2, AlertTriangle, AlertCircle, XCircle,
   FileText, Info, Save, X, Edit, ExternalLink, Database, ShieldCheck,
   ChevronDown, ChevronUp, Eye, Download, FileSpreadsheet, ImageIcon,
   Paperclip, MessageSquare, HelpCircle, CheckCircle, Clock, File, Send,
@@ -9,6 +9,7 @@ import { Plus,
 import { UserSession } from '../types';
 import { CurrencyMode, formatFinancialAmount } from '../utils/currencyFormatter';
 import { RequiredDataQuestionnaire } from './RequiredDataQuestionnaire';
+import { DocumentViewerModal } from './DocumentViewerModal';
 
 interface SamplingViewProps {
   isEvidenceManagementMode?: boolean;
@@ -221,12 +222,40 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   };
 
   const handleDownloadDoc = (doc: any) => {
+    const fileId = doc.googleDriveFileId || doc.id;
+    const downloadUrl = doc.url || (fileId ? `/api/storage/download/${encodeURIComponent(fileId)}?fileName=${encodeURIComponent(doc.name)}` : '') || doc.dataUrl || '#';
     const link = document.createElement('a');
-    link.href = doc.url || doc.dataUrl || '#';
+    link.href = downloadUrl;
     link.download = doc.name || 'document';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const openDocPreview = (doc: any) => {
+    const fileId = doc.googleDriveFileId || doc.id;
+    const downloadUrl = doc.url || (fileId ? `/api/storage/download/${encodeURIComponent(fileId)}?fileName=${encodeURIComponent(doc.name)}` : '') || doc.dataUrl || '';
+    const previewUrl = doc.dataUrl || (doc.url ? doc.url.replace('/download/', '/preview/') : (fileId ? `/api/storage/preview/${encodeURIComponent(fileId)}?fileName=${encodeURIComponent(doc.name)}` : ''));
+    setPreviewDoc({
+      ...doc,
+      url: downloadUrl,
+      previewUrl: previewUrl,
+      googleDriveFileId: fileId
+    });
+  };
+
+  const getFinalReviewStatus = (rec: any): 'Accepted' | 'Clarification Required' | 'Rejected' | 'Pending Review' => {
+    const qResp = rec.questionnaireResponse;
+    if (qResp?.status === 'Accepted' || rec.testingStatus === 'Tested' || rec.questionnaireStatus === 'Accepted') {
+      return 'Accepted';
+    }
+    if (qResp?.status === 'Clarification Required' || rec.questionnaireStatus === 'Clarification Required') {
+      return 'Clarification Required';
+    }
+    if (qResp?.status === 'Rejected' || rec.questionnaireStatus === 'Rejected') {
+      return 'Rejected';
+    }
+    return 'Pending Review';
   };
 
   const fetchQuestionnaireResponses = async () => {
@@ -981,33 +1010,8 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             </div>
             
             <div className="flex items-center gap-2 pt-1 flex-wrap">
-              <button
-                type="button"
-                onClick={() => setAcceptanceDetailsModalRecord(rec)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-                title="View who accepted the evidence and acceptance date/time"
-              >
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                <span>View Acceptance Details</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setAuditHistoryModalRecord(rec)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/30 hover:bg-amber-900/40 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-                title="View transaction audit history trail"
-              >
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
-                <span>View Audit History</span>
-                {history.length > 0 && (
-                  <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded-full text-[10px] font-mono">
-                    {history.length}
-                  </span>
-                )}
-              </button>
-
               {totalDocsCount > 0 && (
-                <span className="px-2 py-1 bg-slate-800/80 text-slate-300 rounded-lg text-[11px] font-mono border border-slate-700/60">
+                <span className="px-2.5 py-1 bg-slate-800/80 text-slate-300 rounded-lg text-xs font-mono border border-slate-700/60">
                   {totalDocsCount} document{totalDocsCount === 1 ? '' : 's'} attached
                 </span>
               )}
@@ -1031,6 +1035,87 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
               Close Details
             </button>
           </div>
+        </div>
+
+        {/* 1. Acceptance Details Card */}
+        <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-4">
+          <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-emerald-500/20">
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 bg-emerald-500/20 rounded-lg text-emerald-400">
+                <CheckCircle2 className="w-4 h-4" />
+              </span>
+              <div>
+                <h4 className="text-xs font-bold text-emerald-200">Acceptance &amp; Final Review Decision</h4>
+                <p className="text-[11px] text-emerald-400/80">
+                  Evidence verified against audit requirements and approved
+                </p>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full">
+              Accepted
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-3 text-xs">
+            <div>
+              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Accepted By</span>
+              <span className="font-medium text-slate-200 font-mono">{auditorEmail}</span>
+            </div>
+            <div>
+              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Acceptance Timestamp</span>
+              <span className="font-mono text-slate-200">
+                {decisionDate ? new Date(decisionDate).toLocaleString() : 'Recorded in Audit File'}
+              </span>
+            </div>
+            <div>
+              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Review Mode</span>
+              <span className="font-medium text-emerald-300">Read-Only Final Review</span>
+            </div>
+          </div>
+
+          {qResp?.notes && (
+            <div className="mt-3 pt-2 border-t border-emerald-500/20 text-xs text-slate-300">
+              <span className="font-bold text-emerald-300/90 mr-2">Auditor Acceptance Notes:</span>
+              <span>{qResp.notes}</span>
+            </div>
+          )}
+        </div>
+
+        {/* 2. Transaction Summary Card */}
+        <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
+            <div>
+              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Date</span>
+              <span className="font-mono text-slate-200 font-semibold">{rec.date || '—'}</span>
+            </div>
+            <div>
+              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Account</span>
+              <span className="text-slate-200 font-semibold truncate block" title={rec.accountDescription}>
+                {rec.accountDescription || rec.accountNumber || '—'}
+              </span>
+            </div>
+            <div>
+              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Debit</span>
+              <span className="font-mono text-emerald-400 font-bold">
+                {Number(rec.debit) > 0 ? formatCurrency(rec.debit, currencyMode) : '—'}
+              </span>
+            </div>
+            <div>
+              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Credit</span>
+              <span className="font-mono text-indigo-400 font-bold">
+                {Number(rec.credit) > 0 ? formatCurrency(rec.credit, currencyMode) : '—'}
+              </span>
+            </div>
+          </div>
+          {rec.description && (
+            <div className="mt-3 pt-3 border-t border-slate-800/60 text-xs text-slate-300">
+              <span className="font-bold text-slate-400 mr-2">Description:</span>
+              <span>{rec.description}</span>
+              {rec.narration && rec.narration !== rec.description && rec.narration !== '—' && (
+                <span className="text-slate-500 ml-2">({rec.narration})</span>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Persisted Questions & Distributor Responses */}
@@ -1142,8 +1227,8 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                               <div className="flex items-center gap-1 shrink-0">
                                 <button
                                   type="button"
-                                  onClick={() => setPreviewDoc(doc)}
-                                  className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                                  onClick={() => openDocPreview(doc)}
+                                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
                                 >
                                   <Eye className="w-3 h-3" /> View
                                 </button>
@@ -1157,48 +1242,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                               </div>
                             </div>
                           ))}
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Review Decision Info / Acceptance Details */}
-                    <div className="pt-1">
-                      {!expandedItemAcceptance.has(qKey + rec.id) ? (
-                        <button
-                          type="button"
-                          onClick={() => toggleItemAcceptance(qKey + rec.id)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
-                          title="View who accepted the evidence and acceptance date/time"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>View Acceptance Details</span>
-                        </button>
-                      ) : (
-                        <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl space-y-2">
-                          <div className="flex items-center justify-between flex-wrap gap-2">
-                            <div className="flex items-center gap-2">
-                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 uppercase">
-                                Evidence Accepted
-                              </span>
-                              <span className="text-xs text-slate-300">
-                                Accepted by: <strong className="text-emerald-300 font-mono">{itemAuditor}</strong>
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-3">
-                              {itemDecisionDate && (
-                                <span className="text-xs text-slate-400 font-mono">
-                                  {new Date(itemDecisionDate).toLocaleString()}
-                                </span>
-                              )}
-                              <button
-                                type="button"
-                                onClick={() => toggleItemAcceptance(qKey + rec.id)}
-                                className="text-[11px] text-slate-400 hover:text-slate-200 underline cursor-pointer"
-                              >
-                                Hide
-                              </button>
-                            </div>
-                          </div>
                         </div>
                       )}
                     </div>
@@ -1242,8 +1285,8 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
-                          onClick={() => setPreviewDoc(doc)}
-                          className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                          onClick={() => openDocPreview(doc)}
+                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
                         >
                           <Eye className="w-3 h-3" /> View
                         </button>
@@ -1559,44 +1602,66 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                 </td>
                 )}
                 <td className="py-2.5 px-4 bg-slate-900/40 text-center">
-                  <div className="flex flex-col items-center gap-1.5 min-w-[190px]">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                      Accepted
-                    </span>
-                    <div className="flex items-center gap-1 flex-wrap justify-center">
+                  <div className="flex flex-col items-center gap-2 min-w-[170px]">
+                    {/* Final Review Status Badge */}
+                    {(() => {
+                      const status = getFinalReviewStatus(rec);
+                      if (status === 'Accepted') {
+                        return (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                            Accepted
+                          </span>
+                        );
+                      }
+                      if (status === 'Clarification Required') {
+                        return (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
+                            <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
+                            Clarification Required
+                          </span>
+                        );
+                      }
+                      if (status === 'Rejected') {
+                        return (
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm">
+                            <XCircle className="w-3.5 h-3.5 text-rose-400" />
+                            Rejected
+                          </span>
+                        );
+                      }
+                      return (
+                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-800 text-slate-300 border border-slate-700 shadow-sm">
+                          <Clock className="w-3.5 h-3.5 text-slate-400" />
+                          Pending Review
+                        </span>
+                      );
+                    })()}
+
+                    {/* ONLY Details and History buttons */}
+                    <div className="flex items-center gap-1.5 justify-center">
                       <button
                         type="button"
                         onClick={() => toggleRowExpand(rec.id)}
-                        className={`px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all border ${
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all border ${
                           expandedRowIds.has(rec.id)
                             ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
                             : 'bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border-slate-700'
                         }`}
-                        title="View full accepted questionnaire details, distributor responses, uploaded evidence, and audit decision"
+                        title="View questionnaire details, uploaded evidence, and acceptance information"
                       >
-                        <FileText className="w-3 h-3 text-indigo-400" />
+                        <FileText className="w-3.5 h-3.5 text-indigo-400" />
                         <span>{expandedRowIds.has(rec.id) ? 'Hide' : 'Details'}</span>
-                        {expandedRowIds.has(rec.id) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setAcceptanceDetailsModalRecord(rec)}
-                        className="px-2 py-1 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-                        title="View who accepted the evidence and acceptance date/time"
-                      >
-                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                        <span>Acceptance</span>
+                        {expandedRowIds.has(rec.id) ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                       </button>
 
                       <button
                         type="button"
                         onClick={() => setAuditHistoryModalRecord(rec)}
-                        className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-amber-300 hover:text-amber-200 border border-amber-500/30 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-750 text-amber-300 hover:text-amber-200 border border-amber-500/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
                         title="View audit history trail for this specific transaction"
                       >
-                        <Clock className="w-3 h-3 text-amber-400" />
+                        <Clock className="w-3.5 h-3.5 text-amber-400" />
                         <span>History</span>
                       </button>
                     </div>
@@ -2090,14 +2155,18 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       {/* Full Questionnaire Read-Only Modal */}
       {fullModalRecord && (
         <RequiredDataQuestionnaire
+          transaction={fullModalRecord}
+          currentUser={currentUser}
           isOpen={true}
           onClose={() => setFullModalRecord(null)}
           targetSampleId={fullModalRecord.sampleId || fullModalRecord.id}
           targetVoucherNo={fullModalRecord.voucherNo && fullModalRecord.voucherNo !== '—' ? fullModalRecord.voucherNo : (fullModalRecord.sampleId || fullModalRecord.id)}
           targetClassification={Array.isArray(fullModalRecord.testingClassification) ? fullModalRecord.testingClassification[0] : fullModalRecord.testingClassification}
           selectedClient={selectedClient}
+          selectedDistributor={selectedDistributor}
           distributorName={selectedDistributor}
           engagementId={selectedAuditFilter || 'eng-101'}
+          currencyMode={currencyMode}
           isDistributor={false}
           isAuditor={true}
           isReviewMode={true}
@@ -2333,76 +2402,10 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       })()}
 
       {/* Supporting Evidence File Preview Modal */}
-      {previewDoc && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
-            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/60">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="p-2 bg-slate-800 rounded-lg">
-                  {getFileIcon(previewDoc.name)}
-                </div>
-                <div className="min-w-0">
-                  <h3 className="text-sm font-bold text-white truncate max-w-md" title={previewDoc.name}>
-                    {previewDoc.name}
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    {previewDoc.size || 'Supporting Evidence Document'}
-                    {previewDoc.uploadDate && ` • Uploaded ${new Date(previewDoc.uploadDate).toLocaleString()}`}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleDownloadDoc(previewDoc)}
-                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Download className="w-3.5 h-3.5" /> Download
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreviewDoc(null)}
-                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                >
-                  <X className="w-5 h-5" />
-                </button>
-              </div>
-            </div>
-            <div className="flex-1 p-6 overflow-y-auto flex items-center justify-center bg-slate-950/40 min-h-[360px]">
-              {previewDoc.type?.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)$/i.test(previewDoc.name) ? (
-                <img
-                  src={previewDoc.url || previewDoc.dataUrl}
-                  alt={previewDoc.name}
-                  className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg border border-slate-800"
-                />
-              ) : previewDoc.type === 'application/pdf' || previewDoc.name?.toLowerCase().endsWith('.pdf') ? (
-                <iframe
-                  src={previewDoc.url || previewDoc.dataUrl}
-                  title={previewDoc.name}
-                  className="w-full h-[70vh] rounded-lg border border-slate-800 bg-white"
-                />
-              ) : (
-                <div className="text-center p-8 space-y-3">
-                  <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mx-auto text-indigo-400 shadow-inner">
-                    {getFileIcon(previewDoc.name)}
-                  </div>
-                  <p className="text-sm font-bold text-slate-200">{previewDoc.name}</p>
-                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
-                    This file format is best previewed locally or in an external application.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => handleDownloadDoc(previewDoc)}
-                    className="mt-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer shadow-lg shadow-indigo-600/20"
-                  >
-                    <Download className="w-4 h-4" /> Download File ({previewDoc.size || 'Attachment'})
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <DocumentViewerModal
+        doc={previewDoc}
+        onClose={() => setPreviewDoc(null)}
+      />
     </div>
   );
 };
