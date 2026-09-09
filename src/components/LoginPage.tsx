@@ -50,61 +50,81 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
 
     if (mode === 'register') {
       try {
-        // Direct browser SDK insert into Supabase pending_signup_requests table
-        const { error: dbError } = await supabase.from('pending_signup_requests').insert({
+        const { data: authData, error: authError } = await supabase.auth.signUp({ 
+          email, 
+          password,
+          options: {
+            data: { role, organization: org, full_name: fullName }
+          }
+        });
+        
+        if (authError) {
+          setErrorMessage(authError.message);
+          setIsSubmitting(false);
+          return;
+        }
+
+        // Also track the request in the pending table for the admin approval dashboard
+        await supabase.from('pending_signup_requests').insert({
           email,
-          password_hash: password,
           full_name: fullName || email.split('@')[0],
           role: role.toLowerCase(),
           organization: org,
-          status: 'pending'
+          status: 'pending' // Admin must approve this
         });
 
-        if (dbError) {
-          console.warn('Supabase DB Insert Note:', dbError.message);
-        }
-
-        // Send to backend API
-        const res = await fetch('/api/auth/signup-request', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password, fullName, role, organization: org })
-        });
-        const data = await res.json();
-
-        if ((res.ok && data.success) || !dbError) {
-          setSuccessMessage('Signup Request Submitted! Your account request is stored in Supabase pending_signup_requests and awaiting Admin approval.');
-          setEmail('');
-          setPassword('');
-          setFullName('');
-          setDistributorName('');
-        } else {
-          setErrorMessage(data.error || dbError?.message || 'Failed to submit signup request');
-        }
-      } catch (err: any) {
+        // The user is created in Supabase Auth.
+        // In many setups, they require email verification, but assuming it's auto-confirmed or we just wait for admin approval
         setSuccessMessage('Signup request registered! Pending Admin approval.');
+      } catch (err: any) {
+        setErrorMessage('Failed to submit signup request: ' + err.message);
       } finally {
         setIsSubmitting(false);
       }
     } else {
       try {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, password })
-        });
-        const data = await res.json();
-
-        if (res.ok && data.success) {
-          setSuccessMessage('Logged in successfully!');
-          setTimeout(() => {
-            onLogin(data.user);
-          }, 500);
-        } else {
-          setErrorMessage(data.error || 'Invalid email or password');
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) throw error;
+        
+        // Ensure user has been approved by checking pending_signup_requests
+        const { data: requestStatus, error: reqError } = await supabase
+           .from('pending_signup_requests')
+           .select('status')
+           .eq('email', email)
+           .single();
+           
+        if (requestStatus && requestStatus.status !== 'approved') {
+           // Reject login if pending
+           setErrorMessage('Your account is still pending admin approval.');
+           setIsSubmitting(false);
+           // Sign them out of Supabase auth just in case
+           await supabase.auth.signOut();
+           return;
         }
+
+        const metadata = data.user.user_metadata || {};
+        const rawRole = (metadata.role || 'Auditor').toLowerCase();
+        const role = rawRole === 'admin' ? 'Admin' : rawRole === 'distributor' ? 'Distributor' : 'Auditor';
+        const organization = metadata.organization || (role === 'Auditor' ? 'Apex Audit Practice' : 'Midwest Trading Co.');
+        
+        const userSession = {
+          id: data.user.id,
+          email: data.user.email,
+          role,
+          organization,
+          name: metadata.full_name || data.user.email?.split('@')[0] || 'User'
+        };
+        
+        if (data.session) {
+           localStorage.setItem('supabase.auth.token', data.session.access_token);
+        }
+        
+        setSuccessMessage('Logged in successfully!');
+        setTimeout(() => {
+          onLogin(userSession);
+        }, 500);
       } catch (err: any) {
-        setErrorMessage('Login failed. Ensure your account has been approved by the Admin.');
+        setErrorMessage(err.message || 'Login failed. Ensure your account has been approved by the Admin.');
       } finally {
         setIsSubmitting(false);
       }

@@ -1,8 +1,7 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
+const fs = require('fs');
+let code = fs.readFileSync('src/main.tsx', 'utf-8');
 
-
+const fetchPatch = `
 // Monkey-patch fetch to automatically include the Supabase auth token
 const originalFetch = window.fetch;
 window.fetch = async (...args) => {
@@ -32,11 +31,10 @@ window.fetch = async (...args) => {
   }
   return originalFetch(resource, config);
 };
+`;
 
-import './index.css';
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+if (!code.includes('Monkey-patch fetch')) {
+  // insert after imports
+  code = code.replace(/import App from '\.\/App\.tsx';\n/, "import App from './App.tsx';\n\n" + fetchPatch + "\n");
+  fs.writeFileSync('src/main.tsx', code);
+}
