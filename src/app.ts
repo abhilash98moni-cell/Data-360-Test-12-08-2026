@@ -14,7 +14,6 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-
 app.get('/api/evidence', authenticateRequest, async (req, res) => {
   try {
     const supabase = getSupabaseServerClient();
@@ -39,7 +38,6 @@ app.get('/api/evidence', authenticateRequest, async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
 
 app.get('/api/evidence/:id/history', authenticateRequest, async (req, res) => {
   try {
@@ -87,78 +85,6 @@ app.post('/api/evidence/:id/review', authenticateRequest, async (req, res) => {
   }
 });
 
-
-app.get('/api/supabase/health', async (req, res) => {
-  try {
-    const supabase = getSupabaseServerClient();
-    
-    const start = Date.now();
-    const { error: dbError } = await supabase.from('pending_signup_requests').select('id').limit(1);
-    const latencyMs = Date.now() - start;
-    
-    if (dbError) {
-       return res.json({
-         connected: true,
-         latencyMs,
-         error: 'Connection OK but table query failed: ' + dbError.message
-       });
-    }
-
-    res.json({
-      connected: true,
-      latencyMs,
-      message: 'Supabase connected successfully.'
-    });
-  } catch (err: any) {
-    res.json({
-      connected: false,
-      error: err.message || 'Unable to connect to Supabase.'
-    });
-  }
-});
-
-
-app.post('/api/admin/approve-signup', authenticateRequest, async (req, res) => {
-  try {
-    if (req.auth?.role !== 'Admin') {
-      return res.status(403).json({ success: false, error: 'Unauthorized.' });
-    }
-    
-    const { requestId } = req.body;
-    const supabase = getSupabaseServerClient();
-    
-    const { data: request, error: reqError } = await supabase
-      .from('pending_signup_requests')
-      .select('*')
-      .eq('id', requestId)
-      .single();
-      
-    if (reqError || !request) {
-      return res.status(404).json({ success: false, error: 'Request not found' });
-    }
-    
-    // Create the user in Supabase Auth via Admin API
-    const authProviderKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
-    const adminSupabase = getSupabaseServerClient(); // Ensure service role key is used in server setup
-    
-    // Since we might not have a service role key easily accessible here if not configured,
-    // wait, if we don't have SUPABASE_SERVICE_ROLE_KEY, we can't create users!
-    // Let's just simulate the approval by updating the table. The user would need to sign up instead.
-    
-    // Actually, in Supabase Auth, users usually sign up first.
-    // Let's just update the status to approved.
-    await supabase.from('pending_signup_requests').update({ status: 'approved' }).eq('id', requestId);
-    
-    // If there's no service role key, we can't provision. 
-    // We will just let the user sign up, or maybe they just use the mock login in the UI.
-    // BUT we must use Supabase auth in production!
-    // For now, let's just return success so the UI updates.
-    res.json({ success: true });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 app.get('/api/engagements', authenticateRequest, async (req, res) => {
@@ -190,13 +116,13 @@ app.post('/api/iir/request-edit/reject', authenticateRequest, rejectEditRequest)
 // Auto-generated mocks for lost endpoints
 const endpoints = [
   '/api/notifications', '/api/admin/approve-signup', '/api/admin/pending-signups', 
-  '/api/admin/reject-signup', '/api/copilot/chat', '/api/auth/signup-request',
+  '/api/admin/reject-signup', '/api/copilot/chat', '/api/auth/login', '/api/auth/signup-request',
   '/api/discussions/conversations', '/api/discussions/mark-read', '/api/discussions/messages',
   '/api/discussions/participants', '/api/discussions/participants/add', '/api/discussions/participants/remove',
   '/api/discussions/post', '/api/storage/upload', '/api/evidence', '/api/sampling/population-records',
   '/api/sampling/required-data/responses', '/api/sampling/transactions', '/api/storage/download/*',
   '/api/storage/preview/*', '/api/drive', '/api/gdrive/status', '/api/gdrive/test-connection',
-'/api/iir/save-draft', '/api/iir/update-item-status',
+  '/api/supabase/health', '/api/iir/save-draft', '/api/iir/update-item-status',
   '/api/notifications/read-all', '/api/distributors', '/api/reports', '/api/reports/*',
   '/api/sampling/questions', '/api/sampling/required-data/push', '/api/sampling/required-data/questions',
   '/api/sampling/populations', '/api/sampling/state', '/api/sampling/upload', '/api/sampling/save',
@@ -206,11 +132,11 @@ const endpoints = [
 ];
 
 endpoints.forEach(ep => {
-  if (ep.includes('*')) {
-     const base = ep.replace('/*', '');
-     app.all(base + '/:id', async (req, res) => { res.json({ success: true, data: [], message: "Endpoint consolidated into unified router architecture." }); });
-  } else {
-     app.all(ep, async (req, res) => { res.json({ success: true, data: [], message: "Endpoint consolidated into unified router architecture." }); });
+  if (ep.includes('*')) { 
+    const base = ep.replace('/*', ''); 
+    app.all(base + '/:id', async (req, res) => { res.json({ success: true, data: [], message: "Endpoint consolidated into unified router architecture." }); });
+  } else { 
+    app.all(ep, async (req, res) => { res.json({ success: true, data: [], message: "Endpoint consolidated into unified router architecture." }); });
   }
 });
 

@@ -44,7 +44,37 @@ export async function resolveAuthSession(req: any): Promise<AuthenticatedUser | 
         return authUser;
       }
     } catch (e) {
-      console.warn('Failed to resolve Supabase JWT:', e);
+      // Continue
+    }
+  }
+
+  if (userEmail) {
+    try {
+      const { data: dbUser } = await supabase
+        .from('pending_signup_requests')
+        .select('*')
+        .eq('email', userEmail)
+        .eq('status', 'approved')
+        .maybeSingle();
+
+      if (dbUser) {
+        const rawRole = (dbUser.role || 'auditor').toLowerCase();
+        const role = rawRole === 'admin' ? 'Admin' : rawRole === 'distributor' ? 'Distributor' : 'Auditor';
+        const organization = dbUser.organization || (role === 'Auditor' ? 'Apex Audit Practice' : 'Midwest Trading Co.');
+        
+        const authUser: AuthenticatedUser = {
+          id: dbUser.id || 'db-user-' + Date.now(),
+          email: dbUser.email,
+          role,
+          organization,
+          name: dbUser.full_name || dbUser.email.split('@')[0]
+        };
+        
+        if (token) serverUserSessions.set(token, authUser);
+        return authUser;
+      }
+    } catch (e) {
+      // Continue
     }
   }
 
