@@ -14,6 +14,79 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+
+app.get('/api/evidence', authenticateRequest, async (req, res) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    let query = supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_RECORD');
+    
+    if (req.query.client && req.query.client !== 'All Clients') {
+      query = query.contains('details', { clientName: req.query.client });
+    }
+    if (req.query.auditId && req.query.auditId !== 'All Audits') {
+      query = query.contains('details', { auditId: req.query.auditId });
+    }
+    if (req.query.distributor && req.query.distributor !== 'All Distributors' && req.query.distributor !== 'all') {
+      query = query.contains('details', { distributorName: req.query.distributor });
+    }
+    
+    const { data, error } = await query;
+    if (error) throw error;
+    
+    const records = data.map(d => ({ id: d.id, ...d.details }));
+    res.json({ success: true, records });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+
+app.get('/api/evidence/:id/history', authenticateRequest, async (req, res) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    const { data } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_RECORD').eq('id', req.params.id);
+    if (!data || data.length === 0) return res.json({ success: true, history: [] });
+    res.json({ success: true, history: data[0].details?.history || [] });
+  } catch (e) {
+    res.json({ success: false, history: [] });
+  }
+});
+
+app.patch('/api/evidence/:id/usage', authenticateRequest, async (req, res) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    const { data } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_RECORD').eq('id', req.params.id);
+    if (!data || data.length === 0) return res.status(404).json({ success: false });
+    
+    let details = data[0].details || {};
+    details.documentUsage = req.body.usage || req.body.documentUsage || details.documentUsage;
+    
+    await supabase.from('system_audit_logs').update({ details }).eq('id', req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false });
+  }
+});
+
+app.post('/api/evidence/:id/review', authenticateRequest, async (req, res) => {
+  try {
+    const supabase = getSupabaseServerClient();
+    const { data } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_RECORD').eq('id', req.params.id);
+    if (!data || data.length === 0) return res.status(404).json({ success: false });
+    
+    let details = data[0].details || {};
+    details.status = req.body.status || details.status;
+    details.reviewerComment = req.body.comment || details.reviewerComment;
+    details.reviewedBy = req.auth?.name || 'Reviewer';
+    details.reviewedDate = new Date().toISOString();
+    
+    await supabase.from('system_audit_logs').update({ details }).eq('id', req.params.id);
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ success: false });
+  }
+});
+
 app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
 
 app.get('/api/engagements', authenticateRequest, async (req, res) => {
