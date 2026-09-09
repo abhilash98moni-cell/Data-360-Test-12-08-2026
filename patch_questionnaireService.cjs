@@ -1,4 +1,6 @@
-import { getSupabaseServerClient } from '../lib/supabaseServer.js';
+const fs = require('fs');
+
+const newCode = `import { getSupabaseServerClient } from '../lib/supabaseServer.js';
 export { getSupabaseServerClient };
 
 export interface AuthoritativeQuestionnaireRecord {
@@ -33,3 +35,6 @@ export async function reviewAuthoritativeQuestionnaireEditAccess(clientName: str
 export async function customizeAuthoritativeQuestionnaire(clientName: string, distName: string, auditId: string, customSections: any[], userEmail: string, userName: string): Promise<AuthoritativeQuestionnaireRecord> {
   throw new Error("Endpoint not implemented.");
 }
+`;
+
+fs.writeFileSync('src/services/questionnaireService.ts', newCode);

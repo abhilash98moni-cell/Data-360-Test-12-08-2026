@@ -1,4 +1,6 @@
-import { getSupabaseServerClient } from '../lib/supabaseServer.js';
+const fs = require('fs');
+
+const newCode = `import { getSupabaseServerClient } from '../lib/supabaseServer.js';
 import { getItemCompletionDetails } from '../utils/irlValidation.js';
 export { getSupabaseServerClient };
 
@@ -69,7 +71,7 @@ export async function saveAuthoritativeIRLState(clientName: string, distName: st
     .select()
     .single();
 
-  if (qError) throw new Error(`Failed to save questionnaire: ${qError.message}`);
+  if (qError) throw new Error(\`Failed to save questionnaire: \${qError.message}\`);
 
   // Upsert Items
   if (state.requests && state.requests.length > 0) {
@@ -122,3 +124,6 @@ export async function getAuthoritativeEditRequests(clientName?: string, distName
 export async function reviewAuthoritativeEditRequest(params: any) {
   throw new Error("Edit requests must be migrated to proper relational tables.");
 }
+`;
+
+fs.writeFileSync('src/services/irlService.ts', newCode);

@@ -3,5 +3,10 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SER
 
 async function check() {
   const { data, error } = await supabase
-    .rpc('get_tables'); // Or try querying directly if they didn't block it, but standard rpc doesn't exist for this
+    .from('information_schema.tables')
+    .select('table_name')
+    .eq('table_schema', 'public');
+  console.log("Error:", error);
+  console.log("Tables:", data);
 }
+check();

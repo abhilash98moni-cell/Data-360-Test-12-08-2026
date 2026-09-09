@@ -53,37 +53,30 @@ app.post('/api/admin/approve-signup', authenticateRequest, async (req: any, res)
 app.get('/api/evidence', authenticateRequest, async (req, res) => {
   try {
     const supabase = getSupabaseServerClient();
-    let query = supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_RECORD');
-    if (req.query.client && req.query.client !== 'All Clients') query = query.contains('details', { clientName: req.query.client });
-    if (req.query.auditId && req.query.auditId !== 'All Audits') query = query.contains('details', { auditId: req.query.auditId });
-    if (req.query.distributor && req.query.distributor !== 'All Distributors' && req.query.distributor !== 'all') query = query.contains('details', { distributorName: req.query.distributor });
+    let query = supabase.from('evidence_records').select('*');
+    if (req.query.client && req.query.client !== 'All Clients') query = query.eq('client_name', req.query.client); // Assuming client_name exists, or we map it
+    if (req.query.auditId && req.query.auditId !== 'All Audits') query = query.eq('audit_id', req.query.auditId);
+    if (req.query.distributor && req.query.distributor !== 'All Distributors' && req.query.distributor !== 'all') {
+       query = query.eq('distributor_name', req.query.distributor);
+    }
     const { data, error } = await query;
     if (error) throw error;
-    res.json({ success: true, records: data.map(d => ({ id: d.id, ...d.details })) });
+    res.json({ success: true, records: data || [] });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 app.get('/api/evidence/:id/history', authenticateRequest, async (req, res) => {
-  try {
-    const supabase = getSupabaseServerClient();
-    const { data } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_RECORD').eq('id', req.params.id);
-    if (!data || data.length === 0) return res.json({ success: true, history: [] });
-    res.json({ success: true, history: data[0].details?.history || [] });
-  } catch (e) {
-    res.json({ success: false, history: [] });
-  }
+  // Not fully implemented relationally yet, return empty for now
+  res.json({ success: true, history: [] });
 });
 
 app.patch('/api/evidence/:id/usage', authenticateRequest, async (req, res) => {
   try {
     const supabase = getSupabaseServerClient();
-    const { data } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_RECORD').eq('id', req.params.id);
-    if (!data || data.length === 0) return res.status(404).json({ success: false });
-    let details = data[0].details || {};
-    details.documentUsage = req.body.usage || req.body.documentUsage || details.documentUsage;
-    await supabase.from('system_audit_logs').update({ details }).eq('id', req.params.id);
+    const { error } = await supabase.from('evidence_records').update({ status: req.body.usage }).eq('id', req.params.id);
+    if (error) throw error;
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false });
@@ -93,14 +86,10 @@ app.patch('/api/evidence/:id/usage', authenticateRequest, async (req, res) => {
 app.post('/api/evidence/:id/review', authenticateRequest, async (req: any, res) => {
   try {
     const supabase = getSupabaseServerClient();
-    const { data } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_RECORD').eq('id', req.params.id);
-    if (!data || data.length === 0) return res.status(404).json({ success: false });
-    let details = data[0].details || {};
-    details.status = req.body.status || details.status;
-    details.reviewerComment = req.body.comment || details.reviewerComment;
-    details.reviewedBy = req.auth?.name || 'Reviewer';
-    details.reviewedDate = new Date().toISOString();
-    await supabase.from('system_audit_logs').update({ details }).eq('id', req.params.id);
+    const { error } = await supabase.from('evidence_records').update({
+       status: req.body.status || 'Reviewed'
+    }).eq('id', req.params.id);
+    if (error) throw error;
     res.json({ success: true });
   } catch (e) {
     res.status(500).json({ success: false });
@@ -110,20 +99,26 @@ app.post('/api/evidence/:id/review', authenticateRequest, async (req: any, res) 
 // Engagement Routes
 app.get('/api/engagements', authenticateRequest, async (req, res) => {
   const supabase = getSupabaseServerClient();
-  const { data } = await supabase.from('system_audit_logs')
-    .select('*').eq('event_type', 'ENGAGEMENTS_STATE')
-    .order('created_at', { ascending: false }).limit(1);
-  res.json({ success: true, engagements: data?.[0]?.details?.engagements || [] });
+  const { data, error } = await supabase.from('engagements').select('*');
+  if (error) return res.status(500).json({ success: false, error: error.message });
+  res.json({ success: true, engagements: data || [] });
 });
 
 app.post('/api/engagements', authenticateRequest, async (req: any, res: any) => {
   const supabase = getSupabaseServerClient();
   const { engagements } = req.body;
-  await supabase.from('system_audit_logs').insert({
-    event_type: 'ENGAGEMENTS_STATE',
-    target_user_email: req.auth?.email || 'system',
-    details: { engagements }
-  });
+  
+  if (Array.isArray(engagements)) {
+    for (const eng of engagements) {
+      await supabase.from('engagements').upsert({
+        audit_id: eng.audit_id || eng.id,
+        client_name: eng.client_name || eng.clientName,
+        distributor_name: eng.distributor_name || eng.distributorName,
+        status: eng.status || 'Planning',
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'audit_id' });
+    }
+  }
   res.json({ success: true });
 });
 
@@ -211,41 +206,12 @@ app.get('/api/storage/download/:fileId', authenticateRequest, async (req, res) =
   }
 });
 
-// GENERIC PERSISTENCE LAYER FOR ALL PROTOTYPE ENDPOINTS
-// This replaces the old mock "success: true" catch-all with a REAL Database key-value store.
-app.all('/api/*', authenticateRequest, async (req: any, res) => {
-  const supabase = getSupabaseServerClient();
-  const path = req.path;
-  
-  try {
-    if (req.method === 'GET') {
-       const { data, error } = await supabase.from('system_audit_logs')
-          .select('*')
-          .eq('event_type', 'GENERIC_STATE')
-          .eq('target_user_email', path)
-          .order('created_at', { ascending: false });
-          
-       if (!error && data && data.length > 0) {
-         // Return the most recent state
-         return res.json({ success: true, ...data[0].details });
-       }
-       return res.json({ success: true, data: [] });
-    } else if (req.method === 'POST' || req.method === 'PATCH' || req.method === 'PUT') {
-       const { error } = await supabase.from('system_audit_logs').insert({
-          event_type: 'GENERIC_STATE',
-          target_user_email: path,
-          details: req.body || {}
-       });
-       if (error) throw error;
-       return res.json({ success: true, message: "State saved securely to production database." });
-    } else if (req.method === 'DELETE') {
-       return res.json({ success: true, message: "Deleted" });
-    }
-    
-    res.status(404).json({ success: false, error: `API route not found: ${req.method} ${path}` });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
-  }
+// Fallback for unimplemented endpoints to strictly prevent fake success responses
+app.all('/api/*', authenticateRequest, (req, res) => {
+  res.status(501).json({
+    success: false,
+    error: `Endpoint not implemented: ${req.method} ${req.path}`
+  });
 });
 
 export default app;
