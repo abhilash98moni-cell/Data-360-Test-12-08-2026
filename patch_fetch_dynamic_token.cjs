@@ -1,8 +1,7 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
+const fs = require('fs');
+let code = fs.readFileSync('src/main.tsx', 'utf-8');
 
-
+const fetchPatch = `
 // Intercept fetch to automatically inject the Supabase session token dynamically
 import { supabase } from './lib/supabaseClient.ts';
 
@@ -37,11 +36,14 @@ Object.defineProperty(window, 'fetch', {
     return originalFetch(resource, config);
   }
 });
+`;
 
-import './index.css';
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+// Replace the previous patch
+const regex = /\/\/ Intercept fetch to automatically inject the Supabase session token[\s\S]*?\}\);/;
+if (code.match(regex)) {
+  code = code.replace(regex, fetchPatch.trim());
+  fs.writeFileSync('src/main.tsx', code);
+  console.log('Patched main.tsx for dynamic token');
+} else {
+  console.log('Regex failed');
+}

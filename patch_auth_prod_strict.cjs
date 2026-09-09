@@ -1,20 +1,11 @@
-import { Request, Response, NextFunction } from 'express';
-import { getSupabaseServerClient } from '../lib/supabaseServer.js';
+const fs = require('fs');
+let code = fs.readFileSync('src/middleware/auth.ts', 'utf-8');
 
-export interface AuthenticatedUser {
-  id: string;
-  email: string;
-  role: 'Admin' | 'Auditor' | 'Distributor' | string;
-  organization: string;
-  name: string;
-}
-
-const serverUserSessions = new Map<string, AuthenticatedUser>();
-
+const newResolve = `
 export async function resolveAuthSession(req: any): Promise<AuthenticatedUser | null> {
   const authHeader = req.headers.authorization;
   const sessionHeader = req.headers['x-session-token'] as string;
-  const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : (sessionHeader || '');
+  const token = authHeader ? authHeader.replace(/^Bearer\\s+/i, '').trim() : (sessionHeader || '');
 
   if (token && serverUserSessions.has(token)) {
     return serverUserSessions.get(token)!;
@@ -64,23 +55,8 @@ export async function resolveAuthSession(req: any): Promise<AuthenticatedUser | 
 
   return null;
 }
+`;
 
-export async function authenticateRequest(req: any, res: Response, next: NextFunction) {
-  try {
-    const userAuth = await resolveAuthSession(req);
-    if (!userAuth) {
-      return res.status(401).json({
-        success: false,
-        error: 'HTTP 401 Unauthorized: Valid authentication token or session is required.'
-      });
-    }
-    req.auth = userAuth;
-    req.user = userAuth;
-    next();
-  } catch (err) {
-    return res.status(401).json({
-      success: false,
-      error: 'HTTP 401 Unauthorized: Authentication verification failed.'
-    });
-  }
-}
+const blockRegex = /export async function resolveAuthSession.*?return null;\n\}/s;
+code = code.replace(blockRegex, newResolve.trim());
+fs.writeFileSync('src/middleware/auth.ts', code);

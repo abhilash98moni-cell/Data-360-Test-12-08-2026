@@ -1,3 +1,4 @@
+import { supabase } from './lib/supabaseClient';
 import React, { useState } from 'react';
 import { Header } from './components/Header';
 import { NavigationSidebar, ActiveTab } from './components/NavigationSidebar';
@@ -156,14 +157,38 @@ React.useEffect(() => {
   const [targetVoucherNo, setTargetVoucherNo] = useState<string | null>(null);
 
   // Active User Session State — Loaded from localStorage if available
+  
+  // Sync Supabase Auth state with our app state
+  React.useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT') {
+        setCurrentUser(null);
+        localStorage.removeItem('data360_active_user');
+      } else if (event === 'SIGNED_IN' && session) {
+        // If there's no currentUser, but we just signed in, it might be handled by LoginPage already,
+        // but we can ensure they stay in sync. Let's not blindly overwrite currentUser if they just logged in,
+        // because LoginPage builds the userSession object with role/organization.
+      } else if (event === 'INITIAL_SESSION' && !session) {
+         // If Supabase says absolutely no session on load, clear our local storage mock just in case
+         setCurrentUser(null);
+         localStorage.removeItem('data360_active_user');
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
+  }, []);
+
   const [currentUser, setCurrentUser] = useState<UserSession | null>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('data360_active_user');
-      if (saved) {
+      if (saved && saved !== 'undefined') {
         try {
           return JSON.parse(saved);
         } catch (err) {
           console.error('Failed to parse saved user session:', err);
+          localStorage.removeItem('data360_active_user');
         }
       }
     }
@@ -241,11 +266,12 @@ React.useEffect(() => {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setCurrentUser(null);
     if (typeof window !== 'undefined') {
       localStorage.removeItem('data360_active_user');
     }
+    await supabase.auth.signOut();
   };
 
   // Effective distributor scope

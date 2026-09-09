@@ -1,11 +1,8 @@
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
+const fs = require('fs');
+let code = fs.readFileSync('src/main.tsx', 'utf-8');
 
-
-// Intercept fetch to automatically inject the Supabase session token dynamically
-import { supabase } from './lib/supabaseClient.ts';
-
+const fetchPatch = `
+// Intercept fetch to automatically inject the Supabase session token
 const originalFetch = window.fetch;
 Object.defineProperty(window, 'fetch', {
   configurable: true,
@@ -17,10 +14,7 @@ Object.defineProperty(window, 'fetch', {
       config = config || {};
       config.headers = config.headers || {};
       
-      // Get the freshest token directly from Supabase client
-      const { data } = await supabase.auth.getSession();
-      const token = data?.session?.access_token;
-      
+      const token = localStorage.getItem('supabase.auth.token');
       if (token) {
         if (config.headers instanceof Headers) {
           if (!config.headers.has('Authorization')) {
@@ -37,11 +31,9 @@ Object.defineProperty(window, 'fetch', {
     return originalFetch(resource, config);
   }
 });
+`;
 
-import './index.css';
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+if (!code.includes('Intercept fetch')) {
+  code = code.replace(/import App from '\.\/App\.tsx';\n/, "import App from './App.tsx';\n\n" + fetchPatch + "\n");
+  fs.writeFileSync('src/main.tsx', code);
+}

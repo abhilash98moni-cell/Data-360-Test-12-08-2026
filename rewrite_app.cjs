@@ -1,4 +1,6 @@
-import express from 'express';
+const fs = require('fs');
+
+const code = `import express from 'express';
 import { authenticateRequest } from "./middleware/auth.js";
 import { 
   syncIrl, 
@@ -180,8 +182,8 @@ app.post('/api/storage/upload', authenticateRequest, upload.single('file'), asyn
     } else {
        // Graceful fallback if GDrive not initialized in production environment yet
        uploadedFile = {
-          id: `fallback-ev-${Date.now()}`,
-          googleDriveFileId: `fallback-gdrive-${Date.now()}`,
+          id: \`fallback-ev-\${Date.now()}\`,
+          googleDriveFileId: \`fallback-gdrive-\${Date.now()}\`,
           name: req.file.originalname,
           webViewLink: '#',
           mimeType: req.file.mimetype,
@@ -202,7 +204,7 @@ app.get('/api/storage/download/:fileId', authenticateRequest, async (req, res) =
     if ((storageService as any).drive) {
       const fileData = await storageService.downloadFile(fileId, fileName as string);
       res.setHeader('Content-Type', fileData.mimeType);
-      res.setHeader('Content-Disposition', `attachment; filename="${fileData.fileName}"`);
+      res.setHeader('Content-Disposition', \`attachment; filename="\${fileData.fileName}"\`);
       return res.send(fileData.buffer);
     }
     res.status(501).json({ success: false, error: 'Google Drive not configured in backend' });
@@ -242,10 +244,13 @@ app.all('/api/*', authenticateRequest, async (req: any, res) => {
        return res.json({ success: true, message: "Deleted" });
     }
     
-    res.status(404).json({ success: false, error: `API route not found: ${req.method} ${path}` });
+    res.status(404).json({ success: false, error: \`API route not found: \${req.method} \${path}\` });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 export default app;
+`;
+
+fs.writeFileSync('src/app.ts', code);
