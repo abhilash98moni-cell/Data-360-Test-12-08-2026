@@ -64,6 +64,8 @@ import { CLIENT_TENANTS, getDistributorsForClient } from '../data/clientsAndDist
 
 import { UserSession } from './AuthModal';
 import { DistributorVerticalView } from './DistributorVerticalView';
+import { EngagementWorkspaceActionBar } from './EngagementWorkspaceActionBar';
+import { executeEngagementPush } from '../services/unifiedEngagementPush';
 
 interface InitialInformationRequestViewProps {
   initialRequests: IIRRequestItem[];
@@ -1064,52 +1066,106 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     }
   };
 
+  const [isPushing, setIsPushing] = useState<boolean>(false);
+
   // Push Questionnaire to Selected Distributor
-  const handlePushQuestionnaireToDistributor = () => {
-    let updatedPushed = [...pushedDistributorNames];
-    if (!updatedPushed.includes(selectedDistributorName)) {
-      updatedPushed.push(selectedDistributorName);
-      setPushedDistributorNames(updatedPushed);
-      saveIIRPushedDistributorsToStorage(selectedClientProp, updatedPushed);
+  const handlePushQuestionnaireToDistributor = async () => {
+    setIsPushing(true);
+    try {
+      await executeEngagementPush({
+        tab: 'irl',
+        action: 'push_single',
+        client: selectedClientProp || 'Apex Electronics Corp',
+        targetDistributor: selectedDistributorName || 'Midwest Trading Co.',
+        allDistributors: activeDistributors,
+        data: { requests },
+        currentUser
+      });
+
+      let updatedPushed = [...pushedDistributorNames];
+      if (!updatedPushed.includes(selectedDistributorName)) {
+        updatedPushed.push(selectedDistributorName);
+        setPushedDistributorNames(updatedPushed);
+        saveIIRPushedDistributorsToStorage(selectedClientProp, updatedPushed);
+      }
+
+      // Save current requests for this distributor
+      saveIIRRequestsToStorage(selectedClientProp, selectedDistributorName, requests);
+      setIsLocked(false);
+
+      addAuditLog('Submitted', `Auditor pushed customized questionnaire (${requests.length} items) to distributor ${activeDistributorName}`);
+      showToast(`Questionnaire pushed and synced in real-time to ${activeDistributorName}! (${requests.length} active items)`, 'success');
+    } catch (err: any) {
+      showToast(`Push failed: ${err.message}`, 'error');
+    } finally {
+      setIsPushing(false);
     }
-
-    // Save current requests for this distributor
-    saveIIRRequestsToStorage(selectedClientProp, selectedDistributorName, requests);
-    setIsLocked(false);
-
-    addAuditLog('Submitted', `Auditor pushed customized questionnaire (${requests.length} items) to distributor ${activeDistributorName}`);
-    showToast(`Questionnaire pushed and synced in real-time to ${activeDistributorName}! (${requests.length} active items)`, 'success');
   };
 
   // Push Questionnaire to ALL Distributors under Client
-  const handlePushQuestionnaireToAllDistributors = () => {
-    const allDistNames = activeDistributors.map(d => d.name);
-    let updatedPushed = Array.from(new Set([...pushedDistributorNames, ...allDistNames]));
-    setPushedDistributorNames(updatedPushed);
-    saveIIRPushedDistributorsToStorage(selectedClientProp, updatedPushed);
+  const handlePushQuestionnaireToAllDistributors = async () => {
+    setIsPushing(true);
+    try {
+      const allDistNames = activeDistributors.map(d => d.name);
+      await executeEngagementPush({
+        tab: 'irl',
+        action: 'push_all',
+        client: selectedClientProp || 'Apex Electronics Corp',
+        targetDistributor: selectedDistributorName || 'Midwest Trading Co.',
+        allDistributors: activeDistributors,
+        data: { requests },
+        currentUser
+      });
 
-    allDistNames.forEach(dName => {
-      saveIIRRequestsToStorage(selectedClientProp, dName, requests);
-    });
-    setIsLocked(false);
+      let updatedPushed = Array.from(new Set([...pushedDistributorNames, ...allDistNames]));
+      setPushedDistributorNames(updatedPushed);
+      saveIIRPushedDistributorsToStorage(selectedClientProp, updatedPushed);
 
-    addAuditLog('Submitted', `Auditor pushed customized questionnaire (${requests.length} items) to ALL ${allDistNames.length} distributors under ${selectedClientProp}`);
-    showToast(`Questionnaire pushed and synced in real-time to ALL ${allDistNames.length} distributors! (${requests.length} active items per account)`, 'success');
+      allDistNames.forEach(dName => {
+        saveIIRRequestsToStorage(selectedClientProp, dName, requests);
+      });
+      setIsLocked(false);
+
+      addAuditLog('Submitted', `Auditor pushed customized questionnaire (${requests.length} items) to ALL ${allDistNames.length} distributors under ${selectedClientProp}`);
+      showToast(`Questionnaire pushed and synced in real-time to ALL ${allDistNames.length} distributors! (${requests.length} active items per account)`, 'success');
+    } catch (err: any) {
+      showToast(`Push to all failed: ${err.message}`, 'error');
+    } finally {
+      setIsPushing(false);
+    }
   };
 
   // Push Returned / Clarification Items Back to Distributor
-  const handleSendClarificationsBackToDistributor = () => {
+  const handleSendClarificationsBackToDistributor = async () => {
     const returnedCount = requests.filter(r => r.reviewerStatus === 'Clarification Required' || r.reviewerStatus === 'Rejected').length;
     if (returnedCount === 0) {
       showToast('No items are currently marked for Clarification or Rejection.', 'info');
       return;
     }
 
-    // Unlock form so distributor can re-edit or re-upload for returned items
-    setIsLocked(false);
-    
-    addAuditLog('Review Status Updated', `Auditor returned ${returnedCount} item(s) back to distributor ${activeDistributorName} requiring clarification or re-upload.`);
-    showToast(`${returnedCount} item(s) sent back to ${activeDistributorName} with reviewer notes. Distributor portal unlocked for re-submission.`, 'success');
+    setIsPushing(true);
+    try {
+      await executeEngagementPush({
+        tab: 'irl',
+        action: 'send_clarifications',
+        client: selectedClientProp || 'Apex Electronics Corp',
+        targetDistributor: selectedDistributorName || 'Midwest Trading Co.',
+        allDistributors: activeDistributors,
+        data: { requests },
+        clarificationCount: returnedCount,
+        currentUser
+      });
+
+      // Unlock form so distributor can re-edit or re-upload for returned items
+      setIsLocked(false);
+      
+      addAuditLog('Review Status Updated', `Auditor returned ${returnedCount} item(s) back to distributor ${activeDistributorName} requiring clarification or re-upload.`);
+      showToast(`${returnedCount} item(s) sent back to ${activeDistributorName} with reviewer notes. Distributor portal unlocked for re-submission.`, 'success');
+    } catch (err: any) {
+      showToast(`Send clarifications failed: ${err.message}`, 'error');
+    } finally {
+      setIsPushing(false);
+    }
   };
 
   // Show Toast helper
@@ -1723,43 +1779,18 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
           {/* Auditor Quick Actions (Edit Questionnaire & Push) */}
           {viewRole === 'Auditor' && (
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => handleOpenQuestionnaireModal()}
-                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-indigo-500/30 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
-              >
-                <Sparkles className="h-3.5 w-3.5 text-indigo-400" />
-                <span>+ Customize / Add Request Item</span>
-              </button>
-
-              <button
-                onClick={handlePushQuestionnaireToDistributor}
-                className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-1.5 cursor-pointer"
-                title={`Push current questionnaire items to ${activeDistributorName} account`}
-              >
-                <Send className="h-3.5 w-3.5" />
-                <span>Push to {activeDistributorName}</span>
-              </button>
-
-              <button
-                onClick={handlePushQuestionnaireToAllDistributors}
-                className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-1.5 cursor-pointer"
-                title={`Push current questionnaire items to ALL ${activeDistributors.length} distributor accounts`}
-              >
-                <Send className="h-3.5 w-3.5 text-emerald-200" />
-                <span>Push to ALL ({activeDistributors.length}) Distributors</span>
-              </button>
-
-              {clarificationRequiredCount > 0 && (
-                <button
-                  onClick={handleSendClarificationsBackToDistributor}
-                  className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 cursor-pointer"
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  <span>Send {clarificationRequiredCount} Clarification(s) Back</span>
-                </button>
-              )}
-            </div>
+            <EngagementWorkspaceActionBar
+              tab="irl"
+              viewRole="Auditor"
+              activeDistributorName={activeDistributorName}
+              allDistributorsCount={activeDistributors.length}
+              clarificationCount={clarificationRequiredCount}
+              isPushing={isPushing}
+              onCustomize={() => handleOpenQuestionnaireModal()}
+              onPushToDistributor={handlePushQuestionnaireToDistributor}
+              onPushToAllDistributors={handlePushQuestionnaireToAllDistributors}
+              onSendClarificationsBack={handleSendClarificationsBackToDistributor}
+            />
           )}
         </div>
 

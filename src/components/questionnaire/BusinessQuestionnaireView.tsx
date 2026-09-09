@@ -47,6 +47,9 @@ import {
   QuestionnaireAuditorNoteItem
 } from '../../services/questionnaireService';
 import { UserSession } from '../AuthModal';
+import { EngagementWorkspaceActionBar } from '../EngagementWorkspaceActionBar';
+import { executeEngagementPush } from '../../services/unifiedEngagementPush';
+import { getDistributorsForClient } from '../../data/clientsAndDistributors';
 
 interface BusinessQuestionnaireViewProps {
   selectedClient: string;
@@ -91,6 +94,15 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
   const [isEditRequesting, setIsEditRequesting] = useState<boolean>(false);
   const [isEditReviewing, setIsEditReviewing] = useState<boolean>(false);
 
+  // Unified Push State
+  const activeDistributors = useMemo(() => getDistributorsForClient(selectedClient), [selectedClient]);
+  const [isPushing, setIsPushing] = useState<boolean>(false);
+  const [pushToast, setPushToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+
+  const showPushToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setPushToast({ message, type });
+    setTimeout(() => setPushToast(null), 5000);
+  };
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Moved below
@@ -245,7 +257,110 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
     });
     const percent = total > 0 ? Math.round((answered / total) * 100) : 0;
     return { answered, total, percent, flaggedTotal };
-  }, [localAnswers, localAuditorNotes]);
+  }, [localAnswers, localAuditorNotes, activeSections]);
+
+  const clarificationCount = useMemo(() => {
+    let count = 0;
+    Object.values(localAuditorNotes).forEach((note: any) => {
+      if (note?.isFlaggedForFollowUp || (note?.followUpNote && note.followUpNote.trim().length > 0)) {
+        count++;
+      }
+    });
+    return count || overallStats.flaggedTotal || 0;
+  }, [localAuditorNotes, overallStats.flaggedTotal]);
+
+  const handleOpenCustomizeModal = () => {
+    const initial = questionnaireState?.customSections && questionnaireState.customSections.length > 0
+      ? JSON.parse(JSON.stringify(questionnaireState.customSections))
+      : JSON.parse(JSON.stringify(BUSINESS_QUESTIONNAIRE_SECTIONS));
+    setCustomSectionsDraft(initial);
+    setIsCustomizeModalOpen(true);
+  };
+
+  const handlePushToDistributor = async () => {
+    setIsPushing(true);
+    try {
+      const res = await executeEngagementPush({
+        tab: 'questionnaire',
+        action: 'push_single',
+        client: selectedClient,
+        targetDistributor: selectedDistributor,
+        allDistributors: activeDistributors,
+        data: {
+          customSections: customSectionsDraft.length > 0 ? customSectionsDraft : questionnaireState?.customSections,
+          totalCount: overallStats.total
+        },
+        currentUser
+      });
+
+      if (res.success) {
+        showPushToast(`Business Questionnaire pushed to ${selectedDistributor} successfully! (${overallStats.total} questions released)`, 'success');
+        loadState();
+      } else {
+        showPushToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      showPushToast(err.message || 'Push failed', 'error');
+    } finally {
+      setIsPushing(false);
+    }
+  };
+
+  const handlePushToAllDistributors = async () => {
+    setIsPushing(true);
+    try {
+      const res = await executeEngagementPush({
+        tab: 'questionnaire',
+        action: 'push_all',
+        client: selectedClient,
+        targetDistributor: selectedDistributor,
+        allDistributors: activeDistributors,
+        data: {
+          customSections: customSectionsDraft.length > 0 ? customSectionsDraft : questionnaireState?.customSections,
+          totalCount: overallStats.total
+        },
+        currentUser
+      });
+
+      if (res.success) {
+        showPushToast(`Business Questionnaire pushed to ALL (${activeDistributors.length}) Distributors! Released for compliance completion.`, 'success');
+        loadState();
+      } else {
+        showPushToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      showPushToast(err.message || 'Push to all failed', 'error');
+    } finally {
+      setIsPushing(false);
+    }
+  };
+
+  const handleSendClarificationsBack = async () => {
+    if (clarificationCount === 0) return;
+    setIsPushing(true);
+    try {
+      const res = await executeEngagementPush({
+        tab: 'questionnaire',
+        action: 'send_clarifications',
+        client: selectedClient,
+        targetDistributor: selectedDistributor,
+        allDistributors: activeDistributors,
+        clarificationCount,
+        currentUser
+      });
+
+      if (res.success) {
+        showPushToast(`${clarificationCount} question(s) sent back to ${selectedDistributor} with reviewer feedback. Distributor questionnaire unlocked for edits.`, 'success');
+        loadState();
+      } else {
+        showPushToast(res.message, 'error');
+      }
+    } catch (err: any) {
+      showPushToast(err.message || 'Failed to send clarifications back', 'error');
+    } finally {
+      setIsPushing(false);
+    }
+  };
 
   // Save answer handler
   const handleAnswerChange = (questionId: string, value: string, explanation?: string) => {
@@ -720,16 +835,43 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
             )}
 
             {isAuditor && (
-              <button
-                onClick={handleSaveAuditorNotes}
-                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 transition-all cursor-pointer"
-              >
-                <ShieldCheck className="h-3.5 w-3.5" />
-                Save Audit Notes
-              </button>
+              <EngagementWorkspaceActionBar
+                tab="questionnaire"
+                viewRole="Auditor"
+                activeDistributorName={selectedDistributor}
+                allDistributorsCount={activeDistributors.length}
+                clarificationCount={clarificationCount}
+                isPushing={isPushing}
+                onCustomize={handleOpenCustomizeModal}
+                onPushToDistributor={handlePushToDistributor}
+                onPushToAllDistributors={handlePushToAllDistributors}
+                onSendClarificationsBack={handleSendClarificationsBack}
+                extraActions={
+                  <button
+                    onClick={handleSaveAuditorNotes}
+                    className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/20 flex items-center gap-1.5 cursor-pointer"
+                    title="Save review decisions and comments"
+                  >
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                    <span>Save Audit Notes</span>
+                  </button>
+                }
+              />
             )}
           </div>
         </div>
+
+        {/* Push Notification Toast Banner */}
+        {pushToast && (
+          <div className={`mt-3 p-3 rounded-xl border text-xs flex items-center justify-between ${
+            pushToast.type === 'success' ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-200' :
+            pushToast.type === 'error' ? 'bg-rose-950/60 border-rose-500/40 text-rose-200' :
+            'bg-indigo-950/60 border-indigo-500/40 text-indigo-200'
+          }`}>
+            <span className="font-medium">{pushToast.message}</span>
+            <button onClick={() => setPushToast(null)} className="ml-2 text-slate-400 hover:text-white">✕</button>
+          </div>
+        )}
 
         {/* Global Progress Bar */}
         <div className="mt-5 pt-4 border-t border-slate-800/80">

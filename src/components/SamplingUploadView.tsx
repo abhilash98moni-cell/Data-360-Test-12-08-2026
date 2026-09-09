@@ -27,6 +27,9 @@ import * as XLSX from 'xlsx';
 import { UserSession } from './AuthModal';
 import { RequiredDataQuestionnaire } from './RequiredDataQuestionnaire';
 import { CurrencyMode, formatFinancialAmount, getCurrencySymbol } from '../utils/currencyFormatter';
+import { getDistributorsForClient } from '../data/clientsAndDistributors';
+import { EngagementWorkspaceActionBar } from './EngagementWorkspaceActionBar';
+import { executeEngagementPush } from '../services/unifiedEngagementPush';
 
 interface GLRecord {
   id: string;
@@ -139,47 +142,224 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
     ? selectedDistributor
     : (activePopulation?.distributorName || 'Distributor');
 
+  const activeDistributors = React.useMemo(() => {
+    return getDistributorsForClient(selectedClient || 'Apex Electronics Corp');
+  }, [selectedClient]);
+
+  // Row Selection State for granular / single / multi push
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+
+  // Add Custom Sample Request Modal State
+  const [isAddSampleModalOpen, setIsAddSampleModalOpen] = useState<boolean>(false);
+  const [newSampleForm, setNewSampleForm] = useState({
+    voucherNo: '',
+    accountNumber: 'GL-6100',
+    accountDescription: 'Promotional Marketing & Distribution',
+    description: '',
+    narration: '',
+    amount: '10000',
+    date: new Date().toISOString().substring(0, 10)
+  });
+
+  const clarificationCount = React.useMemo(() => {
+    return Object.values(questionnaireResponses || {}).filter(
+      (r: any) => r?.status === 'Clarification Required' || r?.status === 'Rejected'
+    ).length;
+  }, [questionnaireResponses]);
+
+  const handleToggleRowSelect = (id: string) => {
+    setSelectedRowIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = () => {
+    if (selectedRowIds.size === filteredRecords.length) {
+      setSelectedRowIds(new Set());
+    } else {
+      setSelectedRowIds(new Set(filteredRecords.map(r => r.id || r.voucherNo)));
+    }
+  };
+
+  // Add Custom Item Handler
+  const handleAddCustomSampleItem = () => {
+    const voucher = newSampleForm.voucherNo.trim() || `TX-${Math.floor(1000 + Math.random() * 9000)}`;
+    const desc = newSampleForm.description.trim() || 'Custom audit sampling request item';
+    const numAmt = parseFloat(newSampleForm.amount) || 0;
+
+    const newRecord: GLRecord = {
+      id: `custom-sample-${Date.now()}`,
+      date: newSampleForm.date || new Date().toISOString().substring(0, 10),
+      voucherNo: voucher,
+      accountNumber: newSampleForm.accountNumber.trim() || 'GL-6100',
+      accountDescription: newSampleForm.accountDescription.trim() || 'Audit Sample Test Item',
+      description: desc,
+      narration: newSampleForm.narration.trim() || desc,
+      debit: numAmt,
+      credit: 0,
+      balance: numAmt
+    };
+
+    setRecords(prev => [newRecord, ...prev]);
+    // Automatically select the new record so auditor can immediately push it if they want
+    setSelectedRowIds(prev => new Set([...prev, newRecord.id]));
+    setIsAddSampleModalOpen(false);
+    setNewSampleForm({
+      voucherNo: '',
+      accountNumber: 'GL-6100',
+      accountDescription: 'Promotional Marketing & Distribution',
+      description: '',
+      narration: '',
+      amount: '10000',
+      date: new Date().toISOString().substring(0, 10)
+    });
+    showToast('success', `Custom sample item "${voucher}" added. You can push it to ${targetDistributorName} whenever you choose.`);
+  };
+
+  // Unified Push to Selected Distributor
   const handlePushToDistributor = async () => {
-    if (records.length === 0) {
-      showToast('error', `No transaction records found to push. Please upload or select a General Ledger population first.`);
+    setIsPushing(true);
+    try {
+      const candidateRecords = selectedRowIds.size > 0
+        ? records.filter(r => selectedRowIds.has(r.id) || selectedRowIds.has(r.voucherNo))
+        : records;
+
+      const items = candidateRecords.length > 0
+        ? candidateRecords.map(r => ({
+            sampleId: r.id,
+            voucherNo: r.voucherNo || r.id,
+            accountDescription: r.accountDescription,
+            amount: r.debit || r.credit || r.balance || 0
+          }))
+        : [{
+            sampleId: `sample-init-1`,
+            voucherNo: `TX-INIT-01`,
+            accountDescription: 'General Sampling & Fieldwork Documentation Request',
+            amount: 0
+          }];
+
+      const res = await executeEngagementPush({
+        tab: 'sampling',
+        action: 'push_single',
+        client: selectedClient || 'Apex Electronics Corp',
+        targetDistributor: targetDistributorName,
+        allDistributors: activeDistributors,
+        data: {
+          engagementId: selectedAuditFilter || 'eng-101',
+          items
+        },
+        currentUser
+      });
+
+      if (res.success) {
+        await fetchQuestionnaireResponses();
+        window.dispatchEvent(new CustomEvent('notification-updated'));
+        showToast('success', `Questionnaire and required data successfully pushed to ${targetDistributorName} (${items.length} items synced)!`);
+      } else {
+        showToast('error', res.message || `Failed to push questionnaire to ${targetDistributorName}.`);
+      }
+    } catch (err: any) {
+      console.error('Error pushing questionnaire to distributor:', err);
+      showToast('error', `Error pushing questionnaire to ${targetDistributorName}: ${err.message}`);
+    } finally {
+      setIsPushing(false);
+    }
+  };
+
+  // Unified Push to ALL Distributors
+  const handlePushToAllDistributors = async () => {
+    setIsPushing(true);
+    try {
+      const candidateRecords = selectedRowIds.size > 0
+        ? records.filter(r => selectedRowIds.has(r.id) || selectedRowIds.has(r.voucherNo))
+        : records;
+
+      const items = candidateRecords.length > 0
+        ? candidateRecords.map(r => ({
+            sampleId: r.id,
+            voucherNo: r.voucherNo || r.id,
+            accountDescription: r.accountDescription,
+            amount: r.debit || r.credit || r.balance || 0
+          }))
+        : [{
+            sampleId: `sample-init-1`,
+            voucherNo: `TX-INIT-01`,
+            accountDescription: 'General Sampling & Fieldwork Documentation Request',
+            amount: 0
+          }];
+
+      const res = await executeEngagementPush({
+        tab: 'sampling',
+        action: 'push_all',
+        client: selectedClient || 'Apex Electronics Corp',
+        targetDistributor: targetDistributorName,
+        allDistributors: activeDistributors,
+        data: {
+          engagementId: selectedAuditFilter || 'eng-101',
+          items
+        },
+        currentUser
+      });
+
+      if (res.success) {
+        await fetchQuestionnaireResponses();
+        window.dispatchEvent(new CustomEvent('notification-updated'));
+        showToast('success', `Questionnaire and required data successfully pushed to ALL (${activeDistributors.length}) Distributors (${items.length} items per account)!`);
+      } else {
+        showToast('error', res.message || 'Failed to push questionnaire to all distributors.');
+      }
+    } catch (err: any) {
+      console.error('Error pushing questionnaire to all distributors:', err);
+      showToast('error', `Error pushing to all distributors: ${err.message}`);
+    } finally {
+      setIsPushing(false);
+    }
+  };
+
+  // Unified Send Clarifications Back
+  const handleSendClarificationsBack = async () => {
+    if (clarificationCount === 0) {
+      showToast('info', 'No sampling items are currently flagged for Clarification or Rejection.');
       return;
     }
 
     setIsPushing(true);
     try {
-      const items = records.map(r => ({
-        sampleId: r.id,
-        voucherNo: r.voucherNo || r.id,
-        accountDescription: r.accountDescription,
-        amount: r.debit || r.credit || r.balance
-      }));
-
-      const res = await fetch('/api/sampling/required-data/push', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-email': currentUser?.email || ''
-        },
-        body: JSON.stringify({
-          engagementId: selectedAuditFilter || 'eng-101',
-          distributorId: targetDistributorName,
-          distributorName: targetDistributorName,
-          clientName: selectedClient,
-          items
-        })
+      const clarificationItems = records.filter(r => {
+        const resp = questionnaireResponses[String(r.id || '').toLowerCase()] ||
+                     questionnaireResponses[String(r.voucherNo || '').toLowerCase()] ||
+                     questionnaireResponses[r.id] ||
+                     questionnaireResponses[r.voucherNo];
+        return resp?.status === 'Clarification Required' || resp?.status === 'Rejected';
       });
 
-      const data = await res.json();
-      if (data.success) {
+      const res = await executeEngagementPush({
+        tab: 'sampling',
+        action: 'send_clarifications',
+        client: selectedClient || 'Apex Electronics Corp',
+        targetDistributor: targetDistributorName,
+        allDistributors: activeDistributors,
+        clarificationCount,
+        data: {
+          engagementId: selectedAuditFilter || 'eng-101',
+          items: clarificationItems
+        },
+        currentUser
+      });
+
+      if (res.success) {
         await fetchQuestionnaireResponses();
         window.dispatchEvent(new CustomEvent('notification-updated'));
-        showToast('success', `Questionnaire and required data successfully pushed to ${targetDistributorName} (${items.length} transactions synced)!`);
+        showToast('success', `${clarificationCount} sampling item(s) sent back to ${targetDistributorName} with reviewer notes.`);
       } else {
-        showToast('error', data.error || `Failed to push questionnaire to ${targetDistributorName}.`);
+        showToast('error', res.message || 'Failed to send clarifications.');
       }
     } catch (err: any) {
-      console.error('Error pushing questionnaire to distributor:', err);
-      showToast('error', `Error pushing questionnaire to ${targetDistributorName}. Please try again.`);
+      console.error('Error sending clarifications back:', err);
+      showToast('error', `Error sending clarifications back: ${err.message}`);
     } finally {
       setIsPushing(false);
     }
@@ -612,29 +792,34 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
             </button>
 
             {!isDistributor && (
-              <button
-                onClick={handlePushToDistributor}
-                disabled={isPushing}
-                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-purple-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                title={`Push questionnaire and required data to ${targetDistributorName}`}
-              >
-                {isPushing ? (
-                  <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Send className="h-3.5 w-3.5" />
-                )}
-                <span>Push to {targetDistributorName}</span>
-              </button>
-            )}
-
-            {!isDistributor && onNavigateToSamplingReview && (
-              <button
-                onClick={onNavigateToSamplingReview}
-                className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/30 flex items-center gap-2 cursor-pointer"
-              >
-                <span>Go to Sampling Review</span>
-                <ArrowRight className="h-3.5 w-3.5" />
-              </button>
+              <EngagementWorkspaceActionBar
+                tab="sampling"
+                viewRole="Auditor"
+                activeDistributorName={targetDistributorName}
+                allDistributorsCount={activeDistributors.length}
+                clarificationCount={clarificationCount}
+                isPushing={isPushing}
+                pushSingleLabel={
+                  selectedRowIds.size > 0
+                    ? `Push Selected (${selectedRowIds.size}) to ${targetDistributorName}`
+                    : `Push to ${targetDistributorName}`
+                }
+                onCustomize={() => setIsAddSampleModalOpen(true)}
+                onPushToDistributor={handlePushToDistributor}
+                onPushToAllDistributors={handlePushToAllDistributors}
+                onSendClarificationsBack={handleSendClarificationsBack}
+                extraActions={
+                  onNavigateToSamplingReview && (
+                    <button
+                      onClick={onNavigateToSamplingReview}
+                      className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-indigo-600/30 flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span>Go to Sampling Review</span>
+                      <ArrowRight className="h-3.5 w-3.5" />
+                    </button>
+                  )
+                }
+              />
             )}
           </div>
         </div>
@@ -878,6 +1063,17 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
             <table className="w-full text-left text-xs border-collapse">
               <thead>
                 <tr className="border-b border-slate-800 bg-slate-950/80 text-slate-400 font-semibold text-[11px] sticky top-0 z-10 backdrop-blur-md">
+                  {!isDistributor && (
+                    <th className="py-2.5 px-3 w-8 text-center">
+                      <input
+                        type="checkbox"
+                        checked={filteredRecords.length > 0 && selectedRowIds.size === filteredRecords.length}
+                        onChange={handleToggleSelectAll}
+                        title="Select All Transactions"
+                        className="rounded border-slate-700 bg-slate-900 text-indigo-500 cursor-pointer"
+                      />
+                    </th>
+                  )}
                   <th className="py-2.5 px-3 w-12">#</th>
                   <th className="py-2.5 px-3">Date</th>
                   <th className="py-2.5 px-3">Voucher / Ref #</th>
@@ -893,9 +1089,21 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-mono text-[11px]">
-                {filteredRecords.map((row, idx) => (
-                  <tr key={row.id || idx} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="py-2.5 px-3 text-slate-500 font-sans">{idx + 1}</td>
+                {filteredRecords.map((row, idx) => {
+                  const isSelected = selectedRowIds.has(row.id) || selectedRowIds.has(row.voucherNo);
+                  return (
+                    <tr key={row.id || idx} className={`hover:bg-slate-800/40 transition-colors ${isSelected ? 'bg-indigo-950/30' : ''}`}>
+                      {!isDistributor && (
+                        <td className="py-2.5 px-3 text-center">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleRowSelect(row.id || row.voucherNo)}
+                            className="rounded border-slate-700 bg-slate-900 text-indigo-500 cursor-pointer"
+                          />
+                        </td>
+                      )}
+                      <td className="py-2.5 px-3 text-slate-500 font-sans">{idx + 1}</td>
                     <td className="py-2.5 px-3 text-slate-300 font-sans whitespace-nowrap">{row.date || '—'}</td>
                     <td className="py-2.5 px-3 text-indigo-300 font-semibold whitespace-nowrap">{row.voucherNo || '—'}</td>
                     <td className="py-2.5 px-3 text-slate-400">{row.accountNumber || '—'}</td>
@@ -980,7 +1188,8 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                       })()}
                     </td>
                   </tr>
-                ))}
+                );
+              })}
               </tbody>
             </table>
           )}
@@ -1207,6 +1416,127 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
             fetchQuestionnaireResponses();
           }}
         />
+      )}
+
+      {/* Customize / Add Request Item Modal */}
+      {isAddSampleModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full shadow-2xl overflow-hidden">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+              <div className="flex items-center gap-2.5">
+                <div className="h-8 w-8 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400">
+                  <Sparkles className="h-4 w-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Customize / Add Sampling Request Item</h3>
+                  <p className="text-[11px] text-slate-400">Add an ad-hoc or custom transaction sample to push to {targetDistributorName}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAddSampleModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Voucher / Ref Number *</label>
+                  <input
+                    type="text"
+                    value={newSampleForm.voucherNo}
+                    onChange={(e) => setNewSampleForm({ ...newSampleForm, voucherNo: e.target.value })}
+                    placeholder="e.g. TX-8099"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Date</label>
+                  <input
+                    type="date"
+                    value={newSampleForm.date}
+                    onChange={(e) => setNewSampleForm({ ...newSampleForm, date: e.target.value })}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">GL Account #</label>
+                  <input
+                    type="text"
+                    value={newSampleForm.accountNumber}
+                    onChange={(e) => setNewSampleForm({ ...newSampleForm, accountNumber: e.target.value })}
+                    placeholder="e.g. GL-6100"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Amount ({currencySymbol})</label>
+                  <input
+                    type="number"
+                    value={newSampleForm.amount}
+                    onChange={(e) => setNewSampleForm({ ...newSampleForm, amount: e.target.value })}
+                    placeholder="0.00"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">Account Description</label>
+                <input
+                  type="text"
+                  value={newSampleForm.accountDescription}
+                  onChange={(e) => setNewSampleForm({ ...newSampleForm, accountDescription: e.target.value })}
+                  placeholder="e.g. Promotional Marketing & Distribution Expenses"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">Transaction Description / Scope *</label>
+                <input
+                  type="text"
+                  value={newSampleForm.description}
+                  onChange={(e) => setNewSampleForm({ ...newSampleForm, description: e.target.value })}
+                  placeholder="e.g. Promotional event invoice testing & supporting receipts"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">Required Evidence / Narration</label>
+                <textarea
+                  rows={2}
+                  value={newSampleForm.narration}
+                  onChange={(e) => setNewSampleForm({ ...newSampleForm, narration: e.target.value })}
+                  placeholder="Provide guidance to the distributor on what documents or evidence to attach..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+                />
+              </div>
+            </div>
+
+            <div className="p-4 border-t border-slate-800 bg-slate-950/60 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setIsAddSampleModalOpen(false)}
+                className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-xs rounded-xl transition-all cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleAddCustomSampleItem}
+                className="px-4 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-bold text-xs rounded-xl shadow-md shadow-indigo-600/30 transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check className="h-3.5 w-3.5" />
+                <span>Add to Population</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -1957,6 +1957,289 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   });
 
   // ====================================================================
+  // UNIFIED ENGAGEMENT WORKSPACE PUSH API (QUESTIONNAIRE, IRL, SAMPLING)
+  // ====================================================================
+  app.post('/api/engagement-workspace/push', express.json(), async (req: any, res: any) => {
+    try {
+      const { tab, action, client, targetDistributor, distributors, data, auditId = 'eng-101', clarificationCount = 0 } = req.body;
+      const targetDistList: string[] = Array.isArray(distributors) && distributors.length > 0
+        ? distributors
+        : (targetDistributor ? [targetDistributor] : []);
+
+      if (!tab || !client || targetDistList.length === 0) {
+        return res.status(400).json({ success: false, error: 'tab, client, and targetDistributor (or distributors) are required.' });
+      }
+
+      const supabase = getSupabaseServerClient();
+      const userEmail = req.user?.email || req.headers['x-user-email'] || 'auditor@apex-audit.com';
+      const isClarification = action === 'send_clarifications';
+
+      // 1. BUSINESS QUESTIONNAIRE TAB
+      if (tab === 'questionnaire') {
+        for (const dist of targetDistList) {
+          const stateKey = `${client}::${dist}::${auditId}`;
+          const { data: distData } = await supabase
+            .from('system_audit_logs')
+            .select('*')
+            .eq('event_type', 'QUESTIONNAIRE_DISTRIBUTOR_STATE')
+            .eq('target_user_email', stateKey)
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+          let currentState = distData?.[0]?.details || {
+            client,
+            distributor: dist,
+            auditId,
+            status: 'In Progress',
+            isLocked: false,
+            completionPercentage: 0,
+            answeredCount: 0,
+            totalCount: 24,
+            answers: {},
+            version: 1
+          };
+
+          if (isClarification) {
+            currentState = {
+              ...currentState,
+              isLocked: false,
+              editAccessStatus: 'APPROVED',
+              status: 'In Progress',
+              updatedAt: new Date().toISOString(),
+              updatedBy: userEmail
+            };
+          } else {
+            currentState = {
+              ...currentState,
+              isLocked: false,
+              status: currentState.status === 'Submitted' ? 'Submitted' : 'In Progress',
+              customSections: data?.customSections || currentState.customSections,
+              updatedAt: new Date().toISOString(),
+              updatedBy: userEmail,
+              pushedAt: new Date().toISOString(),
+              pushedBy: userEmail
+            };
+          }
+
+          // Persist distributor state
+          await supabase.from('system_audit_logs').insert({
+            event_type: 'QUESTIONNAIRE_DISTRIBUTOR_STATE',
+            target_user_email: stateKey,
+            details: currentState,
+            created_at: new Date().toISOString()
+          });
+
+          // Audit log
+          await supabase.from('system_audit_logs').insert({
+            event_type: isClarification ? 'QUESTIONNAIRE_CLARIFICATION_SENT' : 'QUESTIONNAIRE_PUSHED',
+            target_user_email: userEmail,
+            details: JSON.stringify({
+              client,
+              distributor: dist,
+              action,
+              itemCount: currentState.totalCount || 24,
+              timestamp: new Date().toISOString()
+            })
+          });
+
+          // Dispatch Notification
+          try {
+            await dispatchNotification({
+              target_organization: dist,
+              target_role: 'Distributor',
+              category: 'System',
+              title: isClarification
+                ? 'Questionnaire Clarification Requested'
+                : 'Business Questionnaire Released',
+              message: isClarification
+                ? `Auditor returned ${clarificationCount || 1} question(s) requiring clarification or additional documentation.`
+                : `Auditor has pushed the Business Questionnaire (${currentState.totalCount || 24} questions) for compliance review.`,
+              metadata: {
+                linkTab: 'engagement_workspace',
+                subTab: 'questionnaire',
+                client,
+                distributor: dist,
+                action
+              }
+            });
+          } catch (nErr) {
+            console.warn('Notification error in questionnaire push:', nErr);
+          }
+        }
+      }
+
+      // 2. IRL TAB
+      else if (tab === 'irl') {
+        for (const dist of targetDistList) {
+          const requests = data?.requests || [];
+          if (requests.length > 0) {
+            await saveAuthoritativeIRLState(client, dist, {
+              client,
+              distributor: dist,
+              auditId,
+              status: 'In Progress',
+              isLocked: false,
+              submittedBy: dist,
+              requests
+            });
+          }
+
+          // Audit log
+          await supabase.from('system_audit_logs').insert({
+            event_type: isClarification ? 'IRL_CLARIFICATION_SENT' : 'IRL_PUSHED',
+            target_user_email: userEmail,
+            details: JSON.stringify({
+              client,
+              distributor: dist,
+              action,
+              itemCount: requests.length,
+              timestamp: new Date().toISOString()
+            })
+          });
+
+          // Dispatch Notification
+          try {
+            await dispatchNotification({
+              target_organization: dist,
+              target_role: 'Distributor',
+              category: 'System',
+              title: isClarification
+                ? 'Information Request List (IRL) Clarifications Requested'
+                : 'Information Request List (IRL) Pushed',
+              message: isClarification
+                ? `Auditor returned ${clarificationCount || 1} request item(s) requiring clarification or re-upload.`
+                : `Auditor has pushed the Information Request List (${requests.length} items) for documentation upload.`,
+              metadata: {
+                linkTab: 'engagement_workspace',
+                subTab: 'iir',
+                client,
+                distributor: dist,
+                action
+              }
+            });
+          } catch (nErr) {
+            console.warn('Notification error in IRL push:', nErr);
+          }
+        }
+      }
+
+      // 3. SAMPLING TAB
+      else if (tab === 'sampling') {
+        for (const dist of targetDistList) {
+          const itemsToPush = data?.items || [];
+          if (itemsToPush.length > 0) {
+            for (const item of itemsToPush) {
+              const voucherKey = String(item.voucherNo || item.sampleId || item.id || '').trim();
+              if (!voucherKey) continue;
+
+              const { data: existingResp } = await supabase
+                .from('system_audit_logs')
+                .select('*')
+                .eq('event_type', 'REQUIRED_DATA_RESP')
+                .eq('target_user_email', voucherKey)
+                .order('created_at', { ascending: false })
+                .limit(1);
+
+              const pushDetails = {
+                engagementId: auditId,
+                sampleId: item.sampleId || item.id || voucherKey,
+                voucherNo: item.voucherNo || voucherKey,
+                accountDescription: item.accountDescription || 'Sampling Item',
+                amount: item.amount || item.debit || item.credit || 0,
+                distributorId: dist,
+                distributorName: dist,
+                clientName: client,
+                isPushed: true,
+                pushedAt: new Date().toISOString(),
+                pushedTo: dist,
+                status: isClarification ? 'Clarification Required' : 'Pending Submission',
+                updated_at: new Date().toISOString()
+              };
+
+              if (existingResp && existingResp[0]) {
+                let parsed = existingResp[0].details;
+                if (typeof parsed === 'string') {
+                  try { parsed = JSON.parse(parsed); } catch(e) {}
+                }
+                const updated = {
+                  ...parsed,
+                  ...pushDetails,
+                  status: isClarification ? 'Clarification Required' : (parsed.status === 'Draft' || !parsed.status ? 'Pending Submission' : parsed.status)
+                };
+                await supabase.from('system_audit_logs').update({ details: JSON.stringify(updated) }).eq('id', existingResp[0].id);
+              } else {
+                await supabase.from('system_audit_logs').insert({
+                  event_type: 'REQUIRED_DATA_RESP',
+                  target_user_email: voucherKey,
+                  ip_address: req.ip || '127.0.0.1',
+                  details: JSON.stringify({
+                    ...pushDetails,
+                    notes: '',
+                    uploadedFiles: [],
+                    itemResponses: {},
+                    clarificationHistory: [],
+                    created_by: userEmail,
+                    created_at: new Date().toISOString()
+                  })
+                });
+              }
+            }
+          }
+
+          // Audit log
+          await supabase.from('system_audit_logs').insert({
+            event_type: isClarification ? 'SAMPLING_CLARIFICATION_SENT' : 'SAMPLING_QUESTIONNAIRE_PUSHED',
+            target_user_email: userEmail,
+            details: JSON.stringify({
+              client,
+              distributor: dist,
+              action,
+              itemCount: itemsToPush.length,
+              timestamp: new Date().toISOString()
+            })
+          });
+
+          // Dispatch Notification
+          try {
+            await dispatchNotification({
+              target_organization: dist,
+              target_role: 'Distributor',
+              category: 'System',
+              title: isClarification
+                ? 'Sampling Clarifications Requested'
+                : (itemsToPush.length > 1 ? `New Required Data Questionnaires (${itemsToPush.length} Items)` : `Sampling Questionnaire Pushed`),
+              message: isClarification
+                ? `Auditor returned ${clarificationCount || itemsToPush.length || 1} sampling request(s) requiring clarification or additional documentation.`
+                : `Auditor has prepared and pushed the sampling questionnaire for ${itemsToPush.length || 'selected'} transaction(s). Please review and provide required documentation.`,
+              metadata: {
+                linkTab: 'engagement_workspace',
+                subTab: 'sampling',
+                client,
+                distributor: dist,
+                action
+              }
+            });
+          } catch (nErr) {
+            console.warn('Notification error in sampling push:', nErr);
+          }
+        }
+      }
+
+      return res.json({
+        success: true,
+        tab,
+        action,
+        pushedDistributors: targetDistList,
+        count: targetDistList.length,
+        message: `Successfully executed ${action} for ${tab} across ${targetDistList.length} distributor(s).`
+      });
+    } catch (err: any) {
+      console.error('Error in /api/engagement-workspace/push:', err);
+      return res.status(500).json({ success: false, error: err.message || 'Push failed' });
+    }
+  });
+
+  // ====================================================================
   // NOTIFICATIONS REST APIS
   // ====================================================================
 
