@@ -61,9 +61,26 @@ export async function getAuthoritativeIRLState(
   }
 
   // Initialize canonical baseline state directly from INITIAL_IIR_REQUESTS and persist to Supabase immediately
-  const initialRequests = JSON.parse(JSON.stringify(INITIAL_IIR_REQUESTS));
+  const isNewDistributor = distName !== 'Midwest Trading Co.';
+  const initialRequests = JSON.parse(JSON.stringify(INITIAL_IIR_REQUESTS)).map((r: any) => {
+    if (isNewDistributor) {
+      return {
+        ...r,
+        status: 'Pending',
+        reviewerStatus: undefined,
+        textResponse: '',
+        noUploadExplanation: '',
+        uploadedFiles: [],
+        comments: [],
+        lastUpdated: undefined,
+        reviewerComment: undefined,
+        subQuestionResponses: {}
+      };
+    }
+    return r;
+  });
   const totalCount = initialRequests.length;
-  const completedCount = initialRequests.filter((r: any) => getItemCompletionDetails(r).isComplete).length;
+  const completedCount = isNewDistributor ? 0 : initialRequests.filter((r: any) => getItemCompletionDetails(r).isComplete).length;
   const completionPercentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
   const initialState = {

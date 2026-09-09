@@ -15,7 +15,7 @@ import {
   Layers,
   Shield
 } from 'lucide-react';
-import { CLIENT_TENANTS } from '../data/clientsAndDistributors';
+import { CLIENT_TENANTS, getAllRegisteredDistributors } from '../data/clientsAndDistributors';
 import { supabase } from '../lib/supabaseClient';
 import { UserSession } from './AuthModal';
 
@@ -325,15 +325,23 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                         ))}
                       </select>
                     ) : (
-                      <input 
-                        type="text"
-                        required
-                        value={distributorName}
-                        onChange={(e) => setDistributorName(e.target.value)}
-                        placeholder="e.g. Midwest Trading Co."
-                        autoComplete="off"
-                        className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
-                      />
+                      <>
+                        <input 
+                          type="text"
+                          required
+                          value={distributorName}
+                          onChange={(e) => setDistributorName(e.target.value)}
+                          placeholder="e.g. Midwest Trading Co. or Pacific Distribution LLC"
+                          list="login-distributors-list"
+                          autoComplete="off"
+                          className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500 transition-colors"
+                        />
+                        <datalist id="login-distributors-list">
+                          {getAllRegisteredDistributors().map(d => (
+                            <option key={d.id} value={d.name} />
+                          ))}
+                        </datalist>
+                      </>
                     )}
                   </div>
                 </div>

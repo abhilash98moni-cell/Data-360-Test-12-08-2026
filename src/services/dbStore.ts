@@ -555,7 +555,9 @@ class ResilientDbStore {
       return matchDist && matchAudit && matchClient;
     });
 
-    if (filtered.length === 0 && all.length > 0) {
+    // Only fall back to all if user was asking for all distributors and all audits without specific filter
+    const isUnfilteredQuery = (!distributorId || distributorId === 'All Distributors') && (!auditId || auditId === 'All Audits');
+    if (filtered.length === 0 && isUnfilteredQuery && all.length > 0) {
       filtered = all;
     }
 
@@ -597,7 +599,9 @@ class ResilientDbStore {
       });
     }
 
-    if (!targetRow && logs.length > 0) {
+    // Only fall back if no specific distributor/audit was targeted
+    const isSpecificFilter = (distributorId && distributorId !== 'All Distributors') || (auditId && auditId !== 'All Audits');
+    if (!targetRow && !isSpecificFilter && !fileId && logs.length > 0) {
       targetRow = logs[0];
     }
 

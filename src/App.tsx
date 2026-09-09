@@ -115,7 +115,20 @@ export default function App() {
   };
 
   // Audit Engagements State
-  const [engagements, setEngagements] = useState<AuditEngagement[]>(INITIAL_ENGAGEMENTS);
+  const [engagements, setEngagements] = useState<AuditEngagement[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('data360_engagements');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      } catch (e) {}
+    }
+    return INITIAL_ENGAGEMENTS;
+  });
   const [selectedEngId, setSelectedEngId] = useState<string>('eng-101');
 
   // Findings & CAPAs State
@@ -267,9 +280,28 @@ export default function App() {
   };
 
   // Add New Engagement handler
-  const handleAddEngagement = (newEng: AuditEngagement) => {
-    setEngagements([newEng, ...engagements]);
+  const handleAddEngagement = (newEng: AuditEngagement, newDistributorName?: string, newClientName?: string) => {
+    setEngagements(prev => {
+      const updated = [newEng, ...prev];
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('data360_engagements', JSON.stringify(updated));
+        } catch (e) {}
+      }
+      return updated;
+    });
     setSelectedEngId(newEng.id);
+    if (newClientName) {
+      setSelectedClient(newClientName);
+    } else if (newEng.clientName) {
+      setSelectedClient(newEng.clientName);
+    }
+    const distName = newDistributorName || (newEng as any).distributorName;
+    if (distName) {
+      setSelectedDistributor(distName);
+    }
+    // After creation, open the new engagement as a completely fresh workspace
+    setActiveTab('engagement_workspace');
   };
 
   // If unauthenticated, render the clean full-screen Login Page directly (no UI behind it)
@@ -366,7 +398,20 @@ export default function App() {
               assignments={assignments}
               onSelectEngagement={(id) => {
                 setSelectedEngId(id);
-                setActiveTab('sampling');
+                const eng = engagements.find(e => e.id === id);
+                if (eng) {
+                  if (eng.clientName) setSelectedClient(eng.clientName);
+                  if (eng.distributorName) {
+                    setSelectedDistributor(eng.distributorName);
+                  } else {
+                    const dists = getDistributorsForClient(eng.clientName);
+                    const matched = dists.find(d => eng.title.includes(d.name) || eng.location.includes(d.name) || (d.code && eng.location.includes(d.code)));
+                    if (matched) {
+                      setSelectedDistributor(matched.name);
+                    }
+                  }
+                }
+                setActiveTab('engagement_workspace');
               }}
               onOpenNewAudit={() => setIsNewAuditOpen(true)}
               onTabChange={setActiveTab}
@@ -453,19 +498,13 @@ export default function App() {
         </div>
       )}
 
-      {isNewAuditOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-           {/* Placeholder for New Audit Modal, if we had one extracted */}
-           <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 shadow-2xl w-full max-w-md animate-fade-in-up">
-              <h3 className="text-lg font-bold mb-4 text-white">Create New Audit Engagement</h3>
-              <p className="text-slate-400 text-sm mb-6">This feature is not fully implemented in this demo shell.</p>
-              <div className="flex justify-end gap-3">
-                 <button onClick={() => setIsNewAuditOpen(false)} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm">Cancel</button>
-              </div>
-           </div>
-           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm -z-10" onClick={() => setIsNewAuditOpen(false)} />
-        </div>
-      )}
+      <NewAuditModal 
+        isOpen={isNewAuditOpen}
+        onClose={() => setIsNewAuditOpen(false)}
+        onAddEngagement={handleAddEngagement}
+        defaultClient={selectedClient}
+        currentUser={currentUser}
+      />
 
       <NotificationsModal 
         isOpen={isNotificationsOpen}

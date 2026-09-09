@@ -3272,11 +3272,13 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
           return tB - tA;
         });
 
+        const isSpecificFilter = Boolean((distributorId && distributorId !== 'All Distributors') || (auditId && auditId !== 'All Audits'));
+
         const activeState = sortedState.find(d => {
           const det = d.details || {};
           return (!distributorId || distributorId === 'All Distributors' || cleanStr(det.distributorId) === cleanStr(distributorId)) &&
                  (!auditId || auditId === 'All Audits' || cleanStr(det.auditId) === cleanStr(auditId));
-        }) || sortedState[0];
+        }) || (isSpecificFilter ? undefined : sortedState[0]);
 
         const stateActiveId = activeState?.details?.activePopulationId;
         if (stateActiveId) {
@@ -3290,14 +3292,19 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
           // Fallback to latest matching sampling population
           targetRow = (data || []).find(row => {
             const d = row.details || {};
-            const isMatch = (!distributorId || distributorId === 'All Distributors' || !d.distributor_name || cleanStr(d.distributor_name) === cleanStr(distributorId)) &&
-                            (!auditId || auditId === 'All Audits' || !d.audit_id || cleanStr(d.audit_id) === cleanStr(auditId));
+            const isMatch = (!distributorId || distributorId === 'All Distributors' || (d.distributor_name && cleanStr(d.distributor_name) === cleanStr(distributorId))) &&
+                            (!auditId || auditId === 'All Audits' || (d.audit_id && cleanStr(d.audit_id) === cleanStr(auditId)));
             const hasSampling = d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING' || d.section === 'Sampling';
             return isMatch && hasSampling;
-          }) || (data || []).find(row => {
-            const d = row.details || {};
-            return d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING' || d.section === 'Sampling';
-          }) || (data || [])[0];
+          });
+
+          // Only fall back to generic populations if no specific distributor/audit was requested
+          if (!targetRow && !isSpecificFilter && !fileId) {
+            targetRow = (data || []).find(row => {
+              const d = row.details || {};
+              return d.samplingEnabled === true || (Array.isArray(d.document_usage) && d.document_usage.includes('SAMPLING_POPULATION')) || d.requirement_ref === 'SAMPLING' || d.section === 'Sampling';
+            }) || (data || [])[0];
+          }
         }
       }
 

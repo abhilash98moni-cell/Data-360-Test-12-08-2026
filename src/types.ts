@@ -174,6 +174,9 @@ export interface AuditEngagement {
   title: string;
   clientName: string;
   clientIndustry: string;
+  distributorName?: string;
+  distributorCode?: string;
+  auditPeriod?: string;
   type: AuditType;
   status: AuditStatus;
   riskRating: RiskLevel;

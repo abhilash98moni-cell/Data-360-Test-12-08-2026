@@ -112,6 +112,24 @@ const loadIIRRequestsFromStorage = (client: string, dist: string, fallback: IIRR
       console.error('Failed to parse saved requests:', err);
     }
   }
+
+  // If no saved state exists yet for this distributor:
+  // For any distributor other than the seeded demo ('Midwest Trading Co.'), return completely clean, isolated requests
+  if (dist && dist !== 'Midwest Trading Co.') {
+    return fallback.map(item => ({
+      ...item,
+      status: 'Pending',
+      reviewerStatus: undefined,
+      textResponse: '',
+      noUploadExplanation: '',
+      uploadedFiles: [],
+      comments: [],
+      lastUpdated: undefined,
+      reviewerComment: undefined,
+      subQuestionResponses: {}
+    }));
+  }
+
   return fallback;
 };
 
@@ -227,7 +245,11 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       initialRequests
     )
   );
-  const [auditTrail, setAuditTrail] = useState<IIRAuditTrail[]>(initialAuditTrail);
+  const [auditTrail, setAuditTrail] = useState<IIRAuditTrail[]>(() => 
+    (selectedDistributorProp === 'Midwest Trading Co.' || (!selectedDistributorProp && activeDistributors[0]?.name === 'Midwest Trading Co.'))
+      ? initialAuditTrail
+      : []
+  );
   const [lastSyncedTime, setLastSyncedTime] = useState<string>(() => new Date().toLocaleTimeString());
   
   // View Role Mode: Auditor Reviewer Mode for Auditors/Admins vs Distributor Portal for Distributors
@@ -253,6 +275,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     const targetDist = selectedDistributorName || (activeDistributors[0]?.name || 'Midwest Trading Co.');
     const loadedReqs = loadIIRRequestsFromStorage(selectedClientProp, targetDist, initialRequests);
     setRequests(loadedReqs);
+    setAuditTrail(targetDist === 'Midwest Trading Co.' ? initialAuditTrail : []);
 
     const pushed = loadIIRPushedDistributorsFromStorage(selectedClientProp, pushedDistributorNames);
     setPushedDistributorNames(pushed);
