@@ -115,20 +115,18 @@ export default function App() {
   };
 
   // Audit Engagements State
-  const [engagements, setEngagements] = useState<AuditEngagement[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('data360_engagements');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            return parsed;
-          }
-        }
-      } catch (e) {}
+  
+const [engagements, setEngagements] = useState<AuditEngagement[]>([]);
+React.useEffect(() => {
+  fetch('/api/engagements', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('supabase.auth.token') || '') } })
+  .then(res => res.json())
+  .then(data => {
+    if (data.success && data.engagements && data.engagements.length > 0) {
+      setEngagements(data.engagements);
     }
-    return INITIAL_ENGAGEMENTS;
-  });
+  }).catch(e => console.error(e));
+}, []);
+
   const [selectedEngId, setSelectedEngId] = useState<string>('eng-101');
 
   // Findings & CAPAs State
@@ -285,7 +283,13 @@ export default function App() {
       const updated = [newEng, ...prev];
       if (typeof window !== 'undefined') {
         try {
-          localStorage.setItem('data360_engagements', JSON.stringify(updated));
+          
+fetch('/api/engagements', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('supabase.auth.token') || '') },
+  body: JSON.stringify({ engagements: updated })
+});
+
         } catch (e) {}
       }
       return updated;

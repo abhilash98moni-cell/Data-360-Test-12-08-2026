@@ -36,31 +36,66 @@ export async function getAuthoritativeIRLState(
   auditId: string = 'eng-101'
 ): Promise<AuthoritativeIRLRecord> {
   const supabase = getSupabaseServerClient();
-  const stateKey = `${clientName}::${distName}`;
 
-  const { data, error } = await supabase
-    .from('system_audit_logs')
+  // 1. Strict Scoping: Check relational table first
+  const { data: relationalData, error: relationalError } = await supabase
+    .from('irl_submissions')
     .select('*')
-    .eq('event_type', 'IRL_DISTRIBUTOR_STATE')
-    .eq('target_user_email', stateKey)
-    .order('created_at', { ascending: false })
+    .eq('client_name', clientName)
+    .eq('distributor_name', distName)
+    .eq('audit_id', auditId)
+    .order('updated_at', { ascending: false })
     .limit(1);
 
-  if (error) {
-    console.error('Supabase query error in getAuthoritativeIRLState:', error);
-    throw new Error(`Failed to load authoritative state from Supabase: ${error.message}`);
-  }
-
-  if (data && data.length > 0 && data[0].details) {
+  if (!relationalError && relationalData && relationalData.length > 0) {
+    const row = relationalData[0];
+    const state = {
+      client: row.client_name,
+      distributor: row.distributor_name,
+      auditId: row.audit_id,
+      status: row.status,
+      isLocked: row.is_locked,
+      submissionDate: row.submission_date,
+      completionPercentage: row.completion_percentage,
+      submittedBy: row.submitted_by,
+      requests: row.requests_json || [],
+      version: 1,
+      updatedAt: row.updated_at,
+      totalCount: (row.requests_json || []).length,
+      completedCount: (row.requests_json || []).filter((r: any) => getItemCompletionDetails(r).isComplete).length
+    };
     return {
       found: true,
-      recordId: data[0].id,
-      state: data[0].details,
-      createdAt: data[0].created_at
+      recordId: row.id,
+      state: state,
+      createdAt: row.submission_date || row.updated_at
     };
   }
 
-  // Initialize canonical baseline state directly from INITIAL_IIR_REQUESTS and persist to Supabase immediately
+  // 2. Safe Migration: Fallback to legacy JSON Blob
+  // If found here, it migrates it by calling saveAuthoritativeIRLState which writes to relational.
+  const legacyStateKey = `${clientName}::${distName}`;
+  const { data: legacyData } = await supabase
+    .from('system_audit_logs')
+    .select('*')
+    .eq('event_type', 'IRL_DISTRIBUTOR_STATE')
+    .eq('target_user_email', legacyStateKey)
+    .order('created_at', { ascending: false })
+    .limit(1);
+
+  if (legacyData && legacyData.length > 0 && legacyData[0].details) {
+    const legacyState = legacyData[0].details;
+    legacyState.auditId = auditId; // Enforce scoped context
+    await saveAuthoritativeIRLState(clientName, distName, legacyState, auditId);
+    return {
+      found: true,
+      recordId: legacyData[0].id,
+      state: legacyState,
+      createdAt: legacyData[0].created_at
+    };
+  }
+
+  // 3. Initialize canonical baseline state
   const isNewDistributor = distName !== 'Midwest Trading Co.';
   const initialRequests = JSON.parse(JSON.stringify(INITIAL_IIR_REQUESTS)).map((r: any) => {
     if (isNewDistributor) {
@@ -79,6 +114,7 @@ export async function getAuthoritativeIRLState(
     }
     return r;
   });
+
   const totalCount = initialRequests.length;
   const completedCount = isNewDistributor ? 0 : initialRequests.filter((r: any) => getItemCompletionDetails(r).isComplete).length;
   const completionPercentage = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
@@ -99,38 +135,32 @@ export async function getAuthoritativeIRLState(
     updatedAt: new Date().toISOString()
   };
 
-  const insertRes = await supabase.from('system_audit_logs').insert({
-    event_type: 'IRL_DISTRIBUTOR_STATE',
-    target_user_email: stateKey,
-    details: initialState,
-    created_at: new Date().toISOString()
-  }).select().single();
-
-  if (insertRes.error) {
-    console.error('Supabase initial baseline save error:', insertRes.error);
-    throw new Error(`Failed to initialize baseline IRL state in database: ${insertRes.error.message}`);
-  }
+  const saved = await saveAuthoritativeIRLState(clientName, distName, initialState, auditId);
 
   return {
     found: true,
-    recordId: insertRes.data?.id,
+    recordId: saved.recordId,
     state: initialState,
-    createdAt: insertRes.data?.created_at
+    createdAt: saved.savedAt
   };
 }
 
 /**
  * Persists an updated authoritative IRL state into Supabase PostgreSQL.
- * Automatically recalculates completion metrics and increments the state version.
+ * Uses the strictly relational `irl_submissions` table for primary storage,
+ * while still appending to `system_audit_logs` for historical audit trail.
  */
 export async function saveAuthoritativeIRLState(
   clientName: string,
   distName: string,
-  stateUpdate: any
+  stateUpdate: any,
+  auditId: string = 'eng-101'
 ) {
   const supabase = getSupabaseServerClient();
-  const stateKey = `${clientName}::${distName}`;
   const nowIso = new Date().toISOString();
+
+  // If stateUpdate doesn't specify an auditId, assume the one passed in
+  const resolvedAuditId = stateUpdate.auditId || auditId;
 
   const requests = Array.isArray(stateUpdate.requests) ? stateUpdate.requests : [];
   const totalCount = requests.length;
@@ -144,6 +174,7 @@ export async function saveAuthoritativeIRLState(
     ...stateUpdate,
     client: clientName,
     distributor: distName,
+    auditId: resolvedAuditId,
     completionPercentage,
     completedCount,
     totalCount,
@@ -151,6 +182,31 @@ export async function saveAuthoritativeIRLState(
     updatedAt: nowIso
   };
 
+  // 1. Authoritative Relational Upsert
+  const submissionId = `irl_${resolvedAuditId}_${distName.replace(/\s+/g, '_')}`;
+  
+  const { error: upsertError } = await supabase
+    .from('irl_submissions')
+    .upsert({
+      id: submissionId,
+      client_name: clientName,
+      distributor_name: distName,
+      audit_id: resolvedAuditId,
+      status: fullState.status || 'In Progress',
+      is_locked: fullState.isLocked !== undefined ? fullState.isLocked : false,
+      submission_date: fullState.submissionDate || null,
+      completion_percentage: completionPercentage,
+      submitted_by: fullState.submittedBy || distName,
+      requests_json: requests,
+      updated_at: nowIso
+    });
+
+  if (upsertError) {
+    console.error('Supabase irl_submissions upsert error:', upsertError);
+  }
+
+  // 2. Event Log append for immutable Audit Trail
+  const stateKey = `${resolvedAuditId}::${clientName}::${distName}`;
   const insertRes = await supabase.from('system_audit_logs').insert({
     event_type: 'IRL_DISTRIBUTOR_STATE',
     target_user_email: stateKey,
@@ -158,14 +214,9 @@ export async function saveAuthoritativeIRLState(
     created_at: nowIso
   }).select().single();
 
-  if (insertRes.error) {
-    console.error('Supabase saveAuthoritativeIRLState error:', insertRes.error);
-    throw new Error(`Failed to persist authoritative state in database: ${insertRes.error.message}`);
-  }
-
   return {
     success: true,
-    recordId: insertRes.data?.id,
+    recordId: submissionId,
     state: fullState,
     savedAt: nowIso
   };
