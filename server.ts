@@ -2,7 +2,6 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
@@ -49,6 +48,14 @@ function getGeminiClient(): GoogleGenAI | null {
   }
   return geminiClient;
 }
+
+// Catch unhandled errors gracefully to avoid crashing the server
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
 
 async function startServer() {
   const app = express();
@@ -6492,6 +6499,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
   // Vite middleware for development or static file serving for production
   if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -6501,7 +6509,12 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+      const indexPath = path.join(distPath, 'index.html');
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath);
+      } else {
+        res.status(404).send('Application is starting up or build artifact is missing.');
+      }
     });
   }
 
