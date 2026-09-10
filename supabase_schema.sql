@@ -255,6 +255,21 @@ CREATE INDEX IF NOT EXISTS idx_evidence_status ON public.evidence_files(status);
 -- ROW LEVEL SECURITY (RLS) POLICIES
 -- ====================================================================
 
+
+-- Create a secure function to check admin role without triggering RLS recursion
+CREATE OR REPLACE FUNCTION (SELECT private.is_admin())
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND role = 'admin'
+  );
+$;
+
 -- Enable RLS on all tables
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.pending_signup_requests ENABLE ROW LEVEL SECURITY;
@@ -274,8 +289,15 @@ DO $$ BEGIN
     CREATE POLICY "Public can submit signup requests" ON public.pending_signup_requests FOR INSERT WITH CHECK (true);
 
     -- Admins can manage all profiles
-    DROP POLICY IF EXISTS "Admins can manage all profiles" ON public.profiles;
-    CREATE POLICY "Admins can manage all profiles" ON public.profiles FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
+    DROP POLICY IF EXISTS "Admins can manage all profiles"
+ON public.profiles;
+
+CREATE POLICY "Admins can manage all profiles"
+ON public.profiles
+FOR ALL
+TO authenticated
+USING ((SELECT private.is_admin()))
+WITH CHECK ((SELECT private.is_admin()));
 
     -- Users can view own profile
     DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
@@ -286,8 +308,14 @@ DO $$ BEGIN
     CREATE POLICY "Allow system log creation" ON public.system_audit_logs FOR INSERT WITH CHECK (true);
     
     -- Admins can read system logs
-    DROP POLICY IF EXISTS "Admins can view system logs" ON public.system_audit_logs;
-    CREATE POLICY "Admins can view system logs" ON public.system_audit_logs FOR SELECT USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
+    DROP POLICY IF EXISTS "Admins can view system logs"
+ON public.system_audit_logs;
+
+CREATE POLICY "Admins can view system logs"
+ON public.system_audit_logs
+FOR SELECT
+TO authenticated
+USING ((SELECT private.is_admin()));
 
     -- Allow all access to audit_reports (app level logic limits it, but for DB keep it open as before)
     DROP POLICY IF EXISTS "Allow all access to audit_reports" ON public.audit_reports;
