@@ -4226,7 +4226,25 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       });
       // SERVER-SIDE TENANT ISOLATION: Force distributorName to user's organization if role is Distributor
       if (targetDistributor && targetDistributor !== 'All Distributors') {
-        dbRecords = dbRecords.filter(r => r.distributorName === targetDistributor);
+        const normTarget = targetDistributor.toLowerCase().trim();
+        dbRecords = dbRecords.filter(r => {
+          const normDist = (r.distributorName || '').toLowerCase().trim();
+          if (normTarget.includes('midwest') && normDist.includes('midwest')) return true;
+          return normDist === normTarget;
+        });
+      } else {
+        // "All Distributors" must currently show ONLY Midwest Trading Co. data, since Midwest is the only distributor included in this audit.
+        // Do NOT load, display, or aggregate data from Horizon Logistics, Pacific Rim, Nexus, or any other excluded distributor.
+        // Keep the “All Distributors” option for future use when additional distributors are added to a new audit engagement.
+        const EXCLUDED_DEMO_NAMES = ['horizon', 'pacific rim', 'nexus', 'middle east', 'eurotech', 'latam'];
+        const EXCLUDED_ENGAGEMENT_IDS = ['eng-102', 'eng-103', 'eng-104', 'eng-105', 'eng-106'];
+        dbRecords = dbRecords.filter(r => {
+          const rAudit = String(r.auditId || '').toLowerCase();
+          if (EXCLUDED_ENGAGEMENT_IDS.includes(rAudit)) return false;
+          const rDist = String(r.distributorName || '').toLowerCase();
+          if (EXCLUDED_DEMO_NAMES.some(ex => rDist.includes(ex))) return false;
+          return true;
+        });
       }
 
       if (client && client !== 'All Clients') {

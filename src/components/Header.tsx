@@ -71,15 +71,10 @@ export const Header: React.FC<HeaderProps> = ({
   const [distributorSearchQuery, setDistributorSearchQuery] = useState('');
   const distributorDropdownRef = React.useRef<HTMLDivElement>(null);
 
-  // Initial pre-seeded demo distributor names to hide from the current audit engagement
-  const HIDDEN_SEED_DISTRIBUTORS = React.useMemo(() => [
-    'horizon logistics india',
-    'pacific rim distribution',
-    'nexus logistics ltd',
-    'middle east company',
-    'eurotech supply chains',
-    'latam trading network'
-  ], []);
+  // Baseline initial demo engagement IDs to distinguish from newly created audit engagements
+  const BASELINE_DEMO_ENGAGEMENT_IDS = React.useMemo(() => new Set([
+    'eng-101', 'eng-102', 'eng-103', 'eng-104', 'eng-105', 'eng-106'
+  ]), []);
 
   const availableDistributors = React.useMemo(() => {
     const all = getAllRegisteredDistributors();
@@ -96,8 +91,8 @@ export const Header: React.FC<HeaderProps> = ({
           const parsed = JSON.parse(storedEngs);
           if (Array.isArray(parsed)) {
             parsed.forEach((eng: any) => {
-              // Any engagement beyond the initial baseline (eng-101, eng-102, eng-103)
-              if (eng && eng.id && !['eng-101', 'eng-102', 'eng-103'].includes(eng.id)) {
+              // Any engagement beyond the initial baseline demo set
+              if (eng && eng.id && !BASELINE_DEMO_ENGAGEMENT_IDS.has(eng.id)) {
                 const distName = (eng.distributorName || '').trim();
                 if (distName) {
                   newEngagementDistributorNames.add(distName.toLowerCase());
@@ -129,37 +124,35 @@ export const Header: React.FC<HeaderProps> = ({
 
     const combinedList = [...sourceList, ...newEngagementDistributors];
 
-    // Filter to show:
-    // 1. Midwest Trading Co. (MDT-8092) for current audit engagement
-    // 2. Any distributor belonging to a newly created audit engagement
-    // 3. Any newly registered distributor entity created later
+    // For current audit engagement: show only Midwest Trading Co. (MDT-8092).
+    // Dynamically include additional distributors only if attached to a newly created audit engagement.
     return combinedList.filter(d => {
       const lower = d.name.toLowerCase().trim();
-      if (lower === 'midwest trading co.' || d.code === 'MDT-8092') {
+      if (lower === 'midwest trading co.' || d.code === 'MDT-8092' || lower.includes('midwest trading')) {
         return true;
       }
       if (newEngagementDistributorNames.has(lower)) {
         return true;
       }
-      if (!HIDDEN_SEED_DISTRIBUTORS.includes(lower)) {
-        return true;
-      }
       return false;
     });
-  }, [selectedClient, isDistributorDropdownOpen, HIDDEN_SEED_DISTRIBUTORS]);
+  }, [selectedClient, isDistributorDropdownOpen, BASELINE_DEMO_ENGAGEMENT_IDS]);
 
-  // If the active distributor was previously pointing to a hidden distributor without an engagement, fallback to Midwest Trading Co.
+  // If the active distributor was previously pointing to an excluded distributor without an engagement, fallback to Midwest Trading Co.
   React.useEffect(() => {
-    const isHidden = HIDDEN_SEED_DISTRIBUTORS.includes(selectedDistributor.toLowerCase().trim());
-    if (isHidden) {
-      const isAllowedByNewEngagement = availableDistributors.some(
-        d => d.name.toLowerCase().trim() === selectedDistributor.toLowerCase().trim()
-      );
-      if (!isAllowedByNewEngagement) {
-        onDistributorChange('Midwest Trading Co.');
-      }
+    const lowerSelected = selectedDistributor.toLowerCase().trim();
+    if (lowerSelected === 'all distributors') return;
+
+    const isValid = availableDistributors.some(
+      d => d.name.toLowerCase().trim() === lowerSelected ||
+           (d.code && lowerSelected.includes(d.code.toLowerCase())) ||
+           lowerSelected.includes(d.name.toLowerCase().trim()) ||
+           (lowerSelected.includes('midwest') && d.name.toLowerCase().includes('midwest'))
+    );
+    if (!isValid) {
+      onDistributorChange('Midwest Trading Co.');
     }
-  }, [selectedDistributor, availableDistributors, onDistributorChange, HIDDEN_SEED_DISTRIBUTORS]);
+  }, [selectedDistributor, availableDistributors, onDistributorChange]);
 
   const filteredDistributors = React.useMemo(() => {
     if (!distributorSearchQuery.trim()) return availableDistributors;
@@ -340,7 +333,9 @@ export const Header: React.FC<HeaderProps> = ({
                       </div>
                     ) : (
                       filteredDistributors.map((d) => {
-                        const isSelected = selectedDistributor.toLowerCase() === d.name.toLowerCase();
+                        const isSelected = selectedDistributor.toLowerCase() === d.name.toLowerCase() ||
+                          (selectedDistributor.toLowerCase().includes('midwest') && d.name.toLowerCase().includes('midwest'));
+                        const displayName = d.code && !d.name.includes(d.code) ? `${d.name} (${d.code})` : d.name;
                         return (
                           <button
                             key={d.id || d.name}
@@ -361,13 +356,8 @@ export const Header: React.FC<HeaderProps> = ({
                             <div className="min-w-0 pr-2">
                               <div className="flex items-center gap-1.5">
                                 <span className={`font-bold truncate ${isSelected ? 'text-emerald-300' : 'text-slate-200 group-hover:text-white'}`}>
-                                  {d.name}
+                                  {displayName}
                                 </span>
-                                {d.code && (
-                                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 border border-slate-700/60 shrink-0">
-                                    {d.code}
-                                  </span>
-                                )}
                               </div>
                               <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400 truncate">
                                 <span className="truncate">{d.region}</span>
