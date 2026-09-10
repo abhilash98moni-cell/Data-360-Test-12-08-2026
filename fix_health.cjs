@@ -1,42 +1,6 @@
 const fs = require('fs');
 
-function fixFile(filename) {
-  let lines = fs.readFileSync(filename, 'utf8').split('\n');
-  let startIndex = -1;
-  let endIndex = -1;
-  let braceCount = 0;
-  let found = false;
-
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes("app.get('/api/supabase/health'")) {
-      startIndex = i;
-      found = true;
-    }
-    
-    if (found) {
-      let openBraces = (lines[i].match(/\{/g) || []).length;
-      let closeBraces = (lines[i].match(/\}/g) || []).length;
-      
-      braceCount += openBraces;
-      braceCount -= closeBraces;
-      
-      if (braceCount === 0 && openBraces !== 0 && closeBraces !== 0) {
-        // Not perfectly robust if braces are unmatched on same line, but typical formatting:
-        // app.get(..., () => {
-        // ...
-        // });
-        // The last line is usually "});"
-      }
-      
-      if (braceCount === 0 && lines[i].includes('});') && i > startIndex) {
-        endIndex = i;
-        break;
-      }
-    }
-  }
-
-  if (startIndex !== -1 && endIndex !== -1) {
-    const healthHandlerCode = `app.get('/api/supabase/health', async (req, res) => {
+const healthHandlerCode = `async (req, res) => {
   const startTime = Date.now();
   try {
     const supabase = getSupabaseServerClient();
@@ -94,11 +58,13 @@ function fixFile(filename) {
       latencyMs: Date.now() - startTime
     });
   }
-});`;
-    
-    // First let's do a hard replace by deleting everything from start to a safe marker
-    // But since I messed it up, let's just find the markers.
-  }
-}
+}`;
 
-// Actually I'll just use sed to replace the messed up block.
+let serverCode = fs.readFileSync('server.ts', 'utf8');
+serverCode = serverCode.replace(/app\.get\('\/api\/supabase\/health',\s*async\s*\(req,\s*res\)\s*=>\s*\{[\s\S]*?\}\s*\);/m, "app.get('/api/supabase/health', " + healthHandlerCode + ");");
+fs.writeFileSync('server.ts', serverCode);
+
+let apiCode = fs.readFileSync('api/index.ts', 'utf8');
+apiCode = apiCode.replace(/app\.get\('\/api\/supabase\/health',\s*async\s*\(req,\s*res\)\s*=>\s*\{[\s\S]*?\}\s*\);/m, "app.get('/api/supabase/health', " + healthHandlerCode + ");");
+fs.writeFileSync('api/index.ts', apiCode);
+

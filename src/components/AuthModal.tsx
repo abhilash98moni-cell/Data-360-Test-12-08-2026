@@ -74,19 +74,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
     if (mode === 'register') {
       try {
-        // Direct browser SDK insert into Supabase pending_signup_requests table using .env credentials
-        const { error: dbError } = await supabase.from('pending_signup_requests').insert({
-          email,
-          password_hash: password,
-          full_name: fullName || email.split('@')[0],
-          role: role.toLowerCase(),
-          organization: org,
-          status: 'pending'
-        });
-
-        if (dbError) {
-          console.warn('Supabase DB Insert Note:', dbError.message);
-        }
+        
 
         // Send to backend API
         const res = await fetch('/api/auth/signup-request', {
@@ -96,13 +84,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         });
         const data = await res.json();
 
-        if ((res.ok && data.success) || !dbError) {
+        if (res.ok && data.success) {
           setSuccessMessage('Signup Request Submitted! Your account request is stored in Supabase pending_signup_requests and awaiting Admin approval.');
           setEmail('');
           setPassword('');
           setFullName('');
         } else {
-          setErrorMessage(data.error || dbError?.message || 'Failed to submit signup request');
+          setErrorMessage(data.error || 'Failed to submit signup request');
         }
       } catch (err: any) {
         setSuccessMessage('Signup request registered! Pending Admin approval.');
