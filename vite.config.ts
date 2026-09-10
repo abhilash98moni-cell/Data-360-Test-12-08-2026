@@ -6,17 +6,19 @@ import { defineConfig, loadEnv } from 'vite';
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
 
-  // Default to the working preview configuration
+  // Use the Supabase variables configured in Vercel or local env.
   const projectUrl =
     env.SUPABASE_URL ||
     env.NEXT_PUBLIC_SUPABASE_URL ||
-    'https://imymzvueaagmfzncsmhi.supabase.co';
+    env.VITE_SUPABASE_URL ||
+    '';
 
   const projectAnon =
     env.SUPABASE_ANON_KEY ||
     env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
     env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlteW16dnVlYWFnbWZ6bmNzbWhpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODY0NDE3MzgsImV4cCI6MjEwMjAxNzczOH0.efn-OA3Fm_-BVqxsF8lnHALuP3Jn83Q1ekJx5_cGzQ8';
+    env.VITE_SUPABASE_ANON_KEY ||
+    '';
 
   if (!projectUrl) {
     console.warn('NEXT_PUBLIC_SUPABASE_URL is not configured.');

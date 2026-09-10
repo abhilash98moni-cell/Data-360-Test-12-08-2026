@@ -215,17 +215,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
     }
 
     if (!isDistributor && selectedDistributor && selectedDistributor !== 'All Distributors') {
-      const normSel = selectedDistributor.toLowerCase().trim();
-      const normRec = (rec.distributorName || '').toLowerCase().trim();
-      if (normSel.includes('midwest') && normRec.includes('midwest')) {
-        // match
-      } else if (normRec !== normSel) {
-        return false;
-      }
-    } else if (!isDistributor && (!selectedDistributor || selectedDistributor === 'All Distributors')) {
-      const normRec = (rec.distributorName || '').toLowerCase().trim();
-      const isExcluded = ['horizon', 'pacific rim', 'nexus', 'middle east', 'eurotech', 'latam'].some(ex => normRec.includes(ex));
-      if (isExcluded) {
+      if (rec.distributorName.toLowerCase() !== selectedDistributor.toLowerCase()) {
         return false;
       }
     }

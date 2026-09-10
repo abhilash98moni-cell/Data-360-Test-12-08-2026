@@ -1,9 +1,9 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { INITIAL_IIR_REQUESTS } from '../data/iirData.js';
 import { getItemCompletionDetails } from '../utils/irlValidation.js';
-import { getSupabaseServerClient, getSupabaseServerUrl } from '../lib/supabaseServer.js';
+import { getSupabaseServerClient } from '../lib/supabaseServer.js';
 
-export { getSupabaseServerClient, getSupabaseServerUrl };
+export { getSupabaseServerClient };
 
 export interface AuthoritativeIRLRecord {
   found: boolean;

@@ -289,89 +289,24 @@ export default function App() {
     ? (currentUser.organization || selectedDistributor)
     : selectedDistributor;
 
-  // List of excluded legacy demo engagement IDs (Horizon, Pacific Rim, Nexus, Middle East, EuroTech)
-  // These distributors are not included in the current audit engagement.
-  const EXCLUDED_DEMO_ENGAGEMENT_IDS = React.useMemo(() => new Set([
-    'eng-102', // Horizon Logistics India
-    'eng-103', // Pacific Rim Distribution
-    'eng-104', // Nexus Logistics Ltd
-    'eng-105', // Middle East Company
-    'eng-106'  // EuroTech Supply Chains
-  ]), []);
-
-  // Engagements included in audit scope (eng-101 Midwest Trading Co. + any newly created engagement)
-  const auditScopedEngagements = React.useMemo(() => {
-    return engagements.filter(e => !EXCLUDED_DEMO_ENGAGEMENT_IDS.has(e.id));
-  }, [engagements, EXCLUDED_DEMO_ENGAGEMENT_IDS]);
-
-  // Filter Engagements by selected client and distributor:
-  // For the current audit engagement, “All Distributors” currently shows ONLY Midwest Trading Co. data.
-  // When additional distributors are added to a new audit engagement, they appear and aggregate under "All Distributors".
-  const filteredEngagements = React.useMemo(() => {
-    return auditScopedEngagements.filter(e => {
-      const matchesClient = selectedClient === 'All Clients' || e.clientName === selectedClient;
-      if (!matchesClient) return false;
-
-      if (activeDistributorFilter === 'All Distributors') {
-        return true;
-      }
-
-      const normFilter = activeDistributorFilter.toLowerCase().replace(/\s*\([^)]*\)\s*/g, ' ').trim();
-      const normTitle = e.title.toLowerCase();
-      const normCode = (e.distributorCode || e.code || '').toLowerCase();
-      const normLoc = (e.location || '').toLowerCase();
-      const normDist = ((e as any).distributorName || '').toLowerCase();
-
-      return (
-        normTitle.includes(normFilter) ||
-        normCode.includes(normFilter) ||
-        normLoc.includes(normFilter) ||
-        normDist.includes(normFilter) ||
-        (normFilter.includes('midwest') && (normTitle.includes('midwest') || normLoc.includes('midwest') || normLoc.includes('mdt-8092')))
-      );
-    });
-  }, [auditScopedEngagements, selectedClient, activeDistributorFilter]);
+  // Filter Engagements by selected client and distributor
+  const filteredEngagements = engagements.filter(e => {
+    const matchesClient = selectedClient === 'All Clients' || e.clientName === selectedClient;
+    const matchesDistributor = activeDistributorFilter === 'All Distributors' ||
+      e.title.toLowerCase().includes(activeDistributorFilter.toLowerCase()) ||
+      e.code.toLowerCase().includes(activeDistributorFilter.toLowerCase());
+    return matchesClient && matchesDistributor;
+  });
 
   // Filter Findings by selected client and distributor
-  const filteredFindings = React.useMemo(() => {
-    const validEngIds = new Set(auditScopedEngagements.map(e => e.id));
-
-    return findings.filter(f => {
-      if (!validEngIds.has(f.engagementId)) {
-        return false;
-      }
-
-      const eng = auditScopedEngagements.find(e => e.id === f.engagementId);
-      const matchesClient = selectedClient === 'All Clients' || (eng && eng.clientName === selectedClient);
-      if (!matchesClient) return false;
-
-      if (activeDistributorFilter === 'All Distributors') {
-        return true;
-      }
-
-      const normFilter = activeDistributorFilter.toLowerCase().replace(/\s*\([^)]*\)\s*/g, ' ').trim();
-      const normEntity = (f.auditedEntity || '').toLowerCase();
-      const normTitle = (f.title || '').toLowerCase();
-
-      return (
-        normEntity.includes(normFilter) ||
-        normTitle.includes(normFilter) ||
-        (normFilter.includes('midwest') && (normEntity.includes('midwest') || normEntity.includes('mdt-8092')))
-      );
-    });
-  }, [findings, auditScopedEngagements, selectedClient, activeDistributorFilter]);
-
-  // Filter Sampling Runs by selected client and distributor
-  const filteredSamplingRuns = React.useMemo(() => {
-    const validEngIds = new Set(filteredEngagements.map(e => e.id));
-    return samplingRuns.filter(s => validEngIds.has(s.auditId));
-  }, [samplingRuns, filteredEngagements]);
-
-  // Filter Assignments by selected client and distributor
-  const filteredAssignments = React.useMemo(() => {
-    const validEngIds = new Set(filteredEngagements.map(e => e.id));
-    return assignments.filter(a => validEngIds.has(a.engagementId));
-  }, [assignments, filteredEngagements]);
+  const filteredFindings = findings.filter(f => {
+    const eng = engagements.find(e => e.id === f.engagementId);
+    const matchesClient = selectedClient === 'All Clients' || (eng && eng.clientName === selectedClient);
+    const matchesDistributor = activeDistributorFilter === 'All Distributors' ||
+      (f.auditedEntity && f.auditedEntity.toLowerCase().includes(activeDistributorFilter.toLowerCase())) ||
+      (f.title && f.title.toLowerCase().includes(activeDistributorFilter.toLowerCase()));
+    return matchesClient && matchesDistributor;
+  });
 
   // Update Finding Status handler
   const handleUpdateFindingStatus = (id: string, newStatus: any) => {
@@ -491,10 +426,10 @@ export default function App() {
             />
           ) : activeTab === 'dashboard' ? (
             <DashboardView 
-              engagements={filteredEngagements}
-              findings={filteredFindings}
-              samplingRuns={filteredSamplingRuns}
-              assignments={filteredAssignments}
+              engagements={activeDistributorFilter === 'All Distributors' ? engagements : filteredEngagements}
+              findings={activeDistributorFilter === 'All Distributors' ? findings : filteredFindings}
+              samplingRuns={samplingRuns}
+              assignments={assignments}
               onSelectEngagement={(id) => {
                 setSelectedEngId(id);
                 const eng = engagements.find(e => e.id === id);

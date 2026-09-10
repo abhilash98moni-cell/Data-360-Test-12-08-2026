@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
@@ -11,7 +12,6 @@ import { storageService } from './src/services/storageService.js';
 import { getItemCompletionDetails } from './src/utils/irlValidation.js';
 import {
   getSupabaseServerClient,
-  getSupabaseServerUrl,
   getAuthoritativeIRLState,
   saveAuthoritativeIRLState,
   getAuthoritativeSubmissions,
@@ -50,14 +50,6 @@ function getGeminiClient(): GoogleGenAI | null {
   return geminiClient;
 }
 
-// Catch unhandled errors gracefully to avoid crashing the server
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-});
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-});
-
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -86,14 +78,14 @@ async function startServer() {
           connected: false,
           error: error.message,
           latencyMs,
-          url: getSupabaseServerUrl()
+          url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
         });
       }
 
       return res.json({
         connected: true,
         latencyMs,
-        url: getSupabaseServerUrl(),
+        url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
         message: 'Successfully connected to Supabase PostgreSQL database!',
         timestamp: new Date().toISOString()
       });
@@ -4234,25 +4226,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       });
       // SERVER-SIDE TENANT ISOLATION: Force distributorName to user's organization if role is Distributor
       if (targetDistributor && targetDistributor !== 'All Distributors') {
-        const normTarget = targetDistributor.toLowerCase().trim();
-        dbRecords = dbRecords.filter(r => {
-          const normDist = (r.distributorName || '').toLowerCase().trim();
-          if (normTarget.includes('midwest') && normDist.includes('midwest')) return true;
-          return normDist === normTarget;
-        });
-      } else {
-        // "All Distributors" must currently show ONLY Midwest Trading Co. data, since Midwest is the only distributor included in this audit.
-        // Do NOT load, display, or aggregate data from Horizon Logistics, Pacific Rim, Nexus, or any other excluded distributor.
-        // Keep the “All Distributors” option for future use when additional distributors are added to a new audit engagement.
-        const EXCLUDED_DEMO_NAMES = ['horizon', 'pacific rim', 'nexus', 'middle east', 'eurotech', 'latam'];
-        const EXCLUDED_ENGAGEMENT_IDS = ['eng-102', 'eng-103', 'eng-104', 'eng-105', 'eng-106'];
-        dbRecords = dbRecords.filter(r => {
-          const rAudit = String(r.auditId || '').toLowerCase();
-          if (EXCLUDED_ENGAGEMENT_IDS.includes(rAudit)) return false;
-          const rDist = String(r.distributorName || '').toLowerCase();
-          if (EXCLUDED_DEMO_NAMES.some(ex => rDist.includes(ex))) return false;
-          return true;
-        });
+        dbRecords = dbRecords.filter(r => r.distributorName === targetDistributor);
       }
 
       if (client && client !== 'All Clients') {
@@ -6500,7 +6474,6 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
   // Vite middleware for development or static file serving for production
   if (process.env.NODE_ENV !== 'production') {
-    const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
@@ -6510,12 +6483,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
-      const indexPath = path.join(distPath, 'index.html');
-      if (fs.existsSync(indexPath)) {
-        res.sendFile(indexPath);
-      } else {
-        res.status(404).send('Application is starting up or build artifact is missing.');
-      }
+      res.sendFile(path.join(distPath, 'index.html'));
     });
   }
 
