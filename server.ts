@@ -67,16 +67,36 @@ async function startServer() {
     const startTime = Date.now();
     try {
       const supabase = getSupabaseServerClient();
-      const { error } = await supabase
-        .from('pending_signup_requests')
-        .select('*', { count: 'exact', head: true });
+      
+      const errors: string[] = [];
+
+      // 1. Read checks
+      const [pendingRes, profilesRes, evidenceRes] = await Promise.all([
+        supabase.from('pending_signup_requests').select('id').limit(1),
+        supabase.from('profiles').select('id').limit(1),
+        supabase.from('evidence_files').select('id').limit(1)
+      ]);
+
+      if (pendingRes.error) errors.push(`pending_signup_requests read error: ${pendingRes.error.message}`);
+      if (profilesRes.error) errors.push(`profiles read error: ${profilesRes.error.message}`);
+      if (evidenceRes.error) errors.push(`evidence_files read error: ${evidenceRes.error.message}`);
+
+      // 2. Safe write test (update non-existent UUID on profiles)
+      const { error: writeError } = await supabase
+        .from('profiles')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', '00000000-0000-0000-0000-000000000000');
+        
+      if (writeError) {
+        errors.push(`profiles write error: ${writeError.message}`);
+      }
 
       const latencyMs = Date.now() - startTime;
 
-      if (error) {
+      if (errors.length > 0) {
         return res.status(400).json({
           connected: false,
-          error: error.message,
+          error: errors.join(' | '),
           latencyMs,
           url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
         });
