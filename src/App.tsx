@@ -28,7 +28,7 @@ import {
   INITIAL_ASSIGNMENTS
 } from './data/mockData';
 import { INITIAL_IIR_REQUESTS, INITIAL_IIR_AUDIT_TRAIL } from './data/iirData';
-import { CLIENT_TENANTS, getDistributorsForClient } from './data/clientsAndDistributors';
+import { CLIENT_TENANTS, getDistributorsForClient, getDistributorsForEngagement, DistributorInfo } from './data/clientsAndDistributors';
 import { AuditEngagement, AuditFinding, AuditAssignment } from './types';
 
 import { CurrencyMode } from './utils/currencyFormatter';
@@ -163,7 +163,15 @@ export default function App() {
     }
     return INITIAL_ENGAGEMENTS;
   });
-  const [selectedEngId, setSelectedEngId] = useState<string>('eng-101');
+  const [selectedEngId, setSelectedEngId] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('data360_selected_eng_id');
+        if (stored && stored.trim()) return stored.trim();
+      } catch (e) {}
+    }
+    return 'eng-101';
+  });
 
   // Findings & CAPAs State
   const [findings, setFindings] = useState<AuditFinding[]>(INITIAL_FINDINGS);
@@ -284,94 +292,77 @@ export default function App() {
     }
   };
 
+  // Current active engagement
+  const currentEngagement = React.useMemo(() => {
+    return engagements.find(e => e.id === selectedEngId) || engagements[0];
+  }, [engagements, selectedEngId]);
+
+  // Distributors belonging specifically to the active audit engagement
+  const engagementDistributors = React.useMemo(() => {
+    return getDistributorsForEngagement(currentEngagement);
+  }, [currentEngagement]);
+
+  // Ensure selectedDistributor belongs to the active engagement's distributors (or is 'All Distributors')
+  React.useEffect(() => {
+    if (selectedDistributor && selectedDistributor !== 'All Distributors') {
+      const isStillValid = engagementDistributors.some(
+        d => d.name.toLowerCase() === selectedDistributor.toLowerCase()
+      );
+      if (!isStillValid && engagementDistributors.length > 0) {
+        setSelectedDistributor(engagementDistributors[0].name);
+      }
+    }
+  }, [selectedEngId, engagementDistributors, selectedDistributor]);
+
   // Effective distributor scope
   const activeDistributorFilter = currentUser?.role === 'Distributor' 
     ? (currentUser.organization || selectedDistributor)
     : selectedDistributor;
 
-  // List of excluded legacy demo engagement IDs (Horizon, Pacific Rim, Nexus, Middle East, EuroTech)
-  // These distributors are not included in the current audit engagement.
-  const EXCLUDED_DEMO_ENGAGEMENT_IDS = React.useMemo(() => new Set([
-    'eng-102', // Horizon Logistics India
-    'eng-103', // Pacific Rim Distribution
-    'eng-104', // Nexus Logistics Ltd
-    'eng-105', // Middle East Company
-    'eng-106'  // EuroTech Supply Chains
-  ]), []);
-
-  // Engagements included in audit scope (eng-101 Midwest Trading Co. + any newly created engagement)
-  const auditScopedEngagements = React.useMemo(() => {
-    return engagements.filter(e => !EXCLUDED_DEMO_ENGAGEMENT_IDS.has(e.id));
-  }, [engagements, EXCLUDED_DEMO_ENGAGEMENT_IDS]);
-
-  // Filter Engagements by selected client and distributor:
-  // For the current audit engagement, “All Distributors” currently shows ONLY Midwest Trading Co. data.
-  // When additional distributors are added to a new audit engagement, they appear and aggregate under "All Distributors".
-  const filteredEngagements = React.useMemo(() => {
-    return auditScopedEngagements.filter(e => {
-      const matchesClient = selectedClient === 'All Clients' || e.clientName === selectedClient;
-      if (!matchesClient) return false;
-
-      if (activeDistributorFilter === 'All Distributors') {
-        return true;
-      }
-
-      const normFilter = activeDistributorFilter.toLowerCase().replace(/\s*\([^)]*\)\s*/g, ' ').trim();
-      const normTitle = e.title.toLowerCase();
-      const normCode = (e.distributorCode || e.code || '').toLowerCase();
-      const normLoc = (e.location || '').toLowerCase();
-      const normDist = ((e as any).distributorName || '').toLowerCase();
-
-      return (
-        normTitle.includes(normFilter) ||
-        normCode.includes(normFilter) ||
-        normLoc.includes(normFilter) ||
-        normDist.includes(normFilter) ||
-        (normFilter.includes('midwest') && (normTitle.includes('midwest') || normLoc.includes('midwest') || normLoc.includes('mdt-8092')))
-      );
-    });
-  }, [auditScopedEngagements, selectedClient, activeDistributorFilter]);
+  // Filter Engagements by selected client and distributor
+  // For the current audit engagement, only distributors belonging to this engagement are shown.
+  // "All Distributors" must currently show ONLY data for this audit's distributors (Midwest).
+  const filteredEngagements = engagements.filter(e => {
+    const matchesClient = selectedClient === 'All Clients' || e.clientName === selectedClient;
+    const matchesDistributor = activeDistributorFilter === 'All Distributors'
+      ? engagementDistributors.some(d => 
+          (e.distributorName && e.distributorName.toLowerCase() === d.name.toLowerCase()) ||
+          (d.code && (
+            (e.distributorCode && e.distributorCode.toLowerCase() === d.code.toLowerCase()) ||
+            e.location.toLowerCase().includes(d.code.toLowerCase()) ||
+            e.code.toLowerCase().includes(d.code.toLowerCase())
+          )) ||
+          e.title.toLowerCase().includes(d.name.toLowerCase()) ||
+          e.location.toLowerCase().includes(d.name.toLowerCase())
+        )
+      : (
+          (e.distributorName && e.distributorName.toLowerCase() === activeDistributorFilter.toLowerCase()) ||
+          e.title.toLowerCase().includes(activeDistributorFilter.toLowerCase()) ||
+          e.code.toLowerCase().includes(activeDistributorFilter.toLowerCase())
+        );
+    return matchesClient && matchesDistributor;
+  });
 
   // Filter Findings by selected client and distributor
-  const filteredFindings = React.useMemo(() => {
-    const validEngIds = new Set(auditScopedEngagements.map(e => e.id));
-
-    return findings.filter(f => {
-      if (!validEngIds.has(f.engagementId)) {
-        return false;
-      }
-
-      const eng = auditScopedEngagements.find(e => e.id === f.engagementId);
-      const matchesClient = selectedClient === 'All Clients' || (eng && eng.clientName === selectedClient);
-      if (!matchesClient) return false;
-
-      if (activeDistributorFilter === 'All Distributors') {
-        return true;
-      }
-
-      const normFilter = activeDistributorFilter.toLowerCase().replace(/\s*\([^)]*\)\s*/g, ' ').trim();
-      const normEntity = (f.auditedEntity || '').toLowerCase();
-      const normTitle = (f.title || '').toLowerCase();
-
-      return (
-        normEntity.includes(normFilter) ||
-        normTitle.includes(normFilter) ||
-        (normFilter.includes('midwest') && (normEntity.includes('midwest') || normEntity.includes('mdt-8092')))
-      );
-    });
-  }, [findings, auditScopedEngagements, selectedClient, activeDistributorFilter]);
-
-  // Filter Sampling Runs by selected client and distributor
-  const filteredSamplingRuns = React.useMemo(() => {
-    const validEngIds = new Set(filteredEngagements.map(e => e.id));
-    return samplingRuns.filter(s => validEngIds.has(s.auditId));
-  }, [samplingRuns, filteredEngagements]);
-
-  // Filter Assignments by selected client and distributor
-  const filteredAssignments = React.useMemo(() => {
-    const validEngIds = new Set(filteredEngagements.map(e => e.id));
-    return assignments.filter(a => validEngIds.has(a.engagementId));
-  }, [assignments, filteredEngagements]);
+  const filteredFindings = findings.filter(f => {
+    const eng = engagements.find(e => e.id === f.engagementId);
+    const matchesClient = selectedClient === 'All Clients' || (eng && eng.clientName === selectedClient);
+    const matchesDistributor = activeDistributorFilter === 'All Distributors'
+      ? engagementDistributors.some(d =>
+          (f.auditedEntity && f.auditedEntity.toLowerCase().includes(d.name.toLowerCase())) ||
+          (f.title && f.title.toLowerCase().includes(d.name.toLowerCase())) ||
+          (eng && (
+            (eng.distributorName && eng.distributorName.toLowerCase() === d.name.toLowerCase()) ||
+            eng.title.toLowerCase().includes(d.name.toLowerCase()) ||
+            (d.code && eng.location.toLowerCase().includes(d.code.toLowerCase()))
+          ))
+        )
+      : (
+          (f.auditedEntity && f.auditedEntity.toLowerCase().includes(activeDistributorFilter.toLowerCase())) ||
+          (f.title && f.title.toLowerCase().includes(activeDistributorFilter.toLowerCase()))
+        );
+    return matchesClient && matchesDistributor;
+  });
 
   // Update Finding Status handler
   const handleUpdateFindingStatus = (id: string, newStatus: any) => {
@@ -390,6 +381,11 @@ export default function App() {
       return updated;
     });
     setSelectedEngId(newEng.id);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('data360_selected_eng_id', newEng.id);
+      } catch (e) {}
+    }
     if (newClientName) {
       setSelectedClient(newClientName);
     } else if (newEng.clientName) {
@@ -398,6 +394,11 @@ export default function App() {
     const distName = newDistributorName || (newEng as any).distributorName;
     if (distName) {
       setSelectedDistributor(distName);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('data360_selected_distributor', distName);
+        } catch (e) {}
+      }
     }
     // After creation, open the new engagement as a completely fresh workspace
     setActiveTab('engagement_workspace');
@@ -441,6 +442,8 @@ export default function App() {
             }, 100);
           }
         }}
+        currentEngagement={currentEngagement}
+        availableDistributors={engagementDistributors}
       />
 
       {/* Main Workspace Body */}
@@ -493,20 +496,24 @@ export default function App() {
             <DashboardView 
               engagements={filteredEngagements}
               findings={filteredFindings}
-              samplingRuns={filteredSamplingRuns}
-              assignments={filteredAssignments}
+              samplingRuns={samplingRuns.filter(s => filteredEngagements.some(e => e.id === s.auditId))}
+              assignments={assignments.filter(a => filteredEngagements.some(e => e.id === a.engagementId))}
               onSelectEngagement={(id) => {
                 setSelectedEngId(id);
+                if (typeof window !== 'undefined') {
+                  try {
+                    localStorage.setItem('data360_selected_eng_id', id);
+                  } catch (e) {}
+                }
                 const eng = engagements.find(e => e.id === id);
                 if (eng) {
                   if (eng.clientName) setSelectedClient(eng.clientName);
                   if (eng.distributorName) {
                     handleDistributorChange(eng.distributorName);
                   } else {
-                    const dists = getDistributorsForClient(eng.clientName);
-                    const matched = dists.find(d => eng.title.includes(d.name) || eng.location.includes(d.name) || (d.code && eng.location.includes(d.code)));
-                    if (matched) {
-                      handleDistributorChange(matched.name);
+                    const dists = getDistributorsForEngagement(eng);
+                    if (dists.length > 0) {
+                      handleDistributorChange(dists[0].name);
                     }
                   }
                 }
