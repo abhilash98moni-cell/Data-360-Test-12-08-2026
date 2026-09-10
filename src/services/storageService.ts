@@ -75,6 +75,7 @@ export interface StorageService {
       distributorName: string;
       requirementId: string;
       uploadedBy: string;
+      uploadedById?: string;
       isReferenceMaterial?: boolean;
     }
   ): Promise<FileMetadata>;
@@ -156,6 +157,28 @@ export class GoogleDriveStorageService implements StorageService {
         }
       } catch (err: any) {
         console.warn('Direct file lookup notice:', err.message);
+      }
+    }
+
+    // 2.5. Check Supabase Storage fallback
+    if (fileId && (fileId.startsWith('file-') || fileId.startsWith('ev-'))) {
+      try {
+        const client = getSupabaseServerClient();
+        
+        // Use service key to download directly from the bucket
+        const { data: blob, error } = await client.storage
+          .from('evidence-files')
+          .download(fileId);
+          
+        if (!error && blob) {
+          const arrayBuffer = await blob.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          const entry = { buffer, fileName: fallbackFileName || `Document_${fileId}.pdf`, mimeType: blob.type || 'application/octet-stream' };
+          this.binaryBufferStore.set(fileId, entry);
+          return entry;
+        }
+      } catch (sbErr) {
+        console.warn('Supabase Storage lookup failed:', sbErr);
       }
     }
 
@@ -606,6 +629,7 @@ startxref
       distributorName: string;
       requirementId: string;
       uploadedBy: string;
+      uploadedById?: string;
       isReferenceMaterial?: boolean;
     }
   ): Promise<FileMetadata> {
@@ -690,43 +714,16 @@ startxref
         webViewLink = fileRes.data.webViewLink || '';
         webContentLink = fileRes.data.webContentLink || '';
         console.log(`✅ File '${fileName}' uploaded to Google Drive. Target folder: ${targetFolderId}, Real File ID: ${realDriveFileId}`);
+      } else {
+        throw new Error('Google Drive API returned success but no file ID was provided.');
       }
     } catch (createErr: any) {
-      console.warn(`Folder-targeted upload failed for '${fileName}' (${createErr.message}). Retrying upload directly to Google Drive root...`);
-      
-      try {
-        const fallbackStream = new Readable();
-        fallbackStream.push(fileBuffer);
-        fallbackStream.push(null);
-
-        const fileRes = await this.drive.files.create({
-          requestBody: {
-            name: fileName
-          },
-          media: {
-            mimeType: mimeType || 'application/octet-stream',
-            body: fallbackStream
-          },
-          fields: 'id, name, webViewLink, webContentLink'
-        });
-
-        if (fileRes.data && fileRes.data.id) {
-          realDriveFileId = fileRes.data.id;
-          webViewLink = fileRes.data.webViewLink || '';
-          webContentLink = fileRes.data.webContentLink || '';
-          console.log(`✅ File '${fileName}' uploaded to Google Drive root folder. Real File ID: ${realDriveFileId}`);
-        }
-      } catch (fallbackErr: any) {
-        console.error('Fatal Google Drive upload failure:', fallbackErr.message);
-        console.error(`Google Drive storage upload failed: ${fallbackErr.message || createErr.message}`);
-        // Fallback to local memory instead of failing
-        realDriveFileId = `file-${Date.now()}`;
-        this.saveBinaryBuffer(realDriveFileId, fileName, mimeType, fileBuffer, [realDriveFileId]);
+      console.error(`Fatal Google Drive upload failure for '${fileName}':`, createErr.message);
+      // If it's a specific API error, we can extract it
+      if (createErr.response && createErr.response.data) {
+         console.error('GDrive Response Details:', createErr.response.data);
       }
-    }
-
-    if (!realDriveFileId) {
-      realDriveFileId = `file-${Date.now()}`;
+      throw new Error(`Failed to upload to Google Drive: ${createErr.message}`);
     }
 
     const fileSizeMB = Number((fileBuffer.length / (1024 * 1024)).toFixed(2));
@@ -765,11 +762,28 @@ startxref
     if (fileMeta.evidenceId) this.inMemoryMetadataStore.set(fileMeta.evidenceId, fileMeta);
 
     // Save actual binary buffer locally and in memory
-    this.saveBinaryBuffer(realDriveFileId, fileName, mimeType || 'application/octet-stream', fileBuffer, [fileMeta.id, fileMeta.evidenceId, fileName]);
+    // Fallback local storage disabled
+    // this.saveBinaryBuffer(realDriveFileId, fileName, mimeType || 'application/octet-stream', fileBuffer, [fileMeta.id, fileMeta.evidenceId, fileName]);
 
     // Also insert into Supabase `evidence_files` and `system_audit_logs`
     try {
       const client = getSupabaseServerClient();
+      
+      // INSERT INTO evidence_files (new canonical schema)
+      await client.from('evidence_files').insert({
+        id: fileMeta.id,
+        file_name: fileName,
+        original_name: fileName,
+        mime_type: mimeType || 'application/octet-stream',
+        file_size_bytes: fileBuffer.length,
+        distributor_name: metadata.distributorName,
+        google_drive_id: realDriveFileId,
+        storage_path: folderPath,
+        status: 'UPLOADED',
+        uploaded_by: metadata.uploadedById || null
+      });
+
+      // INSERT INTO system_audit_logs (legacy/history)
       await client.from('system_audit_logs').insert({
         user_name: metadata.uploadedBy,
         user_email: `${metadata.uploadedBy.toLowerCase().replace(/\s+/g, '.')}@data360.com`,
@@ -940,31 +954,11 @@ startxref
         }
       } catch (err: any) {
         console.error(`Error downloading file '${targetDriveFileId}' from Google Drive API:`, err.message);
+        throw new Error(`Google Drive download failed: ${err.message}`);
       }
     }
 
-    // 2. Authoritative local/persistent storage resolution (disk uploads, metadata, audit logs)
-    const resolvedBinary = await this.resolveBinary(targetDriveFileId, fileName) || await this.resolveBinary(googleDriveFileId, fallbackFileName);
-    if (resolvedBinary) {
-      return resolvedBinary;
-    }
-
-    // 3. Fallback for pre-seeded demo/mock files
-    const isSeedFile = googleDriveFileId === 'ev-101' || googleDriveFileId === 'ev-102';
-    
-    if (isSeedFile) {
-      const pdfBuffer = this.generateValidPdfBuffer(
-         `DATA360 DEMO DOCUMENT: ${fileName}`,
-         `File Name: ${fileName} | ID: ${googleDriveFileId} | Pre-seeded Reference Stream`
-      );
-      return {
-         buffer: pdfBuffer,
-         fileName,
-         mimeType: mimeType.includes('pdf') || mimeType === 'application/octet-stream' ? 'application/pdf' : mimeType
-      };
-    }
-
-    // 4. If not found in any source, throw clear error
+    // 2. Remove fallback logic, strictly require Google Drive
     throw new Error(`Requested document binary for '${googleDriveFileId}' was not found in storage. fileName was: ${fileName}`);
   }
 

@@ -1203,12 +1203,53 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   });
 
   // Download file from Google Drive
-  app.get('/api/storage/download/:fileId', async (req, res) => {
+  
+function authenticateStorageRequest(req: any, res: any, next: any) {
+  let role = req.headers['x-user-role'] || req.query.userRole;
+  let org = req.headers['x-user-organization'] || req.query.userOrg;
+  
+  if (!role || !org) {
+    if (req.headers.cookie) {
+      const cookies = Object.fromEntries(req.headers.cookie.split('; ').map((c: string) => c.split('=')));
+      if (!role && cookies.userRole) role = decodeURIComponent(cookies.userRole);
+      if (!org && cookies.userOrg) org = decodeURIComponent(cookies.userOrg);
+    }
+  }
+  
+  req.auth = { role: role || 'Auditor', organization: org || '' };
+  next();
+}
+
+  app.get('/api/storage/download/:fileId', authenticateStorageRequest, async (req: any, res: any) => {
     try {
       const { fileId } = req.params;
       const fallbackFileName = req.query.fileName as string;
-      const downloaded = await storageService.downloadFile(fileId, fallbackFileName);
+      const client = getSupabaseServerClient();
+      
+      if (req.auth.role === 'Distributor') {
+        let authorized = true;
+        
+        // Fix: Use limit(1) to avoid PGRST116 (multiple rows) on system_audit_logs!
+        const { data: logData, error: logErr } = await client
+            .from('system_audit_logs')
+            .select('details')
+            .eq('event_type', 'EVIDENCE_FILE')
+            .contains('details', { google_drive_file_id: fileId })
+            .limit(1)
+            .maybeSingle();
 
+        if (logData && logData.details && logData.details.distributor_name !== req.auth.organization) {
+             authorized = false;
+        } else if (!logData) {
+             authorized = false;
+        }
+        
+        if (!authorized) {
+          return res.status(403).json({ error: 'Unauthorized to download this file.' });
+        }
+      }
+      
+      const downloaded = await storageService.downloadFile(fileId, fallbackFileName);
       res.setHeader('Content-Type', downloaded.mimeType || 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(downloaded.fileName)}"`);
       res.send(downloaded.buffer);
@@ -1217,13 +1258,35 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
     }
   });
 
-  // Preview file from Google Drive
-  app.get('/api/storage/preview/:fileId', async (req, res) => {
+  app.get('/api/storage/preview/:fileId', authenticateStorageRequest, async (req: any, res: any) => {
     try {
       const { fileId } = req.params;
       const fallbackFileName = req.query.fileName as string;
-      const downloaded = await storageService.downloadFile(fileId, fallbackFileName);
+      const client = getSupabaseServerClient();
+      
+      if (req.auth.role === 'Distributor') {
+        let authorized = true;
+        
+        const { data: logData } = await client
+            .from('system_audit_logs')
+            .select('details')
+            .eq('event_type', 'EVIDENCE_FILE')
+            .contains('details', { google_drive_file_id: fileId })
+            .limit(1)
+            .maybeSingle();
 
+        if (logData && logData.details && logData.details.distributor_name !== req.auth.organization) {
+             authorized = false;
+        } else if (!logData) {
+             authorized = false;
+        }
+        
+        if (!authorized) {
+          return res.status(403).json({ error: 'Unauthorized to preview this file.' });
+        }
+      }
+      
+      const downloaded = await storageService.downloadFile(fileId, fallbackFileName);
       res.setHeader('Content-Type', downloaded.mimeType || 'text/plain');
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(downloaded.fileName)}"`);
       res.send(downloaded.buffer);

@@ -650,6 +650,7 @@ app.post('/api/storage/upload', upload.single('file'), async (req: any, res: any
       distributorName: clientDistributorName = 'Test Distributor A',
       requirementId = 'IRL-2.3',
       uploadedBy = req.headers['x-user-name'] || 'User',
+      uploadedById = req.headers['x-user-id'] || req.body.uploadedById,
       isReferenceMaterial = 'false',
       documentType = 'EVIDENCE',
       documentUsage = 'EVIDENCE',
@@ -690,6 +691,7 @@ app.post('/api/storage/upload', upload.single('file'), async (req: any, res: any
         distributorName: targetDistributor,
         requirementId,
         uploadedBy,
+        uploadedById,
         isReferenceMaterial: isRef
       }
     );
@@ -805,9 +807,51 @@ app.post('/api/storage/upload', upload.single('file'), async (req: any, res: any
 });
 
 // Download file from Google Drive / Local Storage
-app.get('/api/storage/download/:fileId', async (req, res) => {
+app.get('/api/storage/download/:fileId', authenticateStorageRequest, async (req: any, res: any) => {
   try {
     const { fileId } = req.params;
+    const client = getSupabaseServerClient();
+    
+    // Verify Authorization
+    if (req.auth.role === 'Distributor') {
+      let authorized = true;
+      console.log('--- TEST 7 DEBUG ---');
+      console.log('File ID:', fileId);
+      console.log('req.auth:', req.auth);
+      const { data: fileData, error: dbErr } = await client
+        .from('evidence_files')
+        .select('distributor_name')
+        .or(`id.eq.${fileId},google_drive_id.eq.${fileId}`)
+        .limit(1).maybeSingle();
+      console.log('fileData:', fileData);
+      console.log('dbErr:', dbErr);
+        
+      if (fileData) {
+         if (fileData.distributor_name !== req.auth.organization) authorized = false;
+      } else {
+        // Fallback check in system_audit_logs if evidence_files not found
+        const { data: logData, error: logErr } = await client
+          .from('system_audit_logs')
+          .select('details')
+          .eq('event_type', 'EVIDENCE_FILE')
+          .contains('details', { google_drive_file_id: fileId })
+          .limit(1).maybeSingle();
+        console.log('logData:', logData);
+        console.log('logErr:', logErr);
+          
+        if (logData && logData.details && logData.details.distributor_name !== req.auth.organization) {
+           authorized = false;
+        } else if (!logData) {
+           // If it's not even in the DB, it's safer to reject distributors for unknown files
+           authorized = false;
+        }
+      }
+      
+      if (!authorized) {
+        return res.status(403).json({ error: 'Unauthorized to download this file.' });
+      }
+    }
+    
     const downloaded = await storageService.downloadFile(fileId);
 
     const safeFileName = downloaded.fileName.replace(/"/g, '\\"');
@@ -821,9 +865,44 @@ app.get('/api/storage/download/:fileId', async (req, res) => {
 });
 
 // Preview file from Google Drive / Local Storage
-app.get('/api/storage/preview/:fileId', async (req, res) => {
+app.get('/api/storage/preview/:fileId', authenticateStorageRequest, async (req: any, res: any) => {
   try {
     const { fileId } = req.params;
+    const client = getSupabaseServerClient();
+    
+    // Verify Authorization
+    if (req.auth.role === 'Distributor') {
+      let authorized = true;
+      const { data: fileData } = await client
+        .from('evidence_files')
+        .select('distributor_name')
+        .or(`id.eq.${fileId},google_drive_id.eq.${fileId}`)
+        .limit(1).maybeSingle();
+        
+      if (fileData) {
+         if (fileData.distributor_name !== req.auth.organization) authorized = false;
+      } else {
+        // Fallback check in system_audit_logs if evidence_files not found
+        const { data: logData } = await client
+          .from('system_audit_logs')
+          .select('details')
+          .eq('event_type', 'EVIDENCE_FILE')
+          .contains('details', { google_drive_file_id: fileId })
+          .limit(1).maybeSingle();
+          
+        if (logData && logData.details && logData.details.distributor_name !== req.auth.organization) {
+           authorized = false;
+        } else if (!logData) {
+           // If it's not even in the DB, it's safer to reject distributors for unknown files
+           authorized = false;
+        }
+      }
+      
+      if (!authorized) {
+        return res.status(403).json({ error: 'Unauthorized to preview this file.' });
+      }
+    }
+    
     const downloaded = await storageService.downloadFile(fileId);
 
     const safeFileName = downloaded.fileName.replace(/"/g, '\\"');
@@ -1242,7 +1321,7 @@ app.delete('/api/sampling/questions/:id', async (req: any, res: any) => {
     const { id } = req.params;
     const supabase = getSupabaseServerClient();
     try {
-      const { data: row } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      const { data: row } = await supabase.from('system_audit_logs').select('*').eq('id', id).limit(1).maybeSingle();
       if (row) {
         let parsedDetails = row.details;
         if (typeof parsedDetails === 'string') {
@@ -1408,7 +1487,7 @@ app.put('/api/sampling/required-data/questions/:id', async (req: any, res: any) 
     const payload = req.body;
     const supabase = getSupabaseServerClient();
     try {
-      const { data: row } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      const { data: row } = await supabase.from('system_audit_logs').select('*').eq('id', id).limit(1).maybeSingle();
       if (row) {
         let parsedDetails = row.details;
         if (typeof parsedDetails === 'string') {
@@ -1434,7 +1513,7 @@ app.delete('/api/sampling/required-data/questions/:id', async (req: any, res: an
     const { id } = req.params;
     const supabase = getSupabaseServerClient();
     try {
-      const { data: row } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      const { data: row } = await supabase.from('system_audit_logs').select('*').eq('id', id).limit(1).maybeSingle();
       if (row) {
         let parsedDetails = row.details;
         if (typeof parsedDetails === 'string') {
@@ -3092,7 +3171,7 @@ app.get('/api/evidence/:id', async (req: any, res: any) => {
   try {
     const { id } = req.params;
     const supabase = getSupabaseServerClient();
-    const { data: row, error } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+    const { data: row, error } = await supabase.from('system_audit_logs').select('*').eq('id', id).limit(1).maybeSingle();
 
     if (error || !row) {
       return res.status(404).json({ success: false, error: 'Evidence record not found in database' });
@@ -3142,7 +3221,7 @@ app.get('/api/evidence/:id/history', async (req: any, res: any) => {
   try {
     const { id } = req.params;
     const supabase = getSupabaseServerClient();
-    const { data: targetLog } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+    const { data: targetLog } = await supabase.from('system_audit_logs').select('*').eq('id', id).limit(1).maybeSingle();
 
     if (!targetLog) {
       return res.json({ success: true, count: 0, history: [] });
@@ -3208,7 +3287,7 @@ app.patch('/api/evidence/:id/usage', async (req: any, res: any) => {
     const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
     let existingLog = null;
     if (isUuid) {
-      const { data: log, error: fetchErr } = await supabase.from('system_audit_logs').select('*').eq('id', id).maybeSingle();
+      const { data: log, error: fetchErr } = await supabase.from('system_audit_logs').select('*').eq('id', id).limit(1).maybeSingle();
       if (!fetchErr) {
         existingLog = log;
       }

@@ -127,7 +127,8 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
 
       const res = await fetch(`/api/evidence?${params.toString()}`, {
         headers: {
-          'x-user-email': currentUser?.email || '',
+          'x-user-id': currentUser?.id || '',
+                        'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
         }
@@ -170,7 +171,8 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
     try {
       const res = await fetch(`/api/evidence/${recordId}/history`, {
         headers: {
-          'x-user-email': currentUser?.email || '',
+          'x-user-id': currentUser?.id || '',
+                        'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
         }
@@ -308,7 +310,8 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
-          'x-user-email': currentUser?.email || '',
+          'x-user-id': currentUser?.id || '',
+                        'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
         },
@@ -365,7 +368,8 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
-          'x-user-email': currentUser?.email || '',
+          'x-user-id': currentUser?.id || '',
+                        'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
         },
@@ -402,7 +406,8 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
-          'x-user-email': currentUser?.email || '',
+          'x-user-id': currentUser?.id || '',
+                        'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
         },
@@ -447,7 +452,8 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'x-user-email': currentUser?.email || '',
+          'x-user-id': currentUser?.id || '',
+                        'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
         },
@@ -665,6 +671,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                     const res = await fetch('/api/storage/upload', {
                       method: 'POST',
                       headers: {
+                        'x-user-id': currentUser?.id || '',
                         'x-user-email': currentUser?.email || '',
                         'x-user-role': currentUser?.role || '',
                         'x-user-organization': currentUser?.organization || ''

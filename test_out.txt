@@ -1,0 +1,16 @@
+◇ injected env (0) from .env // tip: ◈ encrypted .env [www.dotenvx.com]
+--- TEST 1: Distributor uploads PDF ---
+Upload OK. File ID: file-1789060829014-185
+Preview OK. Content: FAKE PDF CONTENT
+
+--- TEST 2: Distributor download works ---
+Download OK. Headers: attachment; filename="test_distributor.pdf"
+
+--- TEST 3: Auditor views same PDF ---
+Auditor Preview OK. Content: FAKE PDF CONTENT
+
+--- TEST 7: Unauthorized distributor fails ---
+TEST 7 FAILED - It allowed access!
+
+--- TEST 8: Nonexistent file produces clean error ---
+TEST 8 Passed - Clean error: Failed to preview file from Google Drive
