@@ -1,104 +1,21 @@
 const fs = require('fs');
+let code = fs.readFileSync('src/components/RequiredDataQuestionnaire.tsx', 'utf8');
 
-function fixFile(filename) {
-  let lines = fs.readFileSync(filename, 'utf8').split('\n');
-  let startIndex = -1;
-  let endIndex = -1;
-  let braceCount = 0;
-  let found = false;
+// The problematic section is:
+// ) : (                                                    
+// {(!isDistributor || isReviewMode) ? (
+//   <div className="text-xs text-slate-500 italic">No document uploaded</div>
+// ) : (
 
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes("app.get('/api/supabase/health'")) {
-      startIndex = i;
-      found = true;
-    }
-    
-    if (found) {
-      let openBraces = (lines[i].match(/\{/g) || []).length;
-      let closeBraces = (lines[i].match(/\}/g) || []).length;
-      
-      braceCount += openBraces;
-      braceCount -= closeBraces;
-      
-      if (braceCount === 0 && openBraces !== 0 && closeBraces !== 0) {
-        // Not perfectly robust if braces are unmatched on same line, but typical formatting:
-        // app.get(..., () => {
-        // ...
-        // });
-        // The last line is usually "});"
-      }
-      
-      if (braceCount === 0 && lines[i].includes('});') && i > startIndex) {
-        endIndex = i;
-        break;
-      }
-    }
-  }
+code = code.replace(
+  /\) : \(\s*\{\(!isDistributor \|\| isReviewMode\) \? \(/,
+  `) : (!isDistributor || isReviewMode) ? (`
+);
 
-  if (startIndex !== -1 && endIndex !== -1) {
-    const healthHandlerCode = `app.get('/api/supabase/health', async (req, res) => {
-  const startTime = Date.now();
-  try {
-    const supabase = getSupabaseServerClient();
-    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+// We have an extra closing brace `)}` at the end
+code = code.replace(
+  /                          \)\}\n                        \)\}\n                      <\/div>/,
+  `                          )\n                        }\n                      </div>`
+);
 
-    const errors = [];
-    const results = {};
-
-    const checkTable = async (table) => {
-      try {
-        const { error } = await supabase.from(table).select('id').limit(1);
-        if (error) {
-          results[table] = { status: 'error', error: error.message, code: error.code };
-          errors.push(table + ": " + error.message);
-        } else {
-          results[table] = { status: 'ok' };
-        }
-      } catch (err) {
-        results[table] = { status: 'error', error: err.message };
-        errors.push(table + ": " + err.message);
-      }
-    };
-
-    await Promise.all([
-      checkTable('pending_signup_requests'),
-      checkTable('profiles'),
-      checkTable('evidence_files')
-    ]);
-
-    const latencyMs = Date.now() - startTime;
-
-    if (errors.length > 0) {
-      return res.status(502).json({
-        connected: false,
-        error: 'Database query errors occurred. ' + errors.join(' | '),
-        details: errors,
-        tables: results,
-        latencyMs,
-        url: url
-      });
-    }
-
-    return res.json({
-      connected: true,
-      latencyMs,
-      url: url,
-      tables: results,
-      message: 'Successfully connected and verified all required tables!',
-      timestamp: new Date().toISOString()
-    });
-  } catch (err) {
-    return res.status(500).json({
-      connected: false,
-      error: err.message || 'Failed to ping Supabase database',
-      latencyMs: Date.now() - startTime
-    });
-  }
-});`;
-    
-    // First let's do a hard replace by deleting everything from start to a safe marker
-    // But since I messed it up, let's just find the markers.
-  }
-}
-
-// Actually I'll just use sed to replace the messed up block.
+fs.writeFileSync('src/components/RequiredDataQuestionnaire.tsx', code);

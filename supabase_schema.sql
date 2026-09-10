@@ -7,14 +7,17 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- 1. Create Custom Enum Types for Roles & Request Status
-DO $$ BEGIN
+DO $$ 
+BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
         CREATE TYPE user_role AS ENUM ('admin', 'auditor', 'distributor');
     END IF;
+
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'signup_request_status') THEN
         CREATE TYPE signup_request_status AS ENUM ('pending', 'approved', 'rejected');
     END IF;
 END $$;
+
 
 -- 2. Create Public User Profiles Table (Linked 1-to-1 with Supabase auth.users)
 CREATE TABLE IF NOT EXISTS public.profiles (
@@ -34,7 +37,9 @@ CREATE TABLE IF NOT EXISTS public.profiles (
 CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
 CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles(email);
 
--- 3. Create Pending Signup Requests Table
+
+-- 3. Create Pending Signup Requests Table (Supabase Gatekeeper Queue)
+-- CRITICAL: Unapproved user data stays in this table until Admin approves!
 CREATE TABLE IF NOT EXISTS public.pending_signup_requests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     email TEXT NOT NULL UNIQUE,
@@ -49,13 +54,15 @@ CREATE TABLE IF NOT EXISTS public.pending_signup_requests (
     rejection_reason TEXT
 );
 
+-- Index for pending queue filtering
 CREATE INDEX IF NOT EXISTS idx_pending_requests_status ON public.pending_signup_requests(status);
 CREATE INDEX IF NOT EXISTS idx_pending_requests_email ON public.pending_signup_requests(email);
 
--- 4. Create System Auth Audit Logs Table (This is the one actually used by the code!)
+
+-- 4. Create System Auth Audit Logs Table
 CREATE TABLE IF NOT EXISTS public.system_audit_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_type TEXT NOT NULL,
+    event_type TEXT NOT NULL, -- e.g., 'SIGNUP_REQUEST', 'ADMIN_APPROVE', 'ADMIN_REJECT', 'USER_LOGIN'
     performed_by UUID REFERENCES auth.users(id),
     target_user_email TEXT NOT NULL,
     details JSONB DEFAULT '{}'::jsonb,
@@ -63,7 +70,6 @@ CREATE TABLE IF NOT EXISTS public.system_audit_logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON public.system_audit_logs(created_at DESC);
 
 -- 5. Trigger Function to Automatically Create User Profile on Supabase User Creation
 CREATE OR REPLACE FUNCTION public.handle_new_user_profile()
@@ -83,7 +89,13 @@ BEGIN
     END IF;
 
     INSERT INTO public.profiles (
-        id, email, full_name, role, organization, title, avatar_initials
+        id,
+        email,
+        full_name,
+        role,
+        organization,
+        title,
+        avatar_initials
     )
     VALUES (
         NEW.id,
@@ -103,8 +115,10 @@ BEGIN
         role = EXCLUDED.role,
         organization = EXCLUDED.organization,
         updated_at = NOW();
+
     RETURN NEW;
 EXCEPTION WHEN OTHERS THEN
+    -- Prevent trigger errors from failing user creation in auth.users
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -116,56 +130,59 @@ CREATE TRIGGER on_auth_user_created
     FOR EACH ROW EXECUTE FUNCTION public.handle_new_user_profile();
 
 
--- ====================================================================
--- BUSINESS ENTITIES (From src/db/supabase_schema.sql)
--- ====================================================================
+-- 6. Configure Row Level Security (RLS) Policies
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.pending_signup_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.system_audit_logs ENABLE ROW LEVEL SECURITY;
 
--- Organizations
-CREATE TABLE IF NOT EXISTS public.organizations (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name VARCHAR(255) NOT NULL UNIQUE,
-  type VARCHAR(50) NOT NULL,
-  region VARCHAR(100),
-  industry VARCHAR(100),
-  status VARCHAR(50) DEFAULT 'ACTIVE',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
+-- Policy: Anyone can insert a signup request into the pending queue
+DROP POLICY IF EXISTS "Public can submit signup requests" ON public.pending_signup_requests;
+CREATE POLICY "Public can submit signup requests"
+    ON public.pending_signup_requests
+    FOR INSERT
+    WITH CHECK (true);
 
--- Clients
-CREATE TABLE IF NOT EXISTS public.clients (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
-  name VARCHAR(255) NOT NULL UNIQUE,
-  contact_email VARCHAR(255),
-  status VARCHAR(50) DEFAULT 'ACTIVE',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
+-- Policy: Admin can view and manage all pending requests
+DROP POLICY IF EXISTS "Admins can view and manage pending requests" ON public.pending_signup_requests;
+CREATE POLICY "Admins can view and manage pending requests"
+    ON public.pending_signup_requests
+    FOR ALL
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.profiles 
+            WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+        )
+    );
 
--- Distributors
-CREATE TABLE IF NOT EXISTS public.distributors (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
-  name VARCHAR(255) NOT NULL UNIQUE,
-  client_id UUID REFERENCES public.clients(id),
-  risk_score NUMERIC(5,2),
-  status VARCHAR(50) DEFAULT 'ACTIVE',
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
+-- Policy: Users can view their own profile
+DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
+CREATE POLICY "Users can view own profile"
+    ON public.profiles
+    FOR SELECT
+    USING (auth.uid() = id);
 
--- Audits
-CREATE TABLE IF NOT EXISTS public.audits (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  client_name VARCHAR(255) NOT NULL,
-  distributor_name VARCHAR(255) NOT NULL,
-  audit_status VARCHAR(50) DEFAULT 'PLANNING',
-  start_date DATE,
-  end_date DATE,
-  lead_auditor UUID REFERENCES public.profiles(id),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
+-- Policy: Admins can view and manage all profiles
+DROP POLICY IF EXISTS "Admins can manage all profiles" ON public.profiles;
+CREATE POLICY "Admins can manage all profiles"
+    ON public.profiles
+    FOR ALL
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.profiles 
+            WHERE profiles.id = auth.uid() AND profiles.role = 'admin'
+        )
+    );
 
--- Audit Reports Table
+
+-- 7. Insert Initial Demonstration Pending Requests (Optional Test Seed Data)
+INSERT INTO public.pending_signup_requests (email, password_hash, full_name, role, organization)
+VALUES 
+    ('m.thorne@apex-auditors.com', '$2a$10$e7x...samplehash', 'Marcus Thorne', 'auditor', 'Apex Audit Practice'),
+    ('e.rostova@logistics-global.com', '$2a$10$e7x...samplehash', 'Elena Rostova', 'distributor', 'Global Logistics Corp')
+ON CONFLICT (email) DO NOTHING;
+
+
+-- 8. Audit Reports Table (Reporting Module)
 CREATE TABLE IF NOT EXISTS public.audit_reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     report_id VARCHAR(255) UNIQUE,
@@ -201,103 +218,12 @@ CREATE TABLE IF NOT EXISTS public.audit_reports (
 CREATE INDEX IF NOT EXISTS idx_audit_reports_distributor ON public.audit_reports(distributor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_reports_status ON public.audit_reports(status);
 
--- IRL Edit Requests
-CREATE TABLE IF NOT EXISTS public.irl_edit_requests (
-  id VARCHAR(255) PRIMARY KEY,
-  client_name VARCHAR(255) NOT NULL,
-  distributor_name VARCHAR(255) NOT NULL,
-  audit_id VARCHAR(255) DEFAULT 'eng-101',
-  irl_submission_id VARCHAR(255),
-  scope VARCHAR(50) DEFAULT 'Entire IRL',
-  affected_requirements JSONB,
-  requested_by VARCHAR(255) NOT NULL,
-  request_reason TEXT NOT NULL,
-  status VARCHAR(50) NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'APPROVED', 'REJECTED', 'CANCELLED')),
-  reviewer_comment TEXT,
-  reviewed_by VARCHAR(255),
-  requested_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  reviewed_at TIMESTAMP WITH TIME ZONE,
-  approved_at TIMESTAMP WITH TIME ZONE,
-  rejected_at TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_edit_req_distributor ON public.irl_edit_requests(distributor_name);
-CREATE INDEX IF NOT EXISTS idx_edit_req_client ON public.irl_edit_requests(client_name);
-CREATE INDEX IF NOT EXISTS idx_edit_req_status ON public.irl_edit_requests(status);
-
--- Evidence Files (used in GoogleDriveStorageCard / tests)
-CREATE TABLE IF NOT EXISTS public.evidence_files (
-  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  audit_id UUID REFERENCES public.audits(id) ON DELETE CASCADE,
-  distributor_name VARCHAR(255),
-  file_name VARCHAR(255) NOT NULL,
-  original_name VARCHAR(255),
-  mime_type VARCHAR(100),
-  file_size_bytes BIGINT,
-  storage_path TEXT,
-  google_drive_id VARCHAR(255),
-  status VARCHAR(50) DEFAULT 'UPLOADED',
-  uploaded_by UUID REFERENCES public.profiles(id),
-  ai_analysis_status VARCHAR(50),
-  ai_extracted_data JSONB,
-  ai_analysis_timestamp TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX IF NOT EXISTS idx_evidence_distributor ON public.evidence_files(distributor_name);
-CREATE INDEX IF NOT EXISTS idx_evidence_status ON public.evidence_files(status);
-
-
--- ====================================================================
--- ROW LEVEL SECURITY (RLS) POLICIES
--- ====================================================================
-
--- Enable RLS on all tables
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.pending_signup_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.system_audit_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.distributors ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_reports ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.irl_edit_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.evidence_files ENABLE ROW LEVEL SECURITY;
 
--- Add policies safely if they don't exist
-DO $$ BEGIN
-    -- Public can submit signup requests
-    DROP POLICY IF EXISTS "Public can submit signup requests" ON public.pending_signup_requests;
-    CREATE POLICY "Public can submit signup requests" ON public.pending_signup_requests FOR INSERT WITH CHECK (true);
+DROP POLICY IF EXISTS "Allow all access to audit_reports" ON public.audit_reports;
+CREATE POLICY "Allow all access to audit_reports" ON public.audit_reports
+    FOR ALL
+    USING (true)
+    WITH CHECK (true);
 
-    -- Admins can manage all profiles
-    DROP POLICY IF EXISTS "Admins can manage all profiles" ON public.profiles;
-    CREATE POLICY "Admins can manage all profiles" ON public.profiles FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
-
-    -- Users can view own profile
-    DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
-    CREATE POLICY "Users can view own profile" ON public.profiles FOR SELECT USING (auth.uid() = id);
-
-    -- Allow system log creation
-    DROP POLICY IF EXISTS "Allow system log creation" ON public.system_audit_logs;
-    CREATE POLICY "Allow system log creation" ON public.system_audit_logs FOR INSERT WITH CHECK (true);
-    
-    -- Admins can read system logs
-    DROP POLICY IF EXISTS "Admins can view system logs" ON public.system_audit_logs;
-    CREATE POLICY "Admins can view system logs" ON public.system_audit_logs FOR SELECT USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
-
-    -- Allow all access to audit_reports (app level logic limits it, but for DB keep it open as before)
-    DROP POLICY IF EXISTS "Allow all access to audit_reports" ON public.audit_reports;
-    CREATE POLICY "Allow all access to audit_reports" ON public.audit_reports FOR ALL USING (true) WITH CHECK (true);
-    
-    -- Distributors Edit Requests
-    DROP POLICY IF EXISTS "Distributor Edit Requests Isolation Policy" ON public.irl_edit_requests;
-    CREATE POLICY "Distributor Edit Requests Isolation Policy" ON public.irl_edit_requests FOR ALL USING (true); -- Relaxed for testing
-    
-    -- Evidence Files
-    DROP POLICY IF EXISTS "Distributor Evidence Isolation Policy" ON public.evidence_files;
-    CREATE POLICY "Distributor Evidence Isolation Policy" ON public.evidence_files FOR ALL USING (true); -- Relaxed for testing
-END $$;
+-- Done!

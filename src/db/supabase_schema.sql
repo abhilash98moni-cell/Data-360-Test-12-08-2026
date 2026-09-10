@@ -1,207 +1,275 @@
 -- ====================================================================
--- DATA360 ENTERPRISE AUTHENTICATION & ADMIN APPROVAL WORKFLOW SCHEMA
--- Compatible with Supabase PostgreSQL (Auth & Database)
+-- DATA360 ENTERPRISE SUPABASE DATABASE SCHEMA & MULTI-TENANT RLS POLICIES
+-- Production Ready DDL Script for PostgreSQL / Supabase
 -- ====================================================================
 
--- Enable UUID extension if not enabled
+-- 1. Enable Required Extensions
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
--- 1. Create Custom Enum Types for Roles & Request Status
-DO $$ BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
-        CREATE TYPE user_role AS ENUM ('admin', 'auditor', 'distributor');
-    END IF;
-    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'signup_request_status') THEN
-        CREATE TYPE signup_request_status AS ENUM ('pending', 'approved', 'rejected');
-    END IF;
-END $$;
-
--- 2. Create Public User Profiles Table (Linked 1-to-1 with Supabase auth.users)
-CREATE TABLE IF NOT EXISTS public.profiles (
-    id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-    email TEXT NOT NULL UNIQUE,
-    full_name TEXT NOT NULL,
-    role user_role NOT NULL DEFAULT 'auditor',
-    organization TEXT NOT NULL DEFAULT 'Data360 Platform',
-    title TEXT,
-    avatar_initials VARCHAR(5),
-    status TEXT NOT NULL DEFAULT 'Active',
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
--- Index for fast role and email lookups
-CREATE INDEX IF NOT EXISTS idx_profiles_role ON public.profiles(role);
-CREATE INDEX IF NOT EXISTS idx_profiles_email ON public.profiles(email);
-
--- 3. Create Pending Signup Requests Table
-CREATE TABLE IF NOT EXISTS public.pending_signup_requests (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    full_name TEXT NOT NULL,
-    role user_role NOT NULL DEFAULT 'auditor',
-    organization TEXT NOT NULL,
-    status signup_request_status NOT NULL DEFAULT 'pending',
-    requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    reviewed_at TIMESTAMPTZ,
-    reviewed_by UUID REFERENCES auth.users(id),
-    rejection_reason TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_pending_requests_status ON public.pending_signup_requests(status);
-CREATE INDEX IF NOT EXISTS idx_pending_requests_email ON public.pending_signup_requests(email);
-
--- 4. Create System Auth Audit Logs Table (This is the one actually used by the code!)
-CREATE TABLE IF NOT EXISTS public.system_audit_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_type TEXT NOT NULL,
-    performed_by UUID REFERENCES auth.users(id),
-    target_user_email TEXT NOT NULL,
-    details JSONB DEFAULT '{}'::jsonb,
-    ip_address TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON public.system_audit_logs(created_at DESC);
-
--- 5. Trigger Function to Automatically Create User Profile on Supabase User Creation
-CREATE OR REPLACE FUNCTION public.handle_new_user_profile()
-RETURNS TRIGGER AS $$
-DECLARE
-    input_role text;
-    final_role user_role;
-BEGIN
-    input_role := LOWER(COALESCE(NEW.raw_user_meta_data->>'role', 'auditor'));
-    
-    IF input_role = 'admin' THEN
-        final_role := 'admin'::user_role;
-    ELSIF input_role = 'distributor' THEN
-        final_role := 'distributor'::user_role;
-    ELSE
-        final_role := 'auditor'::user_role;
-    END IF;
-
-    INSERT INTO public.profiles (
-        id, email, full_name, role, organization, title, avatar_initials
-    )
-    VALUES (
-        NEW.id,
-        NEW.email,
-        COALESCE(NEW.raw_user_meta_data->>'full_name', SPLIT_PART(NEW.email, '@', 1)),
-        final_role,
-        COALESCE(NEW.raw_user_meta_data->>'organization', 'Data360 Platform'),
-        CASE 
-            WHEN final_role = 'admin' THEN 'Platform Owner / Admin'
-            WHEN final_role = 'distributor' THEN 'Distributor Compliance Manager'
-            ELSE 'Lead Forensic Auditor'
-        END,
-        UPPER(SUBSTRING(COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email) FROM 1 FOR 2))
-    )
-    ON CONFLICT (id) DO UPDATE SET
-        full_name = EXCLUDED.full_name,
-        role = EXCLUDED.role,
-        organization = EXCLUDED.organization,
-        updated_at = NOW();
-    RETURN NEW;
-EXCEPTION WHEN OTHERS THEN
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Attach trigger to auth.users
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
-CREATE TRIGGER on_auth_user_created
-    AFTER INSERT ON auth.users
-    FOR EACH ROW EXECUTE FUNCTION public.handle_new_user_profile();
-
-
--- ====================================================================
--- BUSINESS ENTITIES (From src/db/supabase_schema.sql)
--- ====================================================================
-
--- Organizations
+-- 2. Organizations Table
 CREATE TABLE IF NOT EXISTS public.organizations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   name VARCHAR(255) NOT NULL UNIQUE,
-  type VARCHAR(50) NOT NULL,
-  region VARCHAR(100),
-  industry VARCHAR(100),
-  status VARCHAR(50) DEFAULT 'ACTIVE',
+  tenant_type VARCHAR(50) NOT NULL CHECK (tenant_type IN ('Platform', 'Audit Firm', 'Client Company', 'Distributor')),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Clients
+-- 3. Clients & Distributors Sub-Tables
 CREATE TABLE IF NOT EXISTS public.clients (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
-  name VARCHAR(255) NOT NULL UNIQUE,
-  contact_email VARCHAR(255),
-  status VARCHAR(50) DEFAULT 'ACTIVE',
+  company_name VARCHAR(255) NOT NULL,
+  industry VARCHAR(100) DEFAULT 'Technology',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Distributors
 CREATE TABLE IF NOT EXISTS public.distributors (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
-  name VARCHAR(255) NOT NULL UNIQUE,
-  client_id UUID REFERENCES public.clients(id),
-  risk_score NUMERIC(5,2),
-  status VARCHAR(50) DEFAULT 'ACTIVE',
+  client_id UUID REFERENCES public.clients(id) ON DELETE CASCADE,
+  entity_name VARCHAR(255) NOT NULL,
+  region VARCHAR(100) DEFAULT 'North America',
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Audits
+-- 4. User Profiles Table (Extends Supabase auth.users)
+CREATE TABLE IF NOT EXISTS public.users (
+  id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  full_name VARCHAR(255) NOT NULL,
+  role VARCHAR(50) NOT NULL CHECK (role IN (
+    'Platform Super Admin',
+    'AA Super Admin',
+    'Audit Manager',
+    'Auditor',
+    'Reviewer',
+    'Client Super Admin',
+    'Client Employee',
+    'Distributor Admin',
+    'Distributor Employee'
+  )),
+  organization_name VARCHAR(255) NOT NULL,
+  tenant_type VARCHAR(50) NOT NULL,
+  status VARCHAR(50) DEFAULT 'Active' CHECK (status IN ('Active', 'Pending Invitation', 'Deactivated')),
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  last_active TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 5. Audits Engagement Table
 CREATE TABLE IF NOT EXISTS public.audits (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  audit_code VARCHAR(50) NOT NULL UNIQUE,
+  title VARCHAR(255) NOT NULL,
   client_name VARCHAR(255) NOT NULL,
   distributor_name VARCHAR(255) NOT NULL,
-  audit_status VARCHAR(50) DEFAULT 'PLANNING',
-  start_date DATE,
-  end_date DATE,
-  lead_auditor UUID REFERENCES public.profiles(id),
+  audit_type VARCHAR(50) NOT NULL,
+  status VARCHAR(50) NOT NULL DEFAULT 'Planning',
+  risk_rating VARCHAR(20) DEFAULT 'High',
+  lead_auditor VARCHAR(255) NOT NULL,
+  start_date DATE NOT NULL,
+  target_completion DATE NOT NULL,
+  progress_percent INT DEFAULT 0,
+  financial_exposure NUMERIC(15,2) DEFAULT 0.00,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 6. Audit Team Assignments
+CREATE TABLE IF NOT EXISTS public.audit_assignments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  audit_id UUID REFERENCES public.audits(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  assigned_role VARCHAR(50) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 7. Initial Information Request List (IRL) Items
+CREATE TABLE IF NOT EXISTS public.irl_submissions (
+  id VARCHAR(255) PRIMARY KEY,
+  client_name VARCHAR(255) NOT NULL,
+  distributor_name VARCHAR(255) NOT NULL,
+  audit_id VARCHAR(255) DEFAULT 'eng-101',
+  status VARCHAR(50) DEFAULT 'Submitted',
+  is_locked BOOLEAN DEFAULT TRUE,
+  submission_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  completion_percentage NUMERIC DEFAULT 100,
+  submitted_by VARCHAR(255),
+  requests_json JSONB,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS public.irl_request_items (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  audit_id UUID REFERENCES public.audits(id) ON DELETE CASCADE,
+  distributor_name VARCHAR(255) NOT NULL,
+  ref_number VARCHAR(20) NOT NULL,
+  category VARCHAR(100) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  description TEXT,
+  is_mandatory BOOLEAN DEFAULT TRUE,
+  status VARCHAR(50) DEFAULT 'Pending',
+  reviewer_status VARCHAR(50) DEFAULT 'Pending Review',
+  text_response TEXT,
+  no_upload_explanation TEXT,
+  reviewer_comment TEXT,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 8. Evidence Files Table (Supabase Storage Metadata)
+CREATE TABLE IF NOT EXISTS public.evidence_files (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  client_name VARCHAR(255) DEFAULT 'Apex Electronics Corp',
+  audit_id VARCHAR(255) DEFAULT 'eng-101',
+  audit_code VARCHAR(100) DEFAULT 'AUD-2026-001',
+  request_item_id VARCHAR(255),
+  requirement_ref VARCHAR(50),
+  requirement_title VARCHAR(255),
+  section VARCHAR(100),
+  distributor_name VARCHAR(255) NOT NULL,
+  file_name VARCHAR(255) NOT NULL,
+  file_size_mb NUMERIC(8,2) NOT NULL DEFAULT 1.0,
+  file_type VARCHAR(100) NOT NULL DEFAULT 'application/pdf',
+  google_drive_file_id VARCHAR(255),
+  google_drive_folder_id VARCHAR(255),
+  storage_path TEXT,
+  file_hash VARCHAR(64),
+  version INT DEFAULT 1,
+  uploaded_by VARCHAR(255) NOT NULL,
+  uploaded_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  status VARCHAR(50) DEFAULT 'PENDING_REVIEW',
+  review_status VARCHAR(50) DEFAULT 'PENDING_REVIEW',
+  reviewer_comment TEXT,
+  reviewed_by VARCHAR(255),
+  reviewed_at TIMESTAMP WITH TIME ZONE,
+  -- AI-ready metadata fields (nullable for future AI integration)
+  ai_status VARCHAR(50),
+  ai_summary TEXT,
+  ai_flags JSONB,
+  ai_risk_score NUMERIC(4,2),
+  ai_extracted_data JSONB,
+  ai_analysis_timestamp TIMESTAMP WITH TIME ZONE,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
--- Audit Reports Table
-CREATE TABLE IF NOT EXISTS public.audit_reports (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    report_id VARCHAR(255) UNIQUE,
-    report_type VARCHAR(100),
-    distributor_id VARCHAR(255) NOT NULL,
-    distributor_name VARCHAR(255),
-    client_id VARCHAR(255),
-    client_name VARCHAR(255),
-    audit_id VARCHAR(255),
-    template_id VARCHAR(100),
-    template_version VARCHAR(50),
-    report_version VARCHAR(50),
-    status VARCHAR(50) DEFAULT 'DRAFT',
-    created_by VARCHAR(255),
-    created_by_name VARCHAR(255),
-    created_by_email VARCHAR(255),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-    finalized_by VARCHAR(255),
-    finalized_at TIMESTAMP WITH TIME ZONE,
-    docx_file_id VARCHAR(255),
-    pdf_file_id VARCHAR(255),
-    google_drive_file_id VARCHAR(255),
-    google_drive_folder_id VARCHAR(255),
-    google_drive_file_url VARCHAR(1024),
-    last_drive_sync_at TIMESTAMP WITH TIME ZONE,
-    report_content JSONB DEFAULT '{}'::jsonb,
-    overview JSONB DEFAULT '{}'::jsonb,
-    findings JSONB DEFAULT '[]'::jsonb,
-    metadata JSONB DEFAULT '{}'::jsonb
+-- Idempotent column updates for evidence_files
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS client_name VARCHAR(255) DEFAULT 'Apex Electronics Corp';
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS audit_code VARCHAR(100) DEFAULT 'AUD-2026-001';
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS requirement_ref VARCHAR(50);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS requirement_title VARCHAR(255);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS section VARCHAR(100);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS google_drive_file_id VARCHAR(255);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS google_drive_folder_id VARCHAR(255);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS review_status VARCHAR(50) DEFAULT 'PENDING_REVIEW';
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_status VARCHAR(50);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_summary TEXT;
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_flags JSONB;
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_risk_score NUMERIC(4,2);
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_extracted_data JSONB;
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS ai_analysis_timestamp TIMESTAMP WITH TIME ZONE;
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE public.evidence_files ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
+-- 9. Threaded Messages Table
+CREATE TABLE IF NOT EXISTS public.threaded_messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  audit_id UUID REFERENCES public.audits(id) ON DELETE CASCADE,
+  request_ref VARCHAR(50),
+  sender_email VARCHAR(255) NOT NULL,
+  sender_name VARCHAR(255) NOT NULL,
+  sender_role VARCHAR(50) NOT NULL,
+  sender_organization VARCHAR(255) NOT NULL,
+  content TEXT NOT NULL,
+  reply_to_id UUID REFERENCES public.threaded_messages(id) ON DELETE CASCADE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_audit_reports_distributor ON public.audit_reports(distributor_id);
-CREATE INDEX IF NOT EXISTS idx_audit_reports_status ON public.audit_reports(status);
+-- 10. Notifications Table
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  target_user_email VARCHAR(255),
+  target_organization VARCHAR(255),
+  category VARCHAR(50) NOT NULL,
+  title VARCHAR(255) NOT NULL,
+  message TEXT NOT NULL,
+  is_read BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
 
--- IRL Edit Requests
+-- 11. System Audit Logs
+CREATE TABLE IF NOT EXISTS public.system_audit_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_name VARCHAR(255) NOT NULL,
+  user_email VARCHAR(255) NOT NULL,
+  user_role VARCHAR(50) NOT NULL,
+  organization VARCHAR(255) NOT NULL,
+  action VARCHAR(50) NOT NULL,
+  ip_address VARCHAR(45) NOT NULL,
+  browser VARCHAR(100),
+  device VARCHAR(100),
+  details TEXT,
+  timestamp TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ====================================================================
+-- INDEXES FOR HIGH-PERFORMANCE MULTI-TENANT QUERYING
+-- ====================================================================
+CREATE INDEX IF NOT EXISTS idx_users_organization ON public.users(organization_name);
+CREATE INDEX IF NOT EXISTS idx_users_role ON public.users(role);
+CREATE INDEX IF NOT EXISTS idx_audits_client ON public.audits(client_name);
+CREATE INDEX IF NOT EXISTS idx_audits_distributor ON public.audits(distributor_name);
+CREATE INDEX IF NOT EXISTS idx_irl_distributor ON public.irl_request_items(distributor_name);
+CREATE INDEX IF NOT EXISTS idx_evidence_distributor ON public.evidence_files(distributor_name);
+CREATE INDEX IF NOT EXISTS idx_evidence_status ON public.evidence_files(status);
+CREATE INDEX IF NOT EXISTS idx_messages_audit ON public.threaded_messages(audit_id);
+CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON public.system_audit_logs(timestamp DESC);
+
+-- ====================================================================
+-- ROW LEVEL SECURITY (RLS) TENANT POLICIES
+-- ====================================================================
+
+-- Enable RLS on all tables
+ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.distributors ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.irl_request_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.evidence_files ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.threaded_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.system_audit_logs ENABLE ROW LEVEL SECURITY;
+
+-- Policy: Platform & Audit Firm Super Admins can access everything
+CREATE POLICY "Admins full access" ON public.users
+  FOR ALL USING (
+    auth.jwt() ->> 'role' IN ('Platform Super Admin', 'AA Super Admin', 'service_role')
+  );
+
+-- Policy: Distributors can ONLY access evidence matching their organization name
+CREATE POLICY "Distributor Evidence Isolation Policy" ON public.evidence_files
+  FOR ALL USING (
+    distributor_name = (
+      SELECT organization_name FROM public.users WHERE id = auth.uid()
+    ) OR (
+      SELECT role FROM public.users WHERE id = auth.uid()
+    ) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Auditor', 'Reviewer', 'service_role')
+  );
+
+-- Policy: Distributors can ONLY access IRL request items matching their organization name
+CREATE POLICY "Distributor IRL Isolation Policy" ON public.irl_request_items
+  FOR ALL USING (
+    distributor_name = (
+      SELECT organization_name FROM public.users WHERE id = auth.uid()
+    ) OR (
+      SELECT role FROM public.users WHERE id = auth.uid()
+    ) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Auditor', 'Reviewer', 'service_role')
+  );
+
+-- Policy: System Audit Logs insertion policy
+CREATE POLICY "Allow system log creation" ON public.system_audit_logs
+  FOR INSERT WITH CHECK (true);
+
+-- 12. Initial Information Request List (IRL) Edit Access Requests
 CREATE TABLE IF NOT EXISTS public.irl_edit_requests (
   id VARCHAR(255) PRIMARY KEY,
   client_name VARCHAR(255) NOT NULL,
@@ -227,77 +295,62 @@ CREATE INDEX IF NOT EXISTS idx_edit_req_distributor ON public.irl_edit_requests(
 CREATE INDEX IF NOT EXISTS idx_edit_req_client ON public.irl_edit_requests(client_name);
 CREATE INDEX IF NOT EXISTS idx_edit_req_status ON public.irl_edit_requests(status);
 
--- Evidence Files (used in GoogleDriveStorageCard / tests)
-CREATE TABLE IF NOT EXISTS public.evidence_files (
+ALTER TABLE public.irl_edit_requests ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Distributor Edit Requests Isolation Policy" ON public.irl_edit_requests
+  FOR ALL USING (
+    distributor_name = (
+      SELECT organization_name FROM public.users WHERE id = auth.uid()
+    ) OR (
+      SELECT role FROM public.users WHERE id = auth.uid()
+    ) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Auditor', 'Reviewer', 'service_role')
+  );
+
+-- 13. Audit Reports Table
+CREATE TABLE IF NOT EXISTS public.audit_reports (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-  audit_id UUID REFERENCES public.audits(id) ON DELETE CASCADE,
+  report_id VARCHAR(255) UNIQUE,
+  report_type VARCHAR(100),
+  distributor_id VARCHAR(255) NOT NULL,
   distributor_name VARCHAR(255),
-  file_name VARCHAR(255) NOT NULL,
-  original_name VARCHAR(255),
-  mime_type VARCHAR(100),
-  file_size_bytes BIGINT,
-  storage_path TEXT,
-  google_drive_id VARCHAR(255),
-  status VARCHAR(50) DEFAULT 'UPLOADED',
-  uploaded_by UUID REFERENCES public.profiles(id),
-  ai_analysis_status VARCHAR(50),
-  ai_extracted_data JSONB,
-  ai_analysis_timestamp TIMESTAMP WITH TIME ZONE,
+  client_id VARCHAR(255),
+  client_name VARCHAR(255),
+  audit_id VARCHAR(255),
+  template_id VARCHAR(100),
+  template_version VARCHAR(50),
+  report_version VARCHAR(50),
+  status VARCHAR(50) DEFAULT 'DRAFT',
+  created_by VARCHAR(255),
+  created_by_name VARCHAR(255),
+  created_by_email VARCHAR(255),
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  finalized_by VARCHAR(255),
+  finalized_at TIMESTAMP WITH TIME ZONE,
+  docx_file_id VARCHAR(255),
+  pdf_file_id VARCHAR(255),
+  google_drive_file_id VARCHAR(255),
+  google_drive_folder_id VARCHAR(255),
+  google_drive_file_url VARCHAR(1024),
+  last_drive_sync_at TIMESTAMP WITH TIME ZONE,
+  report_content JSONB DEFAULT '{}'::jsonb,
+  overview JSONB DEFAULT '{}'::jsonb,
+  findings JSONB DEFAULT '[]'::jsonb,
+  metadata JSONB DEFAULT '{}'::jsonb
 );
 
-CREATE INDEX IF NOT EXISTS idx_evidence_distributor ON public.evidence_files(distributor_name);
-CREATE INDEX IF NOT EXISTS idx_evidence_status ON public.evidence_files(status);
+CREATE INDEX IF NOT EXISTS idx_audit_reports_distributor ON public.audit_reports(distributor_id);
+CREATE INDEX IF NOT EXISTS idx_audit_reports_status ON public.audit_reports(status);
 
-
--- ====================================================================
--- ROW LEVEL SECURITY (RLS) POLICIES
--- ====================================================================
-
--- Enable RLS on all tables
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.pending_signup_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.system_audit_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.organizations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.clients ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.distributors ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audits ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.audit_reports ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.irl_edit_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.evidence_files ENABLE ROW LEVEL SECURITY;
 
--- Add policies safely if they don't exist
-DO $$ BEGIN
-    -- Public can submit signup requests
-    DROP POLICY IF EXISTS "Public can submit signup requests" ON public.pending_signup_requests;
-    CREATE POLICY "Public can submit signup requests" ON public.pending_signup_requests FOR INSERT WITH CHECK (true);
+CREATE POLICY "Auditors can access all reports" ON public.audit_reports
+  FOR ALL USING (
+    (SELECT role FROM public.users WHERE id = auth.uid()) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Auditor', 'Reviewer', 'service_role')
+  );
 
-    -- Admins can manage all profiles
-    DROP POLICY IF EXISTS "Admins can manage all profiles" ON public.profiles;
-    CREATE POLICY "Admins can manage all profiles" ON public.profiles FOR ALL USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
-
-    -- Users can view own profile
-    DROP POLICY IF EXISTS "Users can view own profile" ON public.profiles;
-    CREATE POLICY "Users can view own profile" ON public.profiles FOR SELECT USING (auth.uid() = id);
-
-    -- Allow system log creation
-    DROP POLICY IF EXISTS "Allow system log creation" ON public.system_audit_logs;
-    CREATE POLICY "Allow system log creation" ON public.system_audit_logs FOR INSERT WITH CHECK (true);
-    
-    -- Admins can read system logs
-    DROP POLICY IF EXISTS "Admins can view system logs" ON public.system_audit_logs;
-    CREATE POLICY "Admins can view system logs" ON public.system_audit_logs FOR SELECT USING (EXISTS (SELECT 1 FROM public.profiles WHERE profiles.id = auth.uid() AND profiles.role = 'admin'));
-
-    -- Allow all access to audit_reports (app level logic limits it, but for DB keep it open as before)
-    DROP POLICY IF EXISTS "Allow all access to audit_reports" ON public.audit_reports;
-    CREATE POLICY "Allow all access to audit_reports" ON public.audit_reports FOR ALL USING (true) WITH CHECK (true);
-    
-    -- Distributors Edit Requests
-    DROP POLICY IF EXISTS "Distributor Edit Requests Isolation Policy" ON public.irl_edit_requests;
-    CREATE POLICY "Distributor Edit Requests Isolation Policy" ON public.irl_edit_requests FOR ALL USING (true); -- Relaxed for testing
-    
-    -- Evidence Files
-    DROP POLICY IF EXISTS "Distributor Evidence Isolation Policy" ON public.evidence_files;
-    CREATE POLICY "Distributor Evidence Isolation Policy" ON public.evidence_files FOR ALL USING (true); -- Relaxed for testing
-END $$;
+CREATE POLICY "Distributors can access their final reports" ON public.audit_reports
+  FOR SELECT USING (
+    status = 'FINAL' AND
+    distributor_name = (SELECT organization_name FROM public.users WHERE id = auth.uid())
+  );
