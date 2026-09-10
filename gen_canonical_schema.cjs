@@ -1,4 +1,6 @@
--- ====================================================================
+const fs = require('fs');
+
+const unifiedSchema = `-- ====================================================================
 -- DATA360 ENTERPRISE AUTHENTICATION & ADMIN APPROVAL WORKFLOW SCHEMA
 -- Compatible with Supabase PostgreSQL (Auth & Database)
 -- ====================================================================
@@ -301,3 +303,9 @@ DO $$ BEGIN
     DROP POLICY IF EXISTS "Distributor Evidence Isolation Policy" ON public.evidence_files;
     CREATE POLICY "Distributor Evidence Isolation Policy" ON public.evidence_files FOR ALL USING (true); -- Relaxed for testing
 END $$;
+`;
+
+fs.writeFileSync('supabase_schema.sql', unifiedSchema);
+fs.writeFileSync('src/db/supabase_schema.sql', unifiedSchema);
+console.log('Successfully wrote unified schema to both locations.');
+

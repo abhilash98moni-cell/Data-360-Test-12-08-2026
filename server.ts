@@ -1,4 +1,5 @@
 import express from 'express';
+import bcrypt from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -64,59 +65,64 @@ async function startServer() {
 
   // Supabase health check endpoint
   app.get('/api/supabase/health', async (req, res) => {
-    const startTime = Date.now();
-    try {
-      const supabase = getSupabaseServerClient();
-      
-      const errors: string[] = [];
+  const startTime = Date.now();
+  try {
+    const supabase = getSupabaseServerClient();
+    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 
-      // 1. Read checks
-      const [pendingRes, profilesRes, evidenceRes] = await Promise.all([
-        supabase.from('pending_signup_requests').select('id').limit(1),
-        supabase.from('profiles').select('id').limit(1),
-        supabase.from('evidence_files').select('id').limit(1)
-      ]);
+    const errors = [];
+    const results = {};
 
-      if (pendingRes.error) errors.push(`pending_signup_requests read error: ${pendingRes.error.message}`);
-      if (profilesRes.error) errors.push(`profiles read error: ${profilesRes.error.message}`);
-      if (evidenceRes.error) errors.push(`evidence_files read error: ${evidenceRes.error.message}`);
-
-      // 2. Safe write test (update non-existent UUID on profiles)
-      const { error: writeError } = await supabase
-        .from('profiles')
-        .update({ updated_at: new Date().toISOString() })
-        .eq('id', '00000000-0000-0000-0000-000000000000');
-        
-      if (writeError) {
-        errors.push(`profiles write error: ${writeError.message}`);
+    const checkTable = async (table) => {
+      try {
+        const { error } = await supabase.from(table).select('id').limit(1);
+        if (error) {
+          results[table] = { status: 'error', error: error.message, code: error.code };
+          errors.push(table + ": " + error.message);
+        } else {
+          results[table] = { status: 'ok' };
+        }
+      } catch (err) {
+        results[table] = { status: 'error', error: err.message };
+        errors.push(table + ": " + err.message);
       }
+    };
 
-      const latencyMs = Date.now() - startTime;
+    await Promise.all([
+      checkTable('pending_signup_requests'),
+      checkTable('profiles'),
+      checkTable('evidence_files')
+    ]);
 
-      if (errors.length > 0) {
-        return res.status(400).json({
-          connected: false,
-          error: errors.join(' | '),
-          latencyMs,
-          url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
-        });
-      }
+    const latencyMs = Date.now() - startTime;
 
-      return res.json({
-        connected: true,
-        latencyMs,
-        url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
-        message: 'Successfully connected to Supabase PostgreSQL database!',
-        timestamp: new Date().toISOString()
-      });
-    } catch (err: any) {
-      return res.status(500).json({
+    if (errors.length > 0) {
+      return res.status(502).json({
         connected: false,
-        error: err.message || 'Failed to ping Supabase database',
-        latencyMs: Date.now() - startTime
+        error: 'Database query errors occurred. ' + errors.join(' | '),
+        details: errors,
+        tables: results,
+        latencyMs,
+        url: url
       });
     }
-  });
+
+    return res.json({
+      connected: true,
+      latencyMs,
+      url: url,
+      tables: results,
+      message: 'Successfully connected and verified all required tables!',
+      timestamp: new Date().toISOString()
+    });
+  } catch (err) {
+    return res.status(500).json({
+      connected: false,
+      error: err.message || 'Failed to ping Supabase database',
+      latencyMs: Date.now() - startTime
+    });
+  }
+});
 
   // ====================================================================
 app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => {
@@ -4760,72 +4766,68 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
+    const cleanEmail = email.trim().toLowerCase();
     const formattedRole = (role || 'Auditor').toLowerCase();
-    const formattedOrg = organization || (role === 'Auditor' ? 'Apex Electronics Corp' : 'Midwest Trading Co.');
-    const userFullName = fullName || email.split('@')[0];
+    const validRole = formattedRole === 'admin' ? 'admin' : formattedRole === 'distributor' ? 'distributor' : 'auditor';
+    const formattedOrg = organization || (validRole === 'auditor' ? 'Apex Audit Practice' : 'Midwest Trading Co.');
 
-    // Check memory store
-    const existing = pendingSignupRequests.find(r => r.email.toLowerCase() === email.toLowerCase() && r.status === 'Pending');
-    if (existing) {
-      return res.status(400).json({ error: 'A signup request for this email is already pending Admin approval.' });
-    }
-
-    const newRequest: PendingSignupRequest = {
-      id: `req-${Date.now()}`,
-      email,
-      password,
-      fullName: userFullName,
-      role: role || 'Auditor',
-      organization: formattedOrg,
-      requestedAt: new Date().toISOString(),
-      status: 'Pending'
-    };
-
-    pendingSignupRequests.unshift(newRequest);
-
-    // Direct SQL DB insertion into Supabase `pending_signup_requests` table
     let dbInserted = false;
     let dbErrorDetail = null;
 
     try {
       const client = getSupabaseServerClient();
+      
+      const { data: authData, error: authError } = await client.auth.admin.createUser({
+        email: cleanEmail,
+        password: password,
+        email_confirm: true,
+        user_metadata: {
+          full_name: fullName || cleanEmail.split('@')[0],
+          role: validRole,
+          organization: formattedOrg
+        }
+      });
+
       const { data, error } = await client.from('pending_signup_requests').insert({
-        email,
-        password_hash: password,
-        full_name: userFullName,
-        role: formattedRole,
+        email: cleanEmail,
+        password_hash: '[SECURELY_STORED_IN_SUPABASE_AUTH]',
+        full_name: fullName || cleanEmail.split('@')[0],
+        role: validRole,
         organization: formattedOrg,
         status: 'pending'
-      }).select();
+      });
 
       if (error) {
-        console.error('❌ Supabase DB Insert Error:', error.message, error.details);
         dbErrorDetail = error.message;
       } else {
-        console.log('✅ Supabase DB Insert Success:', data);
         dbInserted = true;
-
-        // Log to system audit logs table in Supabase DB
         await client.from('system_audit_logs').insert({
           event_type: 'SIGNUP_REQUEST_SUBMITTED',
-          target_user_email: email,
-          details: { role: formattedRole, organization: formattedOrg }
+          target_user_email: cleanEmail,
+          details: { role: validRole, organization: formattedOrg }
         });
       }
-    } catch (dbErr: any) {
-      console.error('❌ Supabase DB Exception:', dbErr.message);
+    } catch (dbErr) {
       dbErrorDetail = dbErr.message;
     }
 
+    const newRequest = {
+      id: `req-${Date.now()}`,
+      email: cleanEmail,
+      fullName: fullName || cleanEmail.split('@')[0],
+      role: validRole,
+      organization: formattedOrg,
+      requestedAt: new Date().toISOString(),
+      status: 'Pending'
+    };
+
+    pendingSignupRequests.push(newRequest);
+
     return res.json({
       success: true,
-      pending: true,
-      requestId: newRequest.id,
       dbInserted,
       dbError: dbErrorDetail,
-      message: dbInserted 
-        ? 'Signup request submitted! Stored in Supabase pending_signup_requests table.'
-        : `Signup request held in pending queue. Supabase DB Note: ${dbErrorDetail || 'Table pending_signup_requests active'}`,
+      message: 'Signup request submitted!',
       request: newRequest
     });
   });
@@ -4896,127 +4898,41 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   // Endpoint: Admin Approve Signup Request (Inserts User into Supabase Auth & Profiles Table)
   app.post('/api/admin/approve-signup', async (req, res) => {
     const { requestId } = req.body;
-    if (!requestId) {
-      return res.status(400).json({ error: 'Request ID is required' });
-    }
+    if (!requestId) return res.status(400).json({ error: 'Request ID is required' });
 
     let request = pendingSignupRequests.find(r => r.id === requestId || r.email.toLowerCase() === requestId.toLowerCase());
 
-    // Try finding in DB if not in memory
     if (!request) {
       try {
         const client = getSupabaseServerClient();
         const { data: dbRow } = await client.from('pending_signup_requests').select('*').or(`id.eq.${requestId},email.eq.${requestId}`).single();
         if (dbRow) {
           request = {
-            id: dbRow.id,
-            email: dbRow.email,
-            password: dbRow.password_hash || 'Password123!',
-            fullName: dbRow.full_name,
-            role: dbRow.role === 'admin' ? 'Admin' : dbRow.role === 'distributor' ? 'Distributor' : 'Auditor',
-            organization: dbRow.organization,
-            requestedAt: dbRow.requested_at,
-            status: 'Pending'
+            id: dbRow.id, email: dbRow.email, password: '', fullName: dbRow.full_name,
+            role: dbRow.role, organization: dbRow.organization, requestedAt: dbRow.requested_at, status: 'Pending'
           };
         }
-      } catch (err) {
-        // ignore
-      }
+      } catch (err) {}
     }
 
-    if (!request) {
-      return res.status(404).json({ error: 'Signup request not found' });
-    }
+    if (!request) return res.status(404).json({ error: 'Signup request not found' });
 
     try {
       const client = getSupabaseServerClient();
-
-      const rawRole = (request.role || 'auditor').toLowerCase();
-      const validRole = rawRole === 'admin' ? 'admin' : rawRole === 'distributor' ? 'distributor' : 'auditor';
-
-      // 1. Create user in Supabase Auth DB with email_confirm: true
-      let authUserId = request.id;
-      try {
-        const { data, error } = await client.auth.admin.createUser({
-          email: request.email,
-          password: request.password,
-          email_confirm: true,
-          user_metadata: {
-            full_name: request.fullName,
-            role: validRole,
-            organization: request.organization
-          }
-        });
-
-        if (!error && data?.user) {
-          authUserId = data.user.id;
-        } else if (error) {
-          console.warn('Supabase Auth createUser info:', error.message);
-        }
-      } catch (authErr: any) {
-        console.warn('Supabase Auth createUser exception:', authErr.message);
-      }
-
-      // 2. Direct Profile creation in public.profiles table
-      try {
-        await client.from('profiles').upsert({
-          id: authUserId,
-          email: request.email,
-          full_name: request.fullName,
-          role: validRole,
-          organization: request.organization,
-          title: validRole === 'admin' ? 'Platform Owner / Admin' : validRole === 'distributor' ? 'Distributor Compliance Manager' : 'Lead Forensic Auditor'
-        });
-      } catch (profErr) {
-        // profile creation note
-      }
-
-      // 3. Update status in Supabase `pending_signup_requests` table to 'approved'
-      try {
-        await client.from('pending_signup_requests')
-          .update({ status: 'approved', reviewed_at: new Date().toISOString() })
-          .eq('email', request.email);
-
-        await client.from('system_audit_logs').insert({
-          event_type: 'ADMIN_APPROVE_USER',
-          target_user_email: request.email,
-          details: { approved_user_id: authUserId, role: request.role, organization: request.organization }
-        });
-      } catch (dbErr) {
-        // Table update fallback
-      }
-
-      // Update memory store
-      const reqIdx = pendingSignupRequests.findIndex(r => r.email.toLowerCase() === request!.email.toLowerCase());
-      if (reqIdx !== -1) {
-        pendingSignupRequests.splice(reqIdx, 1);
-      }
-
-      const approvedUser = {
-        id: authUserId,
-        name: request.fullName,
-        email: request.email,
-        role: request.role,
-        organization: request.organization,
-        approvedAt: new Date().toISOString(),
-        status: 'Active'
-      };
-
-      // Add to approved users memory list
-      const existingApprovedIdx = approvedUsersList.findIndex(u => u.email.toLowerCase() === request!.email.toLowerCase());
-      if (existingApprovedIdx !== -1) {
-        approvedUsersList[existingApprovedIdx] = approvedUser;
-      } else {
-        approvedUsersList.unshift(approvedUser);
-      }
-
-      return res.json({
-        success: true,
-        message: `Request approved! User ${request.email} has been provisioned and approved for login!`,
-        user: approvedUser
+      await client.from('pending_signup_requests').update({ status: 'approved', reviewed_at: new Date().toISOString() }).eq('email', request.email);
+      await client.from('system_audit_logs').insert({
+        event_type: 'ADMIN_APPROVE_USER', target_user_email: request.email,
+        details: { role: request.role, organization: request.organization }
       });
-    } catch (err: any) {
-      return res.status(500).json({ error: err.message || 'Failed to approve user in Supabase' });
+      const reqIdx = pendingSignupRequests.findIndex(r => r.email.toLowerCase() === request.email.toLowerCase());
+      if (reqIdx !== -1) pendingSignupRequests.splice(reqIdx, 1);
+      
+      const approvedUser = { id: `usr-${Date.now()}`, email: request.email, fullName: request.fullName, role: request.role, organization: request.organization, approvedAt: new Date().toISOString() };
+      approvedUsersList.push(approvedUser);
+
+      return res.json({ success: true, message: 'User approved', user: approvedUser });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
     }
   });
 

@@ -1,4 +1,5 @@
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+const fs = require('fs');
+const code = `import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
@@ -34,3 +35,5 @@ export function getSupabaseServerClient(): SupabaseClient {
   }
   return serverClientInstance;
 }
+`;
+fs.writeFileSync('src/lib/supabaseServer.ts', code);
