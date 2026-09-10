@@ -1,8 +1,11 @@
 const fs = require('fs');
-function patch(filename) {
-  let code = fs.readFileSync(filename, 'utf8');
-  code = code.replace(/password:\s*string;\n/g, '');
-  fs.writeFileSync(filename, code);
+let code = fs.readFileSync('src/components/SamplingView.tsx', 'utf-8');
+
+const regex = /handleSaveCustomQuestion\(null,\s*newQ\);/;
+if (regex.test(code)) {
+    code = code.replace(regex, 'handleSaveCustomQuestion(undefined, newQ);');
+    fs.writeFileSync('src/components/SamplingView.tsx', code);
+    console.log('Fixed handleSaveCustomQuestion call');
+} else {
+    console.log('Could not find call to fix');
 }
-patch('server.ts');
-patch('api/index.ts');

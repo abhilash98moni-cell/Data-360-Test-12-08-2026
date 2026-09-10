@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Plus,  
-  ArrowLeft, Search, Filter, CheckCircle2, AlertTriangle, AlertCircle, XCircle,
+  ArrowLeft, Search, Filter, CheckCircle2, AlertTriangle, 
   FileText, Info, Save, X, Edit, ExternalLink, Database, ShieldCheck,
   ChevronDown, ChevronUp, Eye, Download, FileSpreadsheet, ImageIcon,
   Paperclip, MessageSquare, HelpCircle, CheckCircle, Clock, File, Send,
-  FileCheck, Trash2, Check, Loader2
+  FileCheck
  } from 'lucide-react';
 import { UserSession } from '../types';
 import { CurrencyMode, formatFinancialAmount } from '../utils/currencyFormatter';
 import { RequiredDataQuestionnaire } from './RequiredDataQuestionnaire';
-import { DocumentViewerModal } from './DocumentViewerModal';
 
 interface SamplingViewProps {
   isEvidenceManagementMode?: boolean;
@@ -143,15 +142,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   const [expandedItemAcceptance, setExpandedItemAcceptance] = useState<Set<string>>(new Set());
   const [expandedRecordHistory, setExpandedRecordHistory] = useState<Set<string>>(new Set());
 
-  // Auditor role & Transaction Question states
-  const isAuditor = !isDistributor;
-  const [showAddTxQuestionModal, setShowAddTxQuestionModal] = useState<boolean>(false);
-  const [newTxQuestionText, setNewTxQuestionText] = useState<string>('');
-  const [newTxQuestionType, setNewTxQuestionType] = useState<string>('Document Upload');
-  const [newTxQuestionInstruction, setNewTxQuestionInstruction] = useState<string>('');
-  const [isSavingTxQuestion, setIsSavingTxQuestion] = useState<boolean>(false);
-  const [txQuestionSaveError, setTxQuestionSaveError] = useState<string | null>(null);
-
   const toggleItemAcceptance = (key: string) => {
     setExpandedItemAcceptance(prev => {
       const next = new Set(prev);
@@ -231,40 +221,12 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   };
 
   const handleDownloadDoc = (doc: any) => {
-    const fileId = doc.googleDriveFileId || doc.id;
-    const downloadUrl = doc.url || (fileId ? `/api/storage/download/${encodeURIComponent(fileId)}?fileName=${encodeURIComponent(doc.name)}` : '') || doc.dataUrl || '#';
     const link = document.createElement('a');
-    link.href = downloadUrl;
+    link.href = doc.url || doc.dataUrl || '#';
     link.download = doc.name || 'document';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
-
-  const openDocPreview = (doc: any) => {
-    const fileId = doc.googleDriveFileId || doc.id;
-    const downloadUrl = doc.url || (fileId ? `/api/storage/download/${encodeURIComponent(fileId)}?fileName=${encodeURIComponent(doc.name)}` : '') || doc.dataUrl || '';
-    const previewUrl = doc.dataUrl || (doc.url ? doc.url.replace('/download/', '/preview/') : (fileId ? `/api/storage/preview/${encodeURIComponent(fileId)}?fileName=${encodeURIComponent(doc.name)}` : ''));
-    setPreviewDoc({
-      ...doc,
-      url: downloadUrl,
-      previewUrl: previewUrl,
-      googleDriveFileId: fileId
-    });
-  };
-
-  const getFinalReviewStatus = (rec: any): 'Accepted' | 'Clarification Required' | 'Rejected' | 'Pending Review' => {
-    const qResp = rec.questionnaireResponse;
-    if (qResp?.status === 'Accepted' || rec.testingStatus === 'Tested' || rec.questionnaireStatus === 'Accepted') {
-      return 'Accepted';
-    }
-    if (qResp?.status === 'Clarification Required' || rec.questionnaireStatus === 'Clarification Required') {
-      return 'Clarification Required';
-    }
-    if (qResp?.status === 'Rejected' || rec.questionnaireStatus === 'Rejected') {
-      return 'Rejected';
-    }
-    return 'Pending Review';
   };
 
   const fetchQuestionnaireResponses = async () => {
@@ -297,140 +259,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       }
     } catch (err) {
       console.warn('Failed to fetch questionnaire responses & questions', err);
-    }
-  };
-
-  const getReviewQuestionnaireResponse = (rec: any) => {
-    if (!rec) return null;
-    const sId = String(rec.sampleId || rec.id || '').toLowerCase();
-    const vNo = String(rec.voucherNo || rec.testingReference || '').toLowerCase();
-    const clean = (s: any) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const cSId = clean(sId);
-    const cVNo = clean(vNo);
-
-    const qMap = questionnaireResponses || {};
-    return (sId && qMap[sId]) ||
-           (vNo && qMap[vNo]) ||
-           (cSId && qMap[cSId]) ||
-           (cVNo && qMap[cVNo]) ||
-           rec.questionnaireResponse ||
-           null;
-  };
-
-  const getReviewTxQuestions = (rec: any) => {
-    if (!rec) return [];
-    const sId = String(rec.sampleId || rec.id || '').toLowerCase();
-    const vNo = String(rec.voucherNo || rec.testingReference || '').toLowerCase();
-    const clean = (s: any) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-    const cSId = clean(sId);
-    const cVNo = clean(vNo);
-
-    // Filter questions specific to this sample/voucher or transaction
-    const questionList = Array.isArray(questionnaireQuestions) ? questionnaireQuestions : [];
-    const matched = questionList.filter((q: any) => {
-      if (!q || q.active === false) return false;
-      const qSample = clean(q.sample_id);
-      const qVoucher = clean(q.voucher_no || q.voucherNo);
-
-      const matchesSample = Boolean(qSample && ((cSId && (qSample === cSId || cSId.includes(qSample) || qSample.includes(cSId))) || (cVNo && (qSample === cVNo || cVNo.includes(qSample) || qSample.includes(cVNo)))));
-      const matchesVoucher = Boolean(qVoucher && ((cVNo && (qVoucher === cVNo || cVNo.includes(qVoucher) || qVoucher.includes(cVNo))) || (cSId && (qVoucher === cSId || cSId.includes(qVoucher) || qVoucher.includes(cSId)))));
-
-      if (q.scope === 'transaction' || q.scope === 'sample') {
-        return matchesSample || matchesVoucher;
-      }
-      if (qSample || qVoucher) {
-        return matchesSample || matchesVoucher;
-      }
-      return false;
-    });
-
-    // Also include any questions that have response records in itemResponses
-    const resp = getReviewQuestionnaireResponse(rec);
-    const itemResponses = (resp?.itemResponses && typeof resp.itemResponses === 'object' && !Array.isArray(resp.itemResponses)) ? resp.itemResponses : {};
-    Object.keys(itemResponses).forEach(qKey => {
-      const exists = matched.some(q => q && (String(q.dbId || q.question_id || q.id || '') === String(qKey) || String(q.question_text || '') === String(qKey)));
-      if (!exists) {
-        matched.push({
-          id: qKey,
-          question_id: qKey,
-          question_text: qKey,
-          scope: 'transaction',
-          answer_type: 'Document Upload'
-        });
-      }
-    });
-
-    return matched;
-  };
-
-  const handleSaveTxQuestion = async () => {
-    if (!newTxQuestionText.trim() || !reviewRecord) return;
-    setIsSavingTxQuestion(true);
-    setTxQuestionSaveError(null);
-    try {
-      const sampleId = reviewRecord.sampleId || reviewRecord.id;
-      const voucherNo = reviewRecord.voucherNo || reviewRecord.testingReference || reviewRecord.id;
-      const distributorId = reviewRecord.distributor || selectedDistributor;
-      const contextClass = reviewRecord._activeClassificationContext || (Array.isArray(reviewRecord.testingClassification) ? reviewRecord.testingClassification[0] : reviewRecord.testingClassification);
-
-      const payload = {
-        engagement_id: selectedAuditFilter || 'eng-101',
-        distributor_id: distributorId,
-        sample_id: sampleId,
-        voucher_no: voucherNo,
-        testing_classification: contextClass,
-        question_text: newTxQuestionText.trim(),
-        answer_type: newTxQuestionType,
-        response_type: newTxQuestionType,
-        help_text: newTxQuestionInstruction.trim(),
-        instruction: newTxQuestionInstruction.trim(),
-        comment: newTxQuestionInstruction.trim(),
-        scope: 'transaction',
-        required: true,
-        allow_comment: true,
-        allow_file_upload: true
-      };
-
-      const res = await fetch('/api/sampling/required-data/questions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-user-email': currentUser?.email || ''
-        },
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.success) {
-        await fetchQuestionnaireResponses();
-        setShowAddTxQuestionModal(false);
-        setNewTxQuestionText('');
-        setNewTxQuestionType('Document Upload');
-        setNewTxQuestionInstruction('');
-      } else {
-        setTxQuestionSaveError(data.error || 'Failed to save question');
-      }
-    } catch (err: any) {
-      console.error('Error saving transaction question:', err);
-      setTxQuestionSaveError(err.message || 'Error saving question');
-    } finally {
-      setIsSavingTxQuestion(false);
-    }
-  };
-
-  const handleDeleteTxQuestion = async (q: any) => {
-    const qId = q.dbId || q.id;
-    if (!qId) return;
-    if (!confirm('Are you sure you want to delete this question?')) return;
-    try {
-      await fetch(`/api/sampling/required-data/questions/${qId}`, {
-        method: 'DELETE',
-        headers: {
-          'x-user-email': currentUser?.email || ''
-        }
-      });
-      await fetchQuestionnaireResponses();
-    } catch (e) {
-      console.error('Failed to delete question', e);
     }
   };
 
@@ -1027,7 +855,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
     });
     setReviewException(record.exceptions || '');
     setSaveSuccess(false);
-    fetchQuestionnaireResponses();
   };
 
   const handleSaveReview = async () => {
@@ -1038,10 +865,9 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
     let overall = 'Tested';
     if (reviewException) overall = 'Exception';
     else {
-       const contextClass = reviewRecord._activeClassificationContext || (Array.isArray(reviewRecord.testingClassification) ? reviewRecord.testingClassification[0] : reviewRecord.testingClassification) || 'General';
-       const cQuestions = Array.isArray(customQuestions) ? customQuestions : [];
-       const relevantCustomQuestions = cQuestions.filter(q => 
-          q && q.contextClass === contextClass && 
+       const contextClass = reviewRecord._activeClassificationContext || (Array.isArray(reviewRecord.testingClassification) ? reviewRecord.testingClassification[0] : reviewRecord.testingClassification);
+       const relevantCustomQuestions = customQuestions.filter(q => 
+          q.contextClass === contextClass && 
           (!q.scope || q.scope === 'classification' || (q.scope === 'sample' && q.sampleId === reviewRecord.id))
        );
        const template = [...(TESTING_TEMPLATES[contextClass] || []), ...relevantCustomQuestions];
@@ -1085,32 +911,28 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   };
 
   const getQuestionsForRecord = (rec: any) => {
-    if (!rec) return [];
     const sId = String(rec.sampleId || rec.id || '').toLowerCase();
-    const vNo = String(rec.voucherNo || rec.testingReference || '').toLowerCase();
+    const vNo = String(rec.voucherNo || '').toLowerCase();
     const classifications: string[] = Array.isArray(rec.testingClassification)
       ? rec.testingClassification
       : [rec.testingClassification].filter(Boolean);
 
     // Filter questions that match this sample
-    const qList = Array.isArray(questionnaireQuestions) ? questionnaireQuestions : [];
-    let matched = qList.filter((q: any) => {
-      if (!q || q.active === false) return false;
+    let matched = questionnaireQuestions.filter((q: any) => {
       const qSample = String(q.sample_id || '').toLowerCase();
-      const qVoucher = String(q.voucher_no || q.voucherNo || '').toLowerCase();
+      const qVoucher = String(q.voucher_no || '').toLowerCase();
       if (qSample && (qSample === sId || qSample === vNo)) return true;
       if (qVoucher && (qVoucher === vNo || qVoucher === sId)) return true;
-      if ((q.scope === 'sample' || q.scope === 'transaction') && !qSample && !qVoucher) return false;
+      if (q.scope === 'sample' && !qSample && !qVoucher) return false;
       if (q.scope === 'classification' && q.contextClass && classifications.includes(q.contextClass)) return true;
       if (q.scope === 'all' || !q.scope) return true;
       return false;
     });
 
     // Also include any questions that have responses recorded
-    const resp = rec?.questionnaireResponse || getReviewQuestionnaireResponse(rec);
-    const itemResponses = (resp?.itemResponses && typeof resp.itemResponses === 'object' && !Array.isArray(resp.itemResponses)) ? resp.itemResponses : {};
+    const itemResponses = rec.questionnaireResponse?.itemResponses || {};
     Object.keys(itemResponses).forEach((qKey) => {
-      const alreadyHas = matched.some(m => m && (String(m.id || m.question_id || m.dbId || '') === String(qKey) || String(m.question_text || '') === String(qKey)));
+      const alreadyHas = matched.some(m => String(m.id || m.question_id) === String(qKey) || String(m.question_text) === String(qKey));
       if (!alreadyHas) {
         matched.push({
           id: qKey,
@@ -1126,21 +948,19 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   };
 
   const renderAcceptedQuestionnaireDetails = (rec: any) => {
-    if (!rec) return null;
-    try {
-      const qResp = rec.questionnaireResponse || getReviewQuestionnaireResponse(rec);
-      const questions = getQuestionsForRecord(rec) || [];
-      const itemResponses = (qResp?.itemResponses && typeof qResp.itemResponses === 'object' && !Array.isArray(qResp.itemResponses)) ? qResp.itemResponses : {};
-      const generalFiles: any[] = Array.isArray(qResp?.uploadedFiles) ? qResp.uploadedFiles : [];
-      const generalRemarks = qResp?.notes || qResp?.distributorRemarks || '';
-      const history: any[] = Array.isArray(getTransactionHistory(rec)) ? getTransactionHistory(rec) : [];
-      const auditorEmail = qResp?.auditorEmail || 'auditor@data360.io';
-      const decisionDate = qResp?.auditorDecisionAt || qResp?.updated_at;
+    const qResp = rec.questionnaireResponse;
+    const questions = getQuestionsForRecord(rec);
+    const itemResponses = qResp?.itemResponses || {};
+    const generalFiles: any[] = Array.isArray(qResp?.uploadedFiles) ? qResp.uploadedFiles : [];
+    const generalRemarks = qResp?.notes || qResp?.distributorRemarks || '';
+    const history: any[] = getTransactionHistory(rec);
+    const auditorEmail = qResp?.auditorEmail || 'auditor@data360.io';
+    const decisionDate = qResp?.auditorDecisionAt || qResp?.updated_at;
 
-      let totalDocsCount = generalFiles.length;
-      Object.values(itemResponses).forEach((item: any) => {
-        if (Array.isArray(item?.files)) totalDocsCount += item.files.length;
-      });
+    let totalDocsCount = generalFiles.length;
+    Object.values(itemResponses).forEach((item: any) => {
+      if (Array.isArray(item?.files)) totalDocsCount += item.files.length;
+    });
 
     return (
       <div className="bg-slate-900/95 border border-indigo-500/30 rounded-2xl p-6 shadow-2xl space-y-6 text-left">
@@ -1161,8 +981,33 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             </div>
             
             <div className="flex items-center gap-2 pt-1 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setAcceptanceDetailsModalRecord(rec)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-300 border border-emerald-500/40 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                title="View who accepted the evidence and acceptance date/time"
+              >
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span>View Acceptance Details</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAuditHistoryModalRecord(rec)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-amber-950/30 hover:bg-amber-900/40 text-amber-300 border border-amber-500/40 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                title="View transaction audit history trail"
+              >
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>View Audit History</span>
+                {history.length > 0 && (
+                  <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded-full text-[10px] font-mono">
+                    {history.length}
+                  </span>
+                )}
+              </button>
+
               {totalDocsCount > 0 && (
-                <span className="px-2.5 py-1 bg-slate-800/80 text-slate-300 rounded-lg text-xs font-mono border border-slate-700/60">
+                <span className="px-2 py-1 bg-slate-800/80 text-slate-300 rounded-lg text-[11px] font-mono border border-slate-700/60">
                   {totalDocsCount} document{totalDocsCount === 1 ? '' : 's'} attached
                 </span>
               )}
@@ -1186,87 +1031,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
               Close Details
             </button>
           </div>
-        </div>
-
-        {/* 1. Acceptance Details Card */}
-        <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-xl p-4">
-          <div className="flex items-center justify-between flex-wrap gap-2 pb-3 border-b border-emerald-500/20">
-            <div className="flex items-center gap-2">
-              <span className="p-1.5 bg-emerald-500/20 rounded-lg text-emerald-400">
-                <CheckCircle2 className="w-4 h-4" />
-              </span>
-              <div>
-                <h4 className="text-xs font-bold text-emerald-200">Acceptance &amp; Final Review Decision</h4>
-                <p className="text-[11px] text-emerald-400/80">
-                  Evidence verified against audit requirements and approved
-                </p>
-              </div>
-            </div>
-            <span className="px-2.5 py-1 text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 rounded-full">
-              Accepted
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 pt-3 text-xs">
-            <div>
-              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Accepted By</span>
-              <span className="font-medium text-slate-200 font-mono">{auditorEmail}</span>
-            </div>
-            <div>
-              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Acceptance Timestamp</span>
-              <span className="font-mono text-slate-200">
-                {decisionDate ? new Date(decisionDate).toLocaleString() : 'Recorded in Audit File'}
-              </span>
-            </div>
-            <div>
-              <span className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">Review Mode</span>
-              <span className="font-medium text-emerald-300">Read-Only Final Review</span>
-            </div>
-          </div>
-
-          {qResp?.notes && (
-            <div className="mt-3 pt-2 border-t border-emerald-500/20 text-xs text-slate-300">
-              <span className="font-bold text-emerald-300/90 mr-2">Auditor Acceptance Notes:</span>
-              <span>{qResp.notes}</span>
-            </div>
-          )}
-        </div>
-
-        {/* 2. Transaction Summary Card */}
-        <div className="bg-slate-950/70 border border-slate-800/80 rounded-xl p-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
-            <div>
-              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Date</span>
-              <span className="font-mono text-slate-200 font-semibold">{rec.date || '—'}</span>
-            </div>
-            <div>
-              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Account</span>
-              <span className="text-slate-200 font-semibold truncate block" title={rec.accountDescription}>
-                {rec.accountDescription || rec.accountNumber || '—'}
-              </span>
-            </div>
-            <div>
-              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Debit</span>
-              <span className="font-mono text-emerald-400 font-bold">
-                {Number(rec.debit) > 0 ? formatCurrency(rec.debit, currencyMode) : '—'}
-              </span>
-            </div>
-            <div>
-              <span className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">Credit</span>
-              <span className="font-mono text-indigo-400 font-bold">
-                {Number(rec.credit) > 0 ? formatCurrency(rec.credit, currencyMode) : '—'}
-              </span>
-            </div>
-          </div>
-          {rec.description && (
-            <div className="mt-3 pt-3 border-t border-slate-800/60 text-xs text-slate-300">
-              <span className="font-bold text-slate-400 mr-2">Description:</span>
-              <span>{rec.description}</span>
-              {rec.narration && rec.narration !== rec.description && rec.narration !== '—' && (
-                <span className="text-slate-500 ml-2">({rec.narration})</span>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Persisted Questions & Distributor Responses */}
@@ -1378,8 +1142,8 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                               <div className="flex items-center gap-1 shrink-0">
                                 <button
                                   type="button"
-                                  onClick={() => openDocPreview(doc)}
-                                  className="px-2.5 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                                  onClick={() => setPreviewDoc(doc)}
+                                  className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
                                 >
                                   <Eye className="w-3 h-3" /> View
                                 </button>
@@ -1393,6 +1157,48 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                               </div>
                             </div>
                           ))}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Review Decision Info / Acceptance Details */}
+                    <div className="pt-1">
+                      {!expandedItemAcceptance.has(qKey + rec.id) ? (
+                        <button
+                          type="button"
+                          onClick={() => toggleItemAcceptance(qKey + rec.id)}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-semibold transition-colors cursor-pointer"
+                          title="View who accepted the evidence and acceptance date/time"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          <span>View Acceptance Details</span>
+                        </button>
+                      ) : (
+                        <div className="p-3 bg-emerald-950/40 border border-emerald-800/60 rounded-xl space-y-2">
+                          <div className="flex items-center justify-between flex-wrap gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 uppercase">
+                                Evidence Accepted
+                              </span>
+                              <span className="text-xs text-slate-300">
+                                Accepted by: <strong className="text-emerald-300 font-mono">{itemAuditor}</strong>
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              {itemDecisionDate && (
+                                <span className="text-xs text-slate-400 font-mono">
+                                  {new Date(itemDecisionDate).toLocaleString()}
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => toggleItemAcceptance(qKey + rec.id)}
+                                className="text-[11px] text-slate-400 hover:text-slate-200 underline cursor-pointer"
+                              >
+                                Hide
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1436,8 +1242,8 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                       <div className="flex items-center gap-1 shrink-0">
                         <button
                           type="button"
-                          onClick={() => openDocPreview(doc)}
-                          className="px-2.5 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
+                          onClick={() => setPreviewDoc(doc)}
+                          className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white rounded text-[11px] font-medium flex items-center gap-1 border border-slate-700 transition-colors cursor-pointer"
                         >
                           <Eye className="w-3 h-3" /> View
                         </button>
@@ -1543,14 +1349,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
         </div>
       </div>
     );
-    } catch (err: any) {
-      console.error("Error rendering accepted questionnaire details:", err);
-      return (
-        <div className="p-4 bg-slate-900/60 border border-slate-800 rounded-xl text-xs text-slate-400">
-          Unable to load questionnaire response details.
-        </div>
-      );
-    }
   };
 
   // Sub-Tab Rendering logic
@@ -1761,66 +1559,44 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                 </td>
                 )}
                 <td className="py-2.5 px-4 bg-slate-900/40 text-center">
-                  <div className="flex flex-col items-center gap-2 min-w-[170px]">
-                    {/* Final Review Status Badge */}
-                    {(() => {
-                      const status = getFinalReviewStatus(rec);
-                      if (status === 'Accepted') {
-                        return (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                            Accepted
-                          </span>
-                        );
-                      }
-                      if (status === 'Clarification Required') {
-                        return (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-sm">
-                            <AlertCircle className="w-3.5 h-3.5 text-amber-400" />
-                            Clarification Required
-                          </span>
-                        );
-                      }
-                      if (status === 'Rejected') {
-                        return (
-                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-sm">
-                            <XCircle className="w-3.5 h-3.5 text-rose-400" />
-                            Rejected
-                          </span>
-                        );
-                      }
-                      return (
-                        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-slate-800 text-slate-300 border border-slate-700 shadow-sm">
-                          <Clock className="w-3.5 h-3.5 text-slate-400" />
-                          Pending Review
-                        </span>
-                      );
-                    })()}
-
-                    {/* ONLY Details and History buttons */}
-                    <div className="flex items-center gap-1.5 justify-center">
+                  <div className="flex flex-col items-center gap-1.5 min-w-[190px]">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 shadow-sm">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                      Accepted
+                    </span>
+                    <div className="flex items-center gap-1 flex-wrap justify-center">
                       <button
                         type="button"
                         onClick={() => toggleRowExpand(rec.id)}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all border ${
+                        className={`px-2 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all border ${
                           expandedRowIds.has(rec.id)
                             ? 'bg-indigo-600 text-white border-indigo-500 shadow-sm'
                             : 'bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white border-slate-700'
                         }`}
-                        title="View questionnaire details, uploaded evidence, and acceptance information"
+                        title="View full accepted questionnaire details, distributor responses, uploaded evidence, and audit decision"
                       >
-                        <FileText className="w-3.5 h-3.5 text-indigo-400" />
+                        <FileText className="w-3 h-3 text-indigo-400" />
                         <span>{expandedRowIds.has(rec.id) ? 'Hide' : 'Details'}</span>
-                        {expandedRowIds.has(rec.id) ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        {expandedRowIds.has(rec.id) ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setAcceptanceDetailsModalRecord(rec)}
+                        className="px-2 py-1 bg-emerald-950/40 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-500/30 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                        title="View who accepted the evidence and acceptance date/time"
+                      >
+                        <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                        <span>Acceptance</span>
                       </button>
 
                       <button
                         type="button"
                         onClick={() => setAuditHistoryModalRecord(rec)}
-                        className="px-2.5 py-1 bg-slate-800 hover:bg-slate-750 text-amber-300 hover:text-amber-200 border border-amber-500/30 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                        className="px-2 py-1 bg-slate-800 hover:bg-slate-750 text-amber-300 hover:text-amber-200 border border-amber-500/30 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
                         title="View audit history trail for this specific transaction"
                       >
-                        <Clock className="w-3.5 h-3.5 text-amber-400" />
+                        <Clock className="w-3 h-3 text-amber-400" />
                         <span>History</span>
                       </button>
                     </div>
@@ -1921,10 +1697,9 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
 
   const renderReviewModal = () => {
     if (!reviewRecord) return null;
-    const contextClass = reviewRecord._activeClassificationContext || (Array.isArray(reviewRecord.testingClassification) ? reviewRecord.testingClassification[0] : reviewRecord.testingClassification) || 'General';
-    const cQuestions = Array.isArray(customQuestions) ? customQuestions : [];
-    const relevantCustomQuestions = cQuestions.filter(q => 
-       q && q.contextClass === contextClass && 
+    const contextClass = reviewRecord._activeClassificationContext || (Array.isArray(reviewRecord.testingClassification) ? reviewRecord.testingClassification[0] : reviewRecord.testingClassification);
+    const relevantCustomQuestions = customQuestions.filter(q => 
+       q.contextClass === contextClass && 
        (!q.scope || q.scope === 'classification' || (q.scope === 'sample' && q.sampleId === reviewRecord.id))
     );
     const template = [...(TESTING_TEMPLATES[contextClass] || []), ...relevantCustomQuestions];
@@ -1987,30 +1762,10 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             </div>
 
             {/* Evidence & Supporting Documents */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3 flex-wrap">
-                <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-emerald-400" /> Transaction Evidence & Support
-                </h3>
-                {isAuditor && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setNewTxQuestionText('');
-                      setNewTxQuestionType('Document Upload');
-                      setNewTxQuestionInstruction('');
-                      setTxQuestionSaveError(null);
-                      setShowAddTxQuestionModal(true);
-                    }}
-                    className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
-                    title="Add a question/request for this specific transaction"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> + Add Question
-                  </button>
-                )}
-              </div>
-
-              {/* Standard Evidence Fields */}
+            <div>
+              <h3 className="text-sm font-bold text-slate-300 uppercase tracking-wider mb-4 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-emerald-400" /> Transaction Evidence & Support
+              </h3>
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {evidenceFields.map(f => (
                   <div key={f.id} className="space-y-1">
@@ -2038,183 +1793,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                   </div>
                 ))}
               </div>
-
-              {/* Specific Transaction Questions & Evidence */}
-              {(() => {
-                const txQuestions = getReviewTxQuestions(reviewRecord) || [];
-                const resp = getReviewQuestionnaireResponse(reviewRecord);
-                const itemResponses = (resp?.itemResponses && typeof resp.itemResponses === 'object' && !Array.isArray(resp.itemResponses)) ? resp.itemResponses : {};
-
-                return (
-                  <div className="space-y-3 pt-2">
-                    <div className="flex items-center justify-between border-t border-slate-800/80 pt-3">
-                      <div className="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-2">
-                        <span>Transaction Questionnaire & Evidence Requests</span>
-                        <span className="px-2 py-0.5 rounded-full bg-slate-800 text-[11px] text-slate-400 font-mono">
-                          {txQuestions.length}
-                        </span>
-                      </div>
-                    </div>
-
-                    {txQuestions.length === 0 ? (
-                      <div className="p-3.5 border border-dashed border-slate-800 rounded-xl bg-slate-950/40 text-center text-xs text-slate-500">
-                        No custom questions added to this transaction yet. Click <strong className="text-emerald-400 font-semibold">+ Add Question</strong> above to add specific evidence requests, questions, or instructions.
-                      </div>
-                    ) : (
-                      <div className="space-y-3">
-                        {txQuestions.map((q: any, idx: number) => {
-                          if (!q) return null;
-                          const qKey = String(q.dbId || q.question_id || q.id || q.question_text || `tx_q_${idx}`);
-                          const rawData = itemResponses[qKey] || (q.question_id ? itemResponses[q.question_id] : null) || (q.id ? itemResponses[q.id] : null) || (q.question_text ? itemResponses[q.question_text] : null) || {};
-                          const itemData = (typeof rawData === 'object' && rawData !== null && !Array.isArray(rawData)) ? rawData : { responseValue: rawData };
-                          const qType = q.answer_type || q.response_type || 'Document Upload';
-                          const instruction = q.help_text || q.instruction || q.comment || '';
-                          const itemFiles: any[] = Array.isArray(itemData.files) ? itemData.files : [];
-                          const itemRemarks: string = typeof itemData.remarks === 'string' ? itemData.remarks : '';
-                          const responseValue = itemData.responseValue;
-                          const hasResponse = (responseValue !== undefined && responseValue !== null && responseValue !== '') || itemFiles.length > 0 || Boolean(itemRemarks);
-
-                          return (
-                            <div 
-                              key={qKey || idx}
-                              className="border border-slate-800/80 bg-slate-950/70 rounded-xl p-4 space-y-3"
-                            >
-                              {/* Question Header */}
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="space-y-1.5 flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/60">
-                                      Q#{idx + 1}
-                                    </span>
-                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                                      Type: {qType}
-                                    </span>
-                                    {hasResponse ? (
-                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 flex items-center gap-1">
-                                        <Check className="w-3 h-3 text-emerald-400" /> Distributor Responded
-                                      </span>
-                                    ) : (
-                                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800/50">
-                                        Awaiting Distributor Response
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <h4 className="text-sm font-semibold text-slate-100 leading-snug">
-                                    {q.question_text}
-                                  </h4>
-
-                                  {instruction && (
-                                    <p className="text-xs text-indigo-300/90 bg-indigo-950/40 border border-indigo-900/50 rounded-md px-2.5 py-1.5">
-                                      <strong className="text-indigo-200">Comment / Instruction:</strong> {instruction}
-                                    </p>
-                                  )}
-                                </div>
-
-                                {isAuditor && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDeleteTxQuestion(q)}
-                                    className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
-                                    title="Delete Question"
-                                  >
-                                    <Trash2 className="w-3.5 h-3.5" />
-                                  </button>
-                                )}
-                              </div>
-
-                              {/* Distributor Response Box */}
-                              <div className="bg-slate-900/60 border border-slate-800/90 rounded-lg p-3 space-y-2.5">
-                                <div className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
-                                  Distributor Response &amp; Evidence:
-                                </div>
-
-                                {/* Response Value */}
-                                {qType !== 'Document Upload' && (
-                                  <div className="flex items-center gap-2 text-xs">
-                                    <span className="font-semibold text-slate-400">Response:</span>
-                                    {responseValue !== undefined && responseValue !== null && responseValue !== '' ? (
-                                      qType === 'Yes / No / N/A' || qType === 'Yes / No' ? (
-                                        <span className={`px-2.5 py-0.5 rounded-full text-xs font-bold border ${
-                                          String(responseValue) === 'Yes' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
-                                          String(responseValue) === 'No' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' :
-                                          'bg-slate-800 text-slate-300 border-slate-700'
-                                        }`}>
-                                          {String(responseValue)}
-                                        </span>
-                                      ) : (
-                                        <span className="text-xs font-semibold text-slate-200 bg-slate-800 px-2.5 py-1 rounded border border-slate-700">
-                                          {typeof responseValue === 'object' ? JSON.stringify(responseValue) : String(responseValue)}
-                                        </span>
-                                      )
-                                    ) : (
-                                      <span className="text-slate-500 italic">Not provided yet</span>
-                                    )}
-                                  </div>
-                                )}
-
-                                {/* Attached Files */}
-                                <div className="space-y-1.5">
-                                  <div className="text-xs font-semibold text-slate-400 flex items-center justify-between">
-                                    <span>Uploaded Evidence Documents ({itemFiles.length})</span>
-                                  </div>
-                                  {itemFiles.length === 0 ? (
-                                    <div className="text-xs text-slate-500 italic py-0.5">
-                                      {qType === 'Document Upload' ? 'No document uploaded by distributor.' : 'No attached documents.'}
-                                    </div>
-                                  ) : (
-                                    <div className="divide-y divide-slate-800/80 border border-slate-800 rounded-lg overflow-hidden bg-slate-950/60">
-                                      {itemFiles.map((doc: any, docIdx: number) => (
-                                        <div key={doc.id || docIdx} className="p-2 flex items-center justify-between gap-3 text-xs">
-                                          <div className="flex items-center gap-2 min-w-0 flex-1">
-                                            <FileText className="w-4 h-4 text-indigo-400 shrink-0" />
-                                            <span className="text-slate-200 font-medium truncate" title={doc.name}>{doc.name}</span>
-                                            {doc.size && <span className="text-[10px] text-slate-500 shrink-0">({doc.size})</span>}
-                                          </div>
-                                          <div className="flex items-center gap-1.5 shrink-0">
-                                            <button
-                                              type="button"
-                                              onClick={() => openDocPreview(doc)}
-                                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
-                                            >
-                                              <Eye className="w-3 h-3" /> View
-                                            </button>
-                                            <button
-                                              type="button"
-                                              onClick={() => handleDownloadDoc(doc)}
-                                              className="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
-                                            >
-                                              <Download className="w-3 h-3" /> Download
-                                            </button>
-                                          </div>
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </div>
-
-                                {/* Distributor Remarks */}
-                                <div className="space-y-1 pt-1 border-t border-slate-800/60">
-                                  <span className="text-xs font-semibold text-slate-400">Distributor Remarks:</span>
-                                  {itemRemarks ? (
-                                    <p className="text-xs text-slate-200 bg-slate-950/60 p-2.5 rounded border border-slate-800">
-                                      {itemRemarks}
-                                    </p>
-                                  ) : (
-                                    <p className="text-xs text-slate-500 italic">
-                                      No remarks entered by distributor.
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
             </div>
 
             {/* Attributes Testing */}
@@ -2244,7 +1822,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
                             {attr.required && <span className="text-rose-500 ml-1">*</span>}
                           </p>
                           {attr.type && <span className="text-[10px] text-slate-500 uppercase tracking-wider mt-1 block">{attr.type}</span>}
-                          {attr.id && String(attr.id).startsWith('CQ') && (
+                          {attr.id.startsWith('CQ') && (
                             <div className="flex gap-2 mt-2">
                                <button className="text-[10px] font-bold text-slate-400 hover:text-indigo-400 uppercase tracking-wider">
                                  Edit
@@ -2409,128 +1987,6 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
             </div>
           </div>
         </div>
-
-        {/* Modal: + Add Question for this Specific Transaction (AUDITOR) */}
-        {showAddTxQuestionModal && reviewRecord && (
-          <div className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-sm animate-in fade-in">
-            <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-lg shadow-2xl p-6 space-y-5 text-left">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <div className="space-y-0.5">
-                  <h3 className="text-base font-bold text-white flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-emerald-400" />
-                    Add Transaction Question
-                  </h3>
-                  <p className="text-xs text-slate-400">
-                    Target: Voucher #{reviewRecord.voucherNo || reviewRecord.testingReference || reviewRecord.id} • Sample #{reviewRecord.sampleId || reviewRecord.id}
-                  </p>
-                </div>
-                <button 
-                  type="button"
-                  onClick={() => setShowAddTxQuestionModal(false)} 
-                  className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              {txQuestionSaveError && (
-                <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center gap-2">
-                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-                  <span>{txQuestionSaveError}</span>
-                </div>
-              )}
-
-              <div className="space-y-4">
-                {/* Question / Request */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-300">
-                    Question / Request <span className="text-rose-400">*</span>
-                  </label>
-                  <textarea
-                    value={newTxQuestionText}
-                    onChange={(e) => setNewTxQuestionText(e.target.value)}
-                    placeholder="Enter the specific question, request, or evidence required for this transaction..."
-                    rows={3}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-
-                {/* Response Type */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-300">
-                    Response Type <span className="text-rose-400">*</span>
-                  </label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { id: 'Document Upload', label: 'Document Upload', desc: 'PDF, Excel, Word, PPT, images, CSV, etc.' },
-                      { id: 'Yes / No / N/A', label: 'Yes / No / N/A', desc: 'Distributor selects Yes, No, or N/A' },
-                      { id: 'Text', label: 'Text', desc: 'Narrative or descriptive response' },
-                      { id: 'Number / Amount', label: 'Number / Amount', desc: 'Numeric or financial figure' }
-                    ].map((typeOption) => {
-                      const isSelected = newTxQuestionType === typeOption.id;
-                      return (
-                        <button
-                          key={typeOption.id}
-                          type="button"
-                          onClick={() => setNewTxQuestionType(typeOption.id)}
-                          className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                            isSelected
-                              ? 'bg-emerald-950/80 border-emerald-500 ring-1 ring-emerald-500/50'
-                              : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-400'
-                          }`}
-                        >
-                          <div className={`text-xs font-bold ${isSelected ? 'text-emerald-300' : 'text-slate-200'}`}>
-                            {typeOption.label}
-                          </div>
-                          <div className="text-[10px] text-slate-500 truncate mt-0.5">
-                            {typeOption.desc}
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Optional Comment / Instruction for EVERY question */}
-                <div className="space-y-1.5">
-                  <label className="text-xs font-bold text-slate-300">
-                    Comment / Instruction <span className="text-slate-500 font-normal">(Optional - applies to all response types)</span>
-                  </label>
-                  <textarea
-                    value={newTxQuestionInstruction}
-                    onChange={(e) => setNewTxQuestionInstruction(e.target.value)}
-                    placeholder="e.g. Ensure document shows authorized counter-signature and stamp..."
-                    rows={2}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2.5 pt-3 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowAddTxQuestionModal(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveTxQuestion}
-                  disabled={!newTxQuestionText.trim() || isSavingTxQuestion}
-                  className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 disabled:opacity-50 cursor-pointer shadow-md shadow-emerald-600/20"
-                >
-                  {isSavingTxQuestion ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Save className="h-3.5 w-3.5" />
-                  )}
-                  <span>Save Question to Transaction</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -2634,18 +2090,14 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       {/* Full Questionnaire Read-Only Modal */}
       {fullModalRecord && (
         <RequiredDataQuestionnaire
-          transaction={fullModalRecord}
-          currentUser={currentUser}
           isOpen={true}
           onClose={() => setFullModalRecord(null)}
           targetSampleId={fullModalRecord.sampleId || fullModalRecord.id}
           targetVoucherNo={fullModalRecord.voucherNo && fullModalRecord.voucherNo !== '—' ? fullModalRecord.voucherNo : (fullModalRecord.sampleId || fullModalRecord.id)}
           targetClassification={Array.isArray(fullModalRecord.testingClassification) ? fullModalRecord.testingClassification[0] : fullModalRecord.testingClassification}
           selectedClient={selectedClient}
-          selectedDistributor={selectedDistributor}
           distributorName={selectedDistributor}
           engagementId={selectedAuditFilter || 'eng-101'}
-          currencyMode={currencyMode}
           isDistributor={false}
           isAuditor={true}
           isReviewMode={true}
@@ -2881,10 +2333,76 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
       })()}
 
       {/* Supporting Evidence File Preview Modal */}
-      <DocumentViewerModal
-        doc={previewDoc}
-        onClose={() => setPreviewDoc(null)}
-      />
+      {previewDoc && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-4xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+            <div className="flex items-center justify-between p-4 border-b border-slate-800 bg-slate-950/60">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="p-2 bg-slate-800 rounded-lg">
+                  {getFileIcon(previewDoc.name)}
+                </div>
+                <div className="min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate max-w-md" title={previewDoc.name}>
+                    {previewDoc.name}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {previewDoc.size || 'Supporting Evidence Document'}
+                    {previewDoc.uploadDate && ` • Uploaded ${new Date(previewDoc.uploadDate).toLocaleString()}`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleDownloadDoc(previewDoc)}
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" /> Download
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewDoc(null)}
+                  className="p-1.5 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 p-6 overflow-y-auto flex items-center justify-center bg-slate-950/40 min-h-[360px]">
+              {previewDoc.type?.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)$/i.test(previewDoc.name) ? (
+                <img
+                  src={previewDoc.url || previewDoc.dataUrl}
+                  alt={previewDoc.name}
+                  className="max-w-full max-h-[70vh] object-contain rounded-lg shadow-lg border border-slate-800"
+                />
+              ) : previewDoc.type === 'application/pdf' || previewDoc.name?.toLowerCase().endsWith('.pdf') ? (
+                <iframe
+                  src={previewDoc.url || previewDoc.dataUrl}
+                  title={previewDoc.name}
+                  className="w-full h-[70vh] rounded-lg border border-slate-800 bg-white"
+                />
+              ) : (
+                <div className="text-center p-8 space-y-3">
+                  <div className="w-16 h-16 rounded-full bg-slate-800 flex items-center justify-center mx-auto text-indigo-400 shadow-inner">
+                    {getFileIcon(previewDoc.name)}
+                  </div>
+                  <p className="text-sm font-bold text-slate-200">{previewDoc.name}</p>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    This file format is best previewed locally or in an external application.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadDoc(previewDoc)}
+                    className="mt-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-2 transition-colors cursor-pointer shadow-lg shadow-indigo-600/20"
+                  >
+                    <Download className="w-4 h-4" /> Download File ({previewDoc.size || 'Attachment'})
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

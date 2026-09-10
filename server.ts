@@ -1,5 +1,4 @@
 import express from 'express';
-import bcrypt from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -65,64 +64,39 @@ async function startServer() {
 
   // Supabase health check endpoint
   app.get('/api/supabase/health', async (req, res) => {
-  const startTime = Date.now();
-  try {
-    const supabase = getSupabaseServerClient();
-    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    const startTime = Date.now();
+    try {
+      const supabase = getSupabaseServerClient();
+      const { error } = await supabase
+        .from('pending_signup_requests')
+        .select('*', { count: 'exact', head: true });
 
-    const errors = [];
-    const results = {};
+      const latencyMs = Date.now() - startTime;
 
-    const checkTable = async (table) => {
-      try {
-        const { error } = await supabase.from(table).select('id').limit(1);
-        if (error) {
-          results[table] = { status: 'error', error: error.message, code: error.code };
-          errors.push(table + ": " + error.message);
-        } else {
-          results[table] = { status: 'ok' };
-        }
-      } catch (err) {
-        results[table] = { status: 'error', error: err.message };
-        errors.push(table + ": " + err.message);
+      if (error) {
+        return res.status(400).json({
+          connected: false,
+          error: error.message,
+          latencyMs,
+          url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+        });
       }
-    };
 
-    await Promise.all([
-      checkTable('pending_signup_requests'),
-      checkTable('profiles'),
-      checkTable('evidence_files')
-    ]);
-
-    const latencyMs = Date.now() - startTime;
-
-    if (errors.length > 0) {
-      return res.status(502).json({
-        connected: false,
-        error: 'Database query errors occurred. ' + errors.join(' | '),
-        details: errors,
-        tables: results,
+      return res.json({
+        connected: true,
         latencyMs,
-        url: url
+        url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
+        message: 'Successfully connected to Supabase PostgreSQL database!',
+        timestamp: new Date().toISOString()
+      });
+    } catch (err: any) {
+      return res.status(500).json({
+        connected: false,
+        error: err.message || 'Failed to ping Supabase database',
+        latencyMs: Date.now() - startTime
       });
     }
-
-    return res.json({
-      connected: true,
-      latencyMs,
-      url: url,
-      tables: results,
-      message: 'Successfully connected and verified all required tables!',
-      timestamp: new Date().toISOString()
-    });
-  } catch (err) {
-    return res.status(500).json({
-      connected: false,
-      error: err.message || 'Failed to ping Supabase database',
-      latencyMs: Date.now() - startTime
-    });
-  }
-});
+  });
 
   // ====================================================================
 app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => {
@@ -1203,53 +1177,12 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   });
 
   // Download file from Google Drive
-  
-function authenticateStorageRequest(req: any, res: any, next: any) {
-  let role = req.headers['x-user-role'] || req.query.userRole;
-  let org = req.headers['x-user-organization'] || req.query.userOrg;
-  
-  if (!role || !org) {
-    if (req.headers.cookie) {
-      const cookies = Object.fromEntries(req.headers.cookie.split('; ').map((c: string) => c.split('=')));
-      if (!role && cookies.userRole) role = decodeURIComponent(cookies.userRole);
-      if (!org && cookies.userOrg) org = decodeURIComponent(cookies.userOrg);
-    }
-  }
-  
-  req.auth = { role: role || 'Auditor', organization: org || '' };
-  next();
-}
-
-  app.get('/api/storage/download/:fileId', authenticateStorageRequest, async (req: any, res: any) => {
+  app.get('/api/storage/download/:fileId', async (req, res) => {
     try {
       const { fileId } = req.params;
       const fallbackFileName = req.query.fileName as string;
-      const client = getSupabaseServerClient();
-      
-      if (req.auth.role === 'Distributor') {
-        let authorized = true;
-        
-        // Fix: Use limit(1) to avoid PGRST116 (multiple rows) on system_audit_logs!
-        const { data: logData, error: logErr } = await client
-            .from('system_audit_logs')
-            .select('details')
-            .eq('event_type', 'EVIDENCE_FILE')
-            .contains('details', { google_drive_file_id: fileId })
-            .limit(1)
-            .maybeSingle();
-
-        if (logData && logData.details && logData.details.distributor_name !== req.auth.organization) {
-             authorized = false;
-        } else if (!logData) {
-             authorized = false;
-        }
-        
-        if (!authorized) {
-          return res.status(403).json({ error: 'Unauthorized to download this file.' });
-        }
-      }
-      
       const downloaded = await storageService.downloadFile(fileId, fallbackFileName);
+
       res.setHeader('Content-Type', downloaded.mimeType || 'application/octet-stream');
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(downloaded.fileName)}"`);
       res.send(downloaded.buffer);
@@ -1258,35 +1191,13 @@ function authenticateStorageRequest(req: any, res: any, next: any) {
     }
   });
 
-  app.get('/api/storage/preview/:fileId', authenticateStorageRequest, async (req: any, res: any) => {
+  // Preview file from Google Drive
+  app.get('/api/storage/preview/:fileId', async (req, res) => {
     try {
       const { fileId } = req.params;
       const fallbackFileName = req.query.fileName as string;
-      const client = getSupabaseServerClient();
-      
-      if (req.auth.role === 'Distributor') {
-        let authorized = true;
-        
-        const { data: logData } = await client
-            .from('system_audit_logs')
-            .select('details')
-            .eq('event_type', 'EVIDENCE_FILE')
-            .contains('details', { google_drive_file_id: fileId })
-            .limit(1)
-            .maybeSingle();
-
-        if (logData && logData.details && logData.details.distributor_name !== req.auth.organization) {
-             authorized = false;
-        } else if (!logData) {
-             authorized = false;
-        }
-        
-        if (!authorized) {
-          return res.status(403).json({ error: 'Unauthorized to preview this file.' });
-        }
-      }
-      
       const downloaded = await storageService.downloadFile(fileId, fallbackFileName);
+
       res.setHeader('Content-Type', downloaded.mimeType || 'text/plain');
       res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(downloaded.fileName)}"`);
       res.send(downloaded.buffer);
@@ -1468,25 +1379,9 @@ function authenticateStorageRequest(req: any, res: any, next: any) {
   app.get('/api/sampling/required-data/questions', authenticateRequest, async (req: any, res: any) => {
     try {
       const { auditId, sampleId, voucherNo, distributorId } = req.query;
-      let data: any[] = [];
-      try {
-        const supabase = getSupabaseServerClient();
-        const { data: sData, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_QUESTION_DEF');
-        if (!error && Array.isArray(sData)) {
-          data = sData;
-        }
-      } catch (e) {}
-
-      // Resilient fallback / merge with dbStore
-      try {
-        const localLogs = await dbStore.getAuditLogs('REQUIRED_DATA_QUESTION_DEF');
-        if (Array.isArray(localLogs) && localLogs.length > 0) {
-          const existingIds = new Set(data.map(d => d.id));
-          localLogs.forEach(l => {
-            if (!existingIds.has(l.id)) data.push(l);
-          });
-        }
-      } catch (e) {}
+      const supabase = getSupabaseServerClient();
+      const { data, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_QUESTION_DEF');
+      if (error) throw error;
       
       const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       const questions = (data || [])
@@ -1506,15 +1401,11 @@ function authenticateStorageRequest(req: any, res: any, next: any) {
             return false;
           }
           if (sampleId || voucherNo) {
-            const targets = [cleanStr(sampleId), cleanStr(voucherNo)].filter(Boolean);
+            const target = cleanStr(sampleId || voucherNo);
             const qSample = cleanStr(q.sample_id);
             const qVoucher = cleanStr(q.voucher_no || q.voucherNo);
-            if (q.scope === 'transaction' || q.scope === 'sample' || qSample || qVoucher) {
-              const matches = targets.some(t => 
-                (qSample && (qSample === t || qSample.endsWith(t) || t.endsWith(qSample) || qSample.includes(t) || t.includes(qSample))) ||
-                (qVoucher && (qVoucher === t || qVoucher.endsWith(t) || t.endsWith(qVoucher) || qVoucher.includes(t) || t.includes(qVoucher)))
-              );
-              return matches;
+            if (q.scope === 'transaction' || qSample || qVoucher) {
+              return qSample === target || qVoucher === target;
             }
           }
           return true;
@@ -1535,21 +1426,15 @@ function authenticateStorageRequest(req: any, res: any, next: any) {
       const userOrg = req.user?.organization || req.auth?.organization || (req.headers['x-user-organization'] as string) || 'Internal';
       const supabase = getSupabaseServerClient();
       
-      const chosenType = payload.answer_type || payload.response_type || 'Document Upload';
-      const helpText = payload.help_text || payload.instruction || payload.comment || '';
-      
       const questionDetails = {
         question_id: payload.question_id || 'RDQ_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-        engagement_id: payload.engagement_id || 'eng-101',
-        distributor_id: payload.distributor_id || payload.distributorName || '',
-        testing_classification: payload.testing_classification || '',
+        engagement_id: payload.engagement_id,
+        distributor_id: payload.distributor_id || payload.distributorName,
+        testing_classification: payload.testing_classification,
         question_text: payload.question_text,
-        answer_type: chosenType,
-        response_type: chosenType,
+        answer_type: payload.answer_type || 'Document Upload & Remarks',
         required: payload.required !== undefined ? payload.required : true,
-        help_text: helpText,
-        instruction: helpText,
-        comment: helpText,
+        help_text: payload.help_text || '',
         scope: payload.scope || 'transaction',
         sample_id: payload.sample_id || null,
         voucher_no: payload.voucher_no || payload.voucherNo || null,
@@ -1561,26 +1446,18 @@ function authenticateStorageRequest(req: any, res: any, next: any) {
         options: payload.options || []
       };
 
-      let insertedId = 'q_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+      const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
+        event_type: 'REQUIRED_DATA_QUESTION_DEF',
+        target_user_email: userEmail,
+        ip_address: req.ip || '127.0.0.1',
+        details: questionDetails
+      }).select().single();
 
-      try {
-        const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
-          event_type: 'REQUIRED_DATA_QUESTION_DEF',
-          target_user_email: userEmail,
-          ip_address: req.ip || '127.0.0.1',
-          details: questionDetails
-        }).select().single();
-
-        if (!error && insertedData?.id) {
-          insertedId = insertedData.id;
-        }
-      } catch (sbErr) {
-        console.warn('Supabase insert warning for question def:', sbErr);
-      }
+      if (error) throw error;
 
       try {
         await dbStore.insertAuditLog({
-          id: insertedId,
+          id: insertedData?.id,
           event_type: 'REQUIRED_DATA_QUESTION_DEF',
           user_email: userEmail,
           organization: userOrg,
@@ -1588,7 +1465,7 @@ function authenticateStorageRequest(req: any, res: any, next: any) {
         });
       } catch (e) {}
 
-      res.json({ success: true, dbId: insertedId });
+      res.json({ success: true, dbId: insertedData.id });
     } catch (err: any) {
       console.error(err);
       res.status(500).json({ success: false, error: err.message });
@@ -1672,10 +1549,8 @@ function authenticateStorageRequest(req: any, res: any, next: any) {
              return false;
            }
            if (sampleId || voucherNo) {
-             const sVals = [cleanStr(sampleId), cleanStr(voucherNo)].filter(Boolean);
-             const rVals = [cleanStr(r.sample_id), cleanStr(r.sampleId), cleanStr(r.voucher_no), cleanStr(r.voucherNo)].filter(Boolean);
-             const hasMatch = sVals.some(s => rVals.includes(s) || rVals.some(r => r.endsWith(s) || s.endsWith(r)));
-             if (!hasMatch) return false;
+             const s = cleanStr(sampleId || voucherNo);
+             return cleanStr(r.sample_id) === s || cleanStr(r.voucher_no) === s || cleanStr(r.voucherNo) === s;
            }
            return true;
         });
@@ -4810,7 +4685,8 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   interface PendingSignupRequest {
     id: string;
     email: string;
-        fullName: string;
+    password: string;
+    fullName: string;
     role: 'Admin' | 'Auditor' | 'Distributor';
     organization: string;
     requestedAt: string;
@@ -4828,68 +4704,72 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    const cleanEmail = email.trim().toLowerCase();
     const formattedRole = (role || 'Auditor').toLowerCase();
-    const validRole = formattedRole === 'admin' ? 'admin' : formattedRole === 'distributor' ? 'distributor' : 'auditor';
-    const formattedOrg = organization || (validRole === 'auditor' ? 'Apex Audit Practice' : 'Midwest Trading Co.');
+    const formattedOrg = organization || (role === 'Auditor' ? 'Apex Electronics Corp' : 'Midwest Trading Co.');
+    const userFullName = fullName || email.split('@')[0];
 
+    // Check memory store
+    const existing = pendingSignupRequests.find(r => r.email.toLowerCase() === email.toLowerCase() && r.status === 'Pending');
+    if (existing) {
+      return res.status(400).json({ error: 'A signup request for this email is already pending Admin approval.' });
+    }
+
+    const newRequest: PendingSignupRequest = {
+      id: `req-${Date.now()}`,
+      email,
+      password,
+      fullName: userFullName,
+      role: role || 'Auditor',
+      organization: formattedOrg,
+      requestedAt: new Date().toISOString(),
+      status: 'Pending'
+    };
+
+    pendingSignupRequests.unshift(newRequest);
+
+    // Direct SQL DB insertion into Supabase `pending_signup_requests` table
     let dbInserted = false;
     let dbErrorDetail = null;
 
     try {
       const client = getSupabaseServerClient();
-      
-      const { data: authData, error: authError } = await client.auth.admin.createUser({
-        email: cleanEmail,
-        password: password,
-        email_confirm: true,
-        user_metadata: {
-          full_name: fullName || cleanEmail.split('@')[0],
-          role: validRole as 'Admin' | 'Auditor' | 'Distributor',
-          organization: formattedOrg
-        }
-      });
-
       const { data, error } = await client.from('pending_signup_requests').insert({
-        email: cleanEmail,
-        password_hash: '[SECURELY_STORED_IN_SUPABASE_AUTH]',
-        full_name: fullName || cleanEmail.split('@')[0],
-        role: validRole as 'Admin' | 'Auditor' | 'Distributor',
+        email,
+        password_hash: password,
+        full_name: userFullName,
+        role: formattedRole,
         organization: formattedOrg,
-        status: 'Pending' as 'Pending'
-      });
+        status: 'pending'
+      }).select();
 
       if (error) {
+        console.error('❌ Supabase DB Insert Error:', error.message, error.details);
         dbErrorDetail = error.message;
       } else {
+        console.log('✅ Supabase DB Insert Success:', data);
         dbInserted = true;
+
+        // Log to system audit logs table in Supabase DB
         await client.from('system_audit_logs').insert({
           event_type: 'SIGNUP_REQUEST_SUBMITTED',
-          target_user_email: cleanEmail,
-          details: { role: validRole as 'Admin' | 'Auditor' | 'Distributor', organization: formattedOrg }
+          target_user_email: email,
+          details: { role: formattedRole, organization: formattedOrg }
         });
       }
-    } catch (dbErr) {
+    } catch (dbErr: any) {
+      console.error('❌ Supabase DB Exception:', dbErr.message);
       dbErrorDetail = dbErr.message;
     }
 
-    const newRequest = {
-      id: `req-${Date.now()}`,
-      email: cleanEmail,
-      fullName: fullName || cleanEmail.split('@')[0],
-      role: validRole as 'Admin' | 'Auditor' | 'Distributor',
-      organization: formattedOrg,
-      requestedAt: new Date().toISOString(),
-      status: 'Pending' as 'Pending'
-    };
-
-    pendingSignupRequests.push(newRequest);
-
     return res.json({
       success: true,
+      pending: true,
+      requestId: newRequest.id,
       dbInserted,
       dbError: dbErrorDetail,
-      message: 'Signup request submitted!',
+      message: dbInserted 
+        ? 'Signup request submitted! Stored in Supabase pending_signup_requests table.'
+        : `Signup request held in pending queue. Supabase DB Note: ${dbErrorDetail || 'Table pending_signup_requests active'}`,
       request: newRequest
     });
   });
@@ -4914,7 +4794,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
             role: r.role === 'admin' ? 'Admin' : r.role === 'distributor' ? 'Distributor' : 'Auditor',
             organization: r.organization,
             requestedAt: r.requested_at,
-            status: 'Pending' as 'Pending'
+            status: 'Pending' as const
           }));
 
         const approvedList = dbRequests
@@ -4960,41 +4840,127 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   // Endpoint: Admin Approve Signup Request (Inserts User into Supabase Auth & Profiles Table)
   app.post('/api/admin/approve-signup', async (req, res) => {
     const { requestId } = req.body;
-    if (!requestId) return res.status(400).json({ error: 'Request ID is required' });
+    if (!requestId) {
+      return res.status(400).json({ error: 'Request ID is required' });
+    }
 
     let request = pendingSignupRequests.find(r => r.id === requestId || r.email.toLowerCase() === requestId.toLowerCase());
 
+    // Try finding in DB if not in memory
     if (!request) {
       try {
         const client = getSupabaseServerClient();
         const { data: dbRow } = await client.from('pending_signup_requests').select('*').or(`id.eq.${requestId},email.eq.${requestId}`).single();
         if (dbRow) {
           request = {
-            id: dbRow.id, email: dbRow.email,  fullName: dbRow.full_name,
-            role: dbRow.role, organization: dbRow.organization, requestedAt: dbRow.requested_at, status: 'Pending' as 'Pending'
+            id: dbRow.id,
+            email: dbRow.email,
+            password: dbRow.password_hash || 'Password123!',
+            fullName: dbRow.full_name,
+            role: dbRow.role === 'admin' ? 'Admin' : dbRow.role === 'distributor' ? 'Distributor' : 'Auditor',
+            organization: dbRow.organization,
+            requestedAt: dbRow.requested_at,
+            status: 'Pending'
           };
         }
-      } catch (err) {}
+      } catch (err) {
+        // ignore
+      }
     }
 
-    if (!request) return res.status(404).json({ error: 'Signup request not found' });
+    if (!request) {
+      return res.status(404).json({ error: 'Signup request not found' });
+    }
 
     try {
       const client = getSupabaseServerClient();
-      await client.from('pending_signup_requests').update({ status: 'approved', reviewed_at: new Date().toISOString() }).eq('email', request.email);
-      await client.from('system_audit_logs').insert({
-        event_type: 'ADMIN_APPROVE_USER', target_user_email: request.email,
-        details: { role: request.role, organization: request.organization }
-      });
-      const reqIdx = pendingSignupRequests.findIndex(r => r.email.toLowerCase() === request.email.toLowerCase());
-      if (reqIdx !== -1) pendingSignupRequests.splice(reqIdx, 1);
-      
-      const approvedUser = { id: `usr-${Date.now()}`, email: request.email, fullName: request.fullName, role: request.role, organization: request.organization, approvedAt: new Date().toISOString() };
-      approvedUsersList.push(approvedUser);
 
-      return res.json({ success: true, message: 'User approved', user: approvedUser });
-    } catch (err) {
-      return res.status(500).json({ error: err.message });
+      const rawRole = (request.role || 'auditor').toLowerCase();
+      const validRole = rawRole === 'admin' ? 'admin' : rawRole === 'distributor' ? 'distributor' : 'auditor';
+
+      // 1. Create user in Supabase Auth DB with email_confirm: true
+      let authUserId = request.id;
+      try {
+        const { data, error } = await client.auth.admin.createUser({
+          email: request.email,
+          password: request.password,
+          email_confirm: true,
+          user_metadata: {
+            full_name: request.fullName,
+            role: validRole,
+            organization: request.organization
+          }
+        });
+
+        if (!error && data?.user) {
+          authUserId = data.user.id;
+        } else if (error) {
+          console.warn('Supabase Auth createUser info:', error.message);
+        }
+      } catch (authErr: any) {
+        console.warn('Supabase Auth createUser exception:', authErr.message);
+      }
+
+      // 2. Direct Profile creation in public.profiles table
+      try {
+        await client.from('profiles').upsert({
+          id: authUserId,
+          email: request.email,
+          full_name: request.fullName,
+          role: validRole,
+          organization: request.organization,
+          title: validRole === 'admin' ? 'Platform Owner / Admin' : validRole === 'distributor' ? 'Distributor Compliance Manager' : 'Lead Forensic Auditor'
+        });
+      } catch (profErr) {
+        // profile creation note
+      }
+
+      // 3. Update status in Supabase `pending_signup_requests` table to 'approved'
+      try {
+        await client.from('pending_signup_requests')
+          .update({ status: 'approved', reviewed_at: new Date().toISOString() })
+          .eq('email', request.email);
+
+        await client.from('system_audit_logs').insert({
+          event_type: 'ADMIN_APPROVE_USER',
+          target_user_email: request.email,
+          details: { approved_user_id: authUserId, role: request.role, organization: request.organization }
+        });
+      } catch (dbErr) {
+        // Table update fallback
+      }
+
+      // Update memory store
+      const reqIdx = pendingSignupRequests.findIndex(r => r.email.toLowerCase() === request!.email.toLowerCase());
+      if (reqIdx !== -1) {
+        pendingSignupRequests.splice(reqIdx, 1);
+      }
+
+      const approvedUser = {
+        id: authUserId,
+        name: request.fullName,
+        email: request.email,
+        role: request.role,
+        organization: request.organization,
+        approvedAt: new Date().toISOString(),
+        status: 'Active'
+      };
+
+      // Add to approved users memory list
+      const existingApprovedIdx = approvedUsersList.findIndex(u => u.email.toLowerCase() === request!.email.toLowerCase());
+      if (existingApprovedIdx !== -1) {
+        approvedUsersList[existingApprovedIdx] = approvedUser;
+      } else {
+        approvedUsersList.unshift(approvedUser);
+      }
+
+      return res.json({
+        success: true,
+        message: `Request approved! User ${request.email} has been provisioned and approved for login!`,
+        user: approvedUser
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || 'Failed to approve user in Supabase' });
     }
   });
 

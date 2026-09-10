@@ -33,7 +33,6 @@ import {
 } from 'lucide-react';
 import { UserSession } from '../types';
 import { CurrencyMode, formatFinancialAmount } from '../utils/currencyFormatter';
-import { DocumentViewerModal } from './DocumentViewerModal';
 
 export interface UploadedDocument {
   id: string;
@@ -47,7 +46,6 @@ export interface UploadedDocument {
 }
 
 export interface ItemResponseData {
-  responseValue?: string;
   remarks?: string;
   files?: UploadedDocument[];
   reviewStatus?: 'Pending' | 'Accepted' | 'Clarification Required' | 'Rejected';
@@ -66,67 +64,36 @@ export interface ClarificationHistoryItem {
 }
 
 export interface QuestionnaireProps {
-  transaction?: any;
-  engagementId?: string;
-  currentUser?: UserSession | null;
+  transaction: any;
+  engagementId: string | undefined;
+  currentUser: UserSession | null;
   onClose: () => void;
   isReviewMode?: boolean;
   isDistributorWorkflow?: boolean;
   currencyMode?: CurrencyMode | string;
   selectedDistributor?: string;
-  distributorName?: string;
   selectedClient?: string;
-  targetSampleId?: string;
-  targetVoucherNo?: string;
-  targetClassification?: string;
-  isOpen?: boolean;
-  isAuditor?: boolean;
-  isDistributor?: boolean;
-  onRefresh?: () => void;
 }
 
-export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) => {
-  const {
-    transaction,
-    engagementId,
-    currentUser,
-    onClose,
-    isReviewMode = false,
-    isDistributorWorkflow = false,
-    currencyMode = 'INR',
-    selectedDistributor,
-    distributorName,
-    selectedClient
-  } = props;
-
+export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
+  transaction,
+  engagementId,
+  currentUser,
+  onClose,
+  isReviewMode = false,
+  isDistributorWorkflow = false,
+  currencyMode = 'INR',
+  selectedDistributor,
+  selectedClient
+}) => {
   const activeCurrency: CurrencyMode = currencyMode === 'USD' ? 'USD' : 'INR';
   const isDistributor = isDistributorWorkflow || currentUser?.role?.includes('Distributor') || currentUser?.role === 'Distributor';
   const isAuditor = !isDistributor;
+  const isReadOnly = Boolean(isReviewMode);
 
-  const targetSampleId = String(
-    props.targetSampleId || transaction?.sampleId || transaction?.id || transaction?.voucherNo || ''
-  );
-  const targetVoucherNo = String(
-    props.targetVoucherNo || transaction?.voucherNo || transaction?.testingReference || transaction?.id || ''
-  );
-  const activeDistributor =
-    selectedDistributor || distributorName || transaction?.distributor || currentUser?.organization || 'Distributor';
-
-  // Overall status
-  const initialStatus =
-    transaction?.questionnaireResponse?.status ||
-    (transaction?.testingStatus === 'Tested' ? 'Accepted' : (transaction?.questionnaireStatus || 'Draft'));
-  const [status, setStatus] = useState<string>(initialStatus);
-
-  const isEvidenceAccepted =
-    status === 'Accepted' ||
-    transaction?.testingStatus === 'Tested' ||
-    transaction?.questionnaireStatus === 'Accepted' ||
-    transaction?.questionnaireResponse?.status === 'Accepted' ||
-    transaction?.questionnaireResponse?.reviewDecision === 'Approved' ||
-    transaction?.questionnaireResponse?.reviewDecision === 'Accepted';
-
-  const isReadOnly = Boolean(isReviewMode) || isEvidenceAccepted;
+  const targetSampleId = String(transaction?.id || transaction?.sampleId || transaction?.voucherNo || 'TX-1');
+  const targetVoucherNo = String(transaction?.voucherNo || transaction?.id || '');
+  const activeDistributor = selectedDistributor || transaction?.distributor || currentUser?.organization || 'Distributor';
 
   // State Management
   const [loading, setLoading] = useState<boolean>(true);
@@ -134,18 +101,12 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const [isPushed, setIsPushed] = useState<boolean>(
-    Boolean(transaction?.pushedAt || transaction?.questionnaireResponse?.isPushed || initialStatus !== 'Draft')
-  );
-  const [pushedAt, setPushedAt] = useState<string | null>(
-    transaction?.pushedAt || transaction?.questionnaireResponse?.pushedAt || null
-  );
-  const [pushedBy, setPushedBy] = useState<string | null>(
-    transaction?.pushedBy || transaction?.questionnaireResponse?.pushedBy || null
-  );
-  const [pushedTo, setPushedTo] = useState<string | null>(
-    transaction?.questionnaireResponse?.pushedTo || activeDistributor
-  );
+  // Overall status
+  const [status, setStatus] = useState<string>('Draft');
+  const [isPushed, setIsPushed] = useState<boolean>(false);
+  const [pushedAt, setPushedAt] = useState<string | null>(null);
+  const [pushedBy, setPushedBy] = useState<string | null>(null);
+  const [pushedTo, setPushedTo] = useState<string | null>(null);
 
   // Questions created by Auditor
   const [questions, setQuestions] = useState<any[]>([]);
@@ -169,7 +130,6 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
   const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);
   const [editingQuestion, setEditingQuestion] = useState<any | null>(null);
   const [questionTextForm, setQuestionTextForm] = useState<string>('');
-  const [questionTypeForm, setQuestionTypeForm] = useState<string>('Document Upload');
   const [questionHelpForm, setQuestionHelpForm] = useState<string>('');
   const [questionRequiredForm, setQuestionRequiredForm] = useState<boolean>(true);
 
@@ -195,9 +155,10 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
         { headers }
       );
       const qData = await qRes.json();
-      let loadedQuestions: any[] = [];
       if (qData.success && Array.isArray(qData.questions)) {
-        loadedQuestions = qData.questions;
+        setQuestions(qData.questions);
+      } else {
+        setQuestions([]);
       }
 
       // 2. Fetch existing responses
@@ -206,76 +167,19 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
         { headers }
       );
       const rData = await rRes.json();
-      let resp: any = null;
       if (rData.success && Array.isArray(rData.responses) && rData.responses.length > 0) {
-        resp = rData.responses[0];
-      } else if (transaction?.questionnaireResponse) {
-        resp = transaction.questionnaireResponse;
-      }
-
-      if (resp) {
-        const respStatus = resp.status || (transaction?.testingStatus === 'Tested' ? 'Accepted' : (transaction?.questionnaireStatus || 'Draft'));
-        setStatus(respStatus);
-        const pushedFlag = resp.isPushed === true || resp.isPushed === 'true' || respStatus !== 'Draft';
-        setIsPushed(pushedFlag);
-        setPushedAt(resp.pushedAt || transaction?.pushedAt || null);
-        setPushedBy(resp.pushedBy || transaction?.pushedBy || null);
-        setPushedTo(resp.pushedTo || activeDistributor);
-        setGeneralNotes(resp.notes || resp.distributorRemarks || '');
+        const resp = rData.responses[0];
+        setStatus(resp.status || 'Draft');
+        setIsPushed(resp.isPushed === true || resp.isPushed === 'true');
+        setPushedAt(resp.pushedAt || null);
+        setPushedBy(resp.pushedBy || null);
+        setPushedTo(resp.pushedTo || null);
+        setGeneralNotes(resp.notes || '');
         setGeneralFiles(resp.uploadedFiles || []);
         setItemResponses(resp.itemResponses || {});
         setActiveClarificationMessage(resp.clarificationMessage || '');
         setClarificationHistory(resp.clarificationHistory || []);
-      } else if (transaction?.questionnaireStatus) {
-        setStatus(transaction.questionnaireStatus);
       }
-
-      // Fallback: If no questions returned by endpoint, fetch from general questions
-      if (loadedQuestions.length === 0) {
-        try {
-          const generalQRes = await fetch(
-            `/api/sampling/questions?auditId=${encodeURIComponent(engagementId || 'eng-101')}&sampleId=${encodeURIComponent(targetSampleId)}&voucherNo=${encodeURIComponent(targetVoucherNo)}&distributorId=${encodeURIComponent(activeDistributor)}`,
-            { headers }
-          );
-          if (generalQRes.ok) {
-            const genData = await generalQRes.json();
-            if (genData.success && Array.isArray(genData.questions) && genData.questions.length > 0) {
-              loadedQuestions = genData.questions.map((q: any) => ({
-                id: q.question_id || q.id,
-                dbId: q.dbId,
-                question_id: q.question_id || q.id,
-                question_text: q.question_text || q.text,
-                testing_classification: q.testing_classification || q.contextClass,
-                required: q.required !== undefined ? q.required : true,
-                scope: q.scope || 'transaction',
-                help_text: q.help_text || ''
-              }));
-            }
-          }
-        } catch (e) {
-          // ignore
-        }
-      }
-
-      // Reconcile any items present in resp.itemResponses that might not be in loadedQuestions
-      if (resp && resp.itemResponses) {
-        Object.keys(resp.itemResponses).forEach((qKey) => {
-          const alreadyExists = loadedQuestions.some(
-            q => String(q.dbId || q.question_id || q.id) === String(qKey) || String(q.question_text) === String(qKey)
-          );
-          if (!alreadyExists) {
-            loadedQuestions.push({
-              id: qKey,
-              question_id: qKey,
-              question_text: qKey,
-              required: true,
-              scope: 'transaction'
-            });
-          }
-        });
-      }
-
-      setQuestions(loadedQuestions);
     } catch (err: any) {
       console.error('Failed to load questionnaire data:', err);
       setErrorMessage('Could not load questionnaire details. Please try again.');
@@ -436,22 +340,11 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
     }));
   };
 
-  const updateItemResponseValue = (qKey: string, responseValue: string) => {
-    setItemResponses(prev => ({
-      ...prev,
-      [qKey]: {
-        ...(prev[qKey] || {}),
-        responseValue
-      }
-    }));
-  };
-
   // AUDITOR: Add or Edit Question
   const handleOpenAddQuestion = () => {
     setEditingQuestion(null);
     setQuestionTextForm('');
     setQuestionHelpForm('');
-    setQuestionTypeForm('Document Upload');
     setQuestionRequiredForm(true);
     setShowAddQuestionModal(true);
   };
@@ -459,8 +352,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
   const handleOpenEditQuestion = (q: any) => {
     setEditingQuestion(q);
     setQuestionTextForm(q.question_text || '');
-    setQuestionHelpForm(q.help_text || q.instruction || q.comment || '');
-    setQuestionTypeForm(q.answer_type || q.response_type || 'Document Upload');
+    setQuestionHelpForm(q.help_text || '');
     setQuestionRequiredForm(q.required !== undefined ? q.required : true);
     setShowAddQuestionModal(true);
   };
@@ -482,10 +374,6 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
           body: JSON.stringify({
             question_text: questionTextForm.trim(),
             help_text: questionHelpForm.trim(),
-            instruction: questionHelpForm.trim(),
-            comment: questionHelpForm.trim(),
-            answer_type: questionTypeForm,
-            response_type: questionTypeForm,
             required: questionRequiredForm
           })
         });
@@ -496,10 +384,6 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
               ...q,
               question_text: questionTextForm.trim(),
               help_text: questionHelpForm.trim(),
-              instruction: questionHelpForm.trim(),
-              comment: questionHelpForm.trim(),
-              answer_type: questionTypeForm,
-              response_type: questionTypeForm,
               required: questionRequiredForm
             };
           }
@@ -514,12 +398,9 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
           voucher_no: targetVoucherNo,
           question_text: questionTextForm.trim(),
           help_text: questionHelpForm.trim(),
-          instruction: questionHelpForm.trim(),
-          comment: questionHelpForm.trim(),
           required: questionRequiredForm,
           scope: 'transaction',
-          answer_type: questionTypeForm,
-          response_type: questionTypeForm,
+          answer_type: 'Document Upload & Remarks',
           allow_comment: true,
           allow_file_upload: true
         };
@@ -1229,13 +1110,10 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
                     >
                       {/* Item Header */}
                       <div className="flex items-start justify-between gap-3">
-                        <div className="space-y-1.5 flex-1 min-w-0">
+                        <div className="space-y-1 flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
                             <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-indigo-950 text-indigo-300 border border-indigo-800/60">
                               Item #{idx + 1}
-                            </span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
-                              {q.answer_type || q.response_type || 'Document Upload'}
                             </span>
                             {q.required && (
                               <span className="text-[10px] font-bold text-rose-400 bg-rose-950/60 px-2 py-0.5 rounded border border-rose-900/60">
@@ -1260,9 +1138,9 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
                             {q.question_text}
                           </h4>
 
-                          {(q.help_text || q.instruction || q.comment) && (
-                            <p className="text-xs text-indigo-300/90 bg-indigo-950/40 border border-indigo-900/50 rounded-md px-2.5 py-1.5">
-                              <strong className="text-indigo-200">Comment / Instruction:</strong> {q.help_text || q.instruction || q.comment}
+                          {q.help_text && (
+                            <p className="text-xs text-slate-400 italic">
+                              Guidance: {q.help_text}
                             </p>
                           )}
                         </div>
@@ -1272,14 +1150,14 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
                           <div className="flex items-center gap-1 shrink-0">
                             <button
                               onClick={() => handleOpenEditQuestion(q)}
-                              className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+                              className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
                               title="Edit Question"
                             >
                               <Edit2 className="h-3.5 w-3.5" />
                             </button>
                             <button
                               onClick={() => handleDeleteQuestion(q)}
-                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors cursor-pointer"
+                              className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition-colors"
                               title="Delete Question"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
@@ -1299,115 +1177,17 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
                         </div>
                       )}
 
-                      {/* Response Input for Non-Document Question Types */}
-                      {(q.answer_type === 'Yes / No / N/A' || q.response_type === 'Yes / No / N/A' || q.answer_type === 'Yes / No' || q.response_type === 'Yes / No') && (
-                        <div className="space-y-1.5 pt-1">
-                          <label className="text-xs font-bold text-slate-300 flex items-center gap-1">
-                            <span>Response Selection:</span>
-                            {q.required && <span className="text-rose-400">*</span>}
-                          </label>
-                          {isDistributor && !isReadOnly ? (
-                            <div className="flex items-center gap-2">
-                              {['Yes', 'No', 'N/A'].map((opt) => {
-                                const isSelected = itemData.responseValue === opt;
-                                return (
-                                  <button
-                                    key={opt}
-                                    type="button"
-                                    onClick={() => updateItemResponseValue(qKey, opt)}
-                                    className={`px-4 py-1.5 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
-                                      isSelected
-                                        ? opt === 'Yes'
-                                          ? 'bg-emerald-600 text-white border-emerald-500 shadow-sm'
-                                          : opt === 'No'
-                                          ? 'bg-rose-600 text-white border-rose-500 shadow-sm'
-                                          : 'bg-slate-700 text-white border-slate-600 shadow-sm'
-                                        : 'bg-slate-900/80 text-slate-300 border-slate-700 hover:bg-slate-800'
-                                    }`}
-                                  >
-                                    {opt}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <div className="text-xs font-medium text-slate-200">
-                              {itemData.responseValue ? (
-                                <span className={`inline-block px-3 py-1 rounded-full text-xs font-bold border ${
-                                  itemData.responseValue === 'Yes' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
-                                  itemData.responseValue === 'No' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' :
-                                  'bg-slate-800 text-slate-300 border-slate-700'
-                                }`}>
-                                  {itemData.responseValue}
-                                </span>
-                              ) : (
-                                <span className="text-slate-500 italic">No response selected yet</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {(q.answer_type === 'Text' || q.response_type === 'Text') && (
-                        <div className="space-y-1.5 pt-1">
-                          <label className="text-xs font-bold text-slate-300 flex items-center gap-1">
-                            <span>Text Response:</span>
-                            {q.required && <span className="text-rose-400">*</span>}
-                          </label>
-                          {isDistributor && !isReadOnly ? (
-                            <textarea
-                              value={itemData.responseValue || ''}
-                              onChange={(e) => updateItemResponseValue(qKey, e.target.value)}
-                              placeholder="Type your response here..."
-                              rows={2}
-                              className="w-full bg-slate-900/80 border border-slate-700 rounded-lg p-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                            />
-                          ) : (
-                            <div className="p-2.5 bg-slate-900/60 border border-slate-800 rounded-lg text-xs text-slate-200">
-                              {itemData.responseValue || <span className="text-slate-500 italic">No text response provided.</span>}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {(q.answer_type === 'Number / Amount' || q.response_type === 'Number / Amount') && (
-                        <div className="space-y-1.5 pt-1">
-                          <label className="text-xs font-bold text-slate-300 flex items-center gap-1">
-                            <span>Number / Amount:</span>
-                            {q.required && <span className="text-rose-400">*</span>}
-                          </label>
-                          {isDistributor && !isReadOnly ? (
-                            <input
-                              type="number"
-                              step="any"
-                              value={itemData.responseValue || ''}
-                              onChange={(e) => updateItemResponseValue(qKey, e.target.value)}
-                              placeholder="Enter number or amount (e.g. 5000.00)..."
-                              className="w-full max-w-xs bg-slate-900/80 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
-                            />
-                          ) : (
-                            <div className="p-2 bg-slate-900/60 border border-slate-800 rounded-lg text-xs font-bold text-slate-200 inline-block">
-                              {itemData.responseValue ? `${itemData.responseValue}` : <span className="text-slate-500 font-normal italic">No amount entered.</span>}
-                            </div>
-                          )}
-                        </div>
-                      )}
-
                       {/* Supporting Documents for this item */}
                       <div className="space-y-2 pt-1 border-t border-slate-800/60">
                         <div className="flex items-center justify-between text-xs font-bold text-slate-400">
-                          <span>
-                            {q.answer_type === 'Document Upload' || q.response_type === 'Document Upload' || (!q.answer_type && !q.response_type)
-                              ? `Attached Evidence Documents (${itemFiles.length})`
-                              : `Supporting Attachment / Evidence (${itemFiles.length})`}
-                          </span>
+                          <span>Attached Documents ({itemFiles.length})</span>
                           {/* Upload button for Distributor */}
                           {isDistributor && !isReadOnly && (
                             <button
                               onClick={() => triggerFileUpload(qKey)}
                               className="text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 cursor-pointer"
                             >
-                              <Upload className="h-3 w-3" /> Upload Document
+                              <Upload className="h-3 w-3" /> Upload Evidence
                             </button>
                           )}
                         </div>
@@ -1641,21 +1421,9 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
         {/* Modal Footer Controls */}
         <div className="px-6 py-4 border-t border-slate-800 bg-slate-950/90 flex items-center justify-between gap-4 shrink-0 flex-wrap">
           <div className="flex items-center gap-2">
-            {status === 'Accepted' || isEvidenceAccepted ? (
-              <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                Evidence Accepted • Final Review Verified
-              </span>
-            ) : isPushed || status === 'Submitted' || status === 'Clarification Required' ? (
-              <span className="text-xs text-indigo-300 flex items-center gap-1.5">
-                <Check className="w-3.5 h-3.5 text-indigo-400" />
-                Pushed to {activeDistributor}{pushedAt ? ` (${new Date(pushedAt).toLocaleDateString()})` : ''}
-              </span>
-            ) : (
-              <span className="text-xs text-slate-500">
-                Not pushed to distributor yet
-              </span>
-            )}
+            <span className="text-xs text-slate-500">
+              {isPushed ? `Pushed to ${activeDistributor}` : 'Not pushed to distributor yet'}
+            </span>
           </div>
 
           <div className="flex items-center gap-2.5">
@@ -1794,62 +1562,26 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
             <div className="space-y-4">
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-300">
-                  Question / Request <span className="text-rose-400">*</span>
+                  Item Description / Question <span className="text-rose-400">*</span>
                 </label>
                 <textarea
                   value={questionTextForm}
                   onChange={(e) => setQuestionTextForm(e.target.value)}
-                  placeholder="Enter the specific required data, document, or question (e.g. Provide signed vendor delivery receipt and confirmation of receipt)..."
+                  placeholder="Enter the specific required data or document (e.g. Provide stamped tax invoice and signed delivery receipt)..."
                   rows={3}
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
               </div>
 
-              {/* Response Type */}
               <div className="space-y-1.5">
                 <label className="text-xs font-bold text-slate-300">
-                  Response Type <span className="text-rose-400">*</span>
+                  Guidance / Instructions (Optional)
                 </label>
-                <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { id: 'Document Upload', label: 'Document Upload', desc: 'PDF, Excel, Word, PPT, images, CSV' },
-                    { id: 'Yes / No / N/A', label: 'Yes / No / N/A', desc: 'Select Yes, No, or N/A' },
-                    { id: 'Text', label: 'Text', desc: 'Descriptive narrative response' },
-                    { id: 'Number / Amount', label: 'Number / Amount', desc: 'Financial quantity or amount' }
-                  ].map((typeOption) => {
-                    const isSelected = questionTypeForm === typeOption.id;
-                    return (
-                      <button
-                        key={typeOption.id}
-                        type="button"
-                        onClick={() => setQuestionTypeForm(typeOption.id)}
-                        className={`p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
-                          isSelected
-                            ? 'bg-indigo-950/80 border-indigo-500 ring-1 ring-indigo-500/50'
-                            : 'bg-slate-950 border-slate-800 hover:border-slate-700 text-slate-400'
-                        }`}
-                      >
-                        <div className={`text-xs font-bold ${isSelected ? 'text-indigo-300' : 'text-slate-200'}`}>
-                          {typeOption.label}
-                        </div>
-                        <div className="text-[10px] text-slate-500 truncate mt-0.5">
-                          {typeOption.desc}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold text-slate-300">
-                  Optional Comment / Instruction <span className="text-slate-500 font-normal">(Applies to all response types)</span>
-                </label>
-                <textarea
+                <input
+                  type="text"
                   value={questionHelpForm}
                   onChange={(e) => setQuestionHelpForm(e.target.value)}
-                  placeholder="e.g. Include authorized finance manager signature, stamp, and reference to purchase order..."
-                  rows={2}
+                  placeholder="e.g. Must show official storekeeper stamp and date"
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
                 />
               </div>
@@ -1863,7 +1595,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
                   className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500 bg-slate-950 h-4 w-4"
                 />
                 <label htmlFor="req_checkbox" className="text-xs text-slate-300 font-semibold cursor-pointer">
-                  Mandatory question for distributor response
+                  Mandatory item for distributor submission
                 </label>
               </div>
             </div>
@@ -1944,10 +1676,63 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
       )}
 
       {/* Document Preview Modal */}
-      <DocumentViewerModal
-        doc={previewDoc}
-        onClose={() => setPreviewDoc(null)}
-      />
+      {previewDoc && (
+        <div className="fixed inset-0 z-70 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-3xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">
+            <div className="px-5 py-3 border-b border-slate-800 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {getFileIcon(previewDoc.name)}
+                <span className="text-sm font-bold text-white truncate max-w-md">{previewDoc.name}</span>
+                <span className="text-xs text-slate-500">({previewDoc.size})</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handleDownloadFile(previewDoc)}
+                  className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded text-xs font-bold flex items-center gap-1"
+                >
+                  <Download className="h-3 w-3" /> Download
+                </button>
+                <button onClick={() => setPreviewDoc(null)} className="text-slate-400 hover:text-white p-1">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 p-4 bg-slate-950 flex items-center justify-center overflow-auto min-h-[300px]">
+              {previewDoc.type.includes('image') || previewDoc.name.match(/\.(jpg|jpeg|png|webp|gif)$/i) ? (
+                <img 
+                  src={previewDoc.dataUrl || previewDoc.url} 
+                  alt={previewDoc.name} 
+                  className="max-h-[60vh] max-w-full object-contain rounded"
+                  referrerPolicy="no-referrer"
+                />
+              ) : previewDoc.type.includes('pdf') || previewDoc.name.endsWith('.pdf') ? (
+                <iframe 
+                  src={previewDoc.dataUrl || previewDoc.url} 
+                  title={previewDoc.name}
+                  className="w-full h-[60vh] rounded border border-slate-800"
+                />
+              ) : (
+                <div className="text-center space-y-3 p-8">
+                  <div className="w-16 h-16 rounded-2xl bg-slate-900 border border-slate-800 flex items-center justify-center mx-auto">
+                    {getFileIcon(previewDoc.name)}
+                  </div>
+                  <h4 className="text-sm font-bold text-slate-200">{previewDoc.name}</h4>
+                  <p className="text-xs text-slate-400 max-w-sm mx-auto">
+                    Direct browser preview is not supported for this file type ({previewDoc.type || 'binary'}). You can download and open it on your device.
+                  </p>
+                  <button
+                    onClick={() => handleDownloadFile(previewDoc)}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold inline-flex items-center gap-1.5"
+                  >
+                    <Download className="h-4 w-4" /> Download File
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

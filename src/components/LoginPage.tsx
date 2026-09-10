@@ -60,7 +60,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           status: 'pending'
         });
 
-        
+        if (dbError) {
+          console.warn('Supabase DB Insert Note:', dbError.message);
+        }
 
         // Send to backend API
         const res = await fetch('/api/auth/signup-request', {
@@ -77,7 +79,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           setFullName('');
           setDistributorName('');
         } else {
-          setErrorMessage(data.error || 'Failed to submit signup request');
+          setErrorMessage(data.error || dbError?.message || 'Failed to submit signup request');
         }
       } catch (err: any) {
         setSuccessMessage('Signup request registered! Pending Admin approval.');
