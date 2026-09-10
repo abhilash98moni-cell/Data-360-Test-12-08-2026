@@ -20,11 +20,12 @@ import {
   X,
   User,
   Lock,
-  LogOut
+  LogOut,
+  Check
 } from 'lucide-react';
 
 import { CurrencyMode } from '../utils/currencyFormatter';
-import { CLIENT_TENANTS, getDistributorsForClient } from '../data/clientsAndDistributors';
+import { CLIENT_TENANTS, getDistributorsForClient, getAllRegisteredDistributors } from '../data/clientsAndDistributors';
 import { UserSession } from './AuthModal';
 
 interface HeaderProps {
@@ -66,15 +67,56 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onNavigateToProfile
 }) => {
-  // No longer needed: const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
-  const currentDistributors = getDistributorsForClient(selectedClient);
+  const [isDistributorDropdownOpen, setIsDistributorDropdownOpen] = useState(false);
+  const [distributorSearchQuery, setDistributorSearchQuery] = useState('');
+  const distributorDropdownRef = React.useRef<HTMLDivElement>(null);
+
+  const availableDistributors = React.useMemo(() => {
+    const all = getAllRegisteredDistributors();
+    if (all && all.length > 0) return all;
+    return getDistributorsForClient(selectedClient);
+  }, [selectedClient]);
+
+  const filteredDistributors = React.useMemo(() => {
+    if (!distributorSearchQuery.trim()) return availableDistributors;
+    const query = distributorSearchQuery.toLowerCase().trim();
+    return availableDistributors.filter(d => 
+      d.name.toLowerCase().includes(query) ||
+      (d.code && d.code.toLowerCase().includes(query)) ||
+      (d.region && d.region.toLowerCase().includes(query))
+    );
+  }, [availableDistributors, distributorSearchQuery]);
+
+  React.useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        distributorDropdownRef.current && 
+        !distributorDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsDistributorDropdownOpen(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isDistributorDropdownOpen) {
+        setIsDistributorDropdownOpen(false);
+      }
+    };
+    if (isDistributorDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isDistributorDropdownOpen]);
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 px-3 sm:px-4 lg:px-6 py-2.5 shadow-md w-full max-w-full">
       <div className="flex items-center justify-between gap-2 max-w-full">
         
         {/* Brand & Client Switcher */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="flex items-center gap-2.5">
             <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-indigo-600 via-blue-600 to-cyan-400 flex items-center justify-center font-bold text-base shadow-inner ring-1 ring-white/20 shrink-0">
               <Layers className="h-4 w-4 text-white" />
@@ -91,40 +133,184 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           </div>
 
-          {/* Scope Selector - Responsive Visibility */}
+          {/* Distributor Selector - Working dropdown */}
           {currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor') ? (
-            <div className="hidden xl:flex items-center gap-2 bg-emerald-950/40 border border-emerald-500/30 rounded-xl px-2.5 py-1 text-xs text-emerald-300 font-semibold shadow-inner">
+            <div className="flex items-center gap-2 bg-emerald-950/40 border border-emerald-500/30 rounded-xl px-2.5 py-1 text-xs text-emerald-300 font-semibold shadow-inner">
               <UserCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-              <div className="truncate max-w-[200px]">
+              <div className="truncate max-w-[130px] sm:max-w-[180px] md:max-w-[220px]">
                 <span className="font-bold text-emerald-300 truncate">{currentUser.organization || selectedDistributor}</span>
               </div>
             </div>
           ) : (
-            <div className="hidden 2xl:flex items-center gap-2 bg-slate-950/80 border border-slate-800 rounded-xl p-1 text-xs">
-              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1">
-                <Building2 className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                <span className="text-slate-100 text-xs font-semibold">Apex Electronics</span>
-              </div>
+            <div className="relative" ref={distributorDropdownRef} id="header-distributor-selector-container">
+              <button
+                id="header-distributor-selector-btn"
+                type="button"
+                onClick={() => {
+                  setIsDistributorDropdownOpen(prev => !prev);
+                  setDistributorSearchQuery('');
+                }}
+                aria-expanded={isDistributorDropdownOpen}
+                aria-haspopup="listbox"
+                className={`flex items-center gap-1.5 sm:gap-2 bg-slate-950/80 hover:bg-slate-800/90 border rounded-xl px-2.5 py-1 text-xs font-semibold transition-all cursor-pointer shadow-sm group ${
+                  isDistributorDropdownOpen 
+                    ? 'border-emerald-500/60 ring-2 ring-emerald-500/20 bg-slate-800/90 text-white' 
+                    : 'border-slate-800 hover:border-slate-700 text-slate-200'
+                }`}
+                title={`Currently selected distributor: ${selectedDistributor}. Click to switch distributor.`}
+              >
+                <div className="flex items-center gap-1 shrink-0">
+                  <div className="h-4.5 w-4.5 rounded-md bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                    <Building2 className="h-3 w-3" />
+                  </div>
+                  <span className="text-[11px] font-medium text-slate-400 hidden xl:inline">Distributor:</span>
+                </div>
 
-              <span className="text-slate-600 font-bold">&gt;</span>
+                <span className="text-xs font-bold text-emerald-400 truncate max-w-[110px] sm:max-w-[150px] md:max-w-[190px] lg:max-w-[230px]">
+                  {selectedDistributor}
+                </span>
 
-              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1">
-                <UserCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                <select 
-                  value={selectedDistributor} 
-                  onChange={(e) => onDistributorChange(e.target.value)}
-                  className="bg-transparent text-emerald-300 text-xs font-semibold focus:outline-none cursor-pointer"
+                <ChevronDown 
+                  className={`h-3.5 w-3.5 text-slate-400 transition-transform duration-200 shrink-0 ${
+                    isDistributorDropdownOpen ? 'rotate-180 text-emerald-400' : 'group-hover:text-slate-200'
+                  }`} 
+                />
+              </button>
+
+              {/* Dropdown Menu */}
+              {isDistributorDropdownOpen && (
+                <div 
+                  id="header-distributor-dropdown-menu"
+                  role="listbox"
+                  aria-label="Distributor list"
+                  className="absolute left-0 mt-2 w-72 sm:w-80 bg-slate-900/95 backdrop-blur-md border border-slate-700/80 rounded-2xl shadow-2xl py-2 z-50 animate-in fade-in zoom-in-95 duration-150 ring-1 ring-black/50"
                 >
-                  <option value="All Distributors" className="bg-slate-900 text-slate-200">
-                    All Distributors ({currentDistributors.length})
-                  </option>
-                  {currentDistributors.map(d => (
-                    <option key={d.id} value={d.name} className="bg-slate-900 text-slate-200">
-                      {d.name} ({d.code})
-                    </option>
-                  ))}
-                </select>
-              </div>
+                  <div className="px-3 pb-2 pt-1 border-b border-slate-800/80 flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Building2 className="h-3.5 w-3.5 text-emerald-400" />
+                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                        Distributor Context
+                      </span>
+                    </div>
+                    <span className="text-[10px] font-semibold text-emerald-300 bg-emerald-950/60 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+                      {availableDistributors.length} Available
+                    </span>
+                  </div>
+
+                  {availableDistributors.length > 5 && (
+                    <div className="px-2 pt-2 pb-1">
+                      <div className="relative">
+                        <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-slate-400" />
+                        <input
+                          id="distributor-search-input"
+                          type="text"
+                          value={distributorSearchQuery}
+                          onChange={(e) => setDistributorSearchQuery(e.target.value)}
+                          placeholder="Search distributor or code..."
+                          className="w-full bg-slate-950/90 border border-slate-800 rounded-lg pl-8 pr-2.5 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-emerald-500/50"
+                          autoFocus
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="max-h-72 overflow-y-auto py-1 px-1.5 space-y-0.5 custom-scrollbar">
+                    {/* All Distributors Option */}
+                    {(!distributorSearchQuery.trim() || 'all distributors'.includes(distributorSearchQuery.toLowerCase())) && (
+                      <button
+                        id="distributor-opt-all"
+                        type="button"
+                        role="option"
+                        aria-selected={selectedDistributor === 'All Distributors'}
+                        onClick={() => {
+                          onDistributorChange('All Distributors');
+                          setIsDistributorDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-between transition-colors cursor-pointer ${
+                          selectedDistributor === 'All Distributors'
+                            ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                            : 'text-slate-300 hover:bg-slate-800/80 hover:text-white border border-transparent'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className="h-6 w-6 rounded-lg bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 shrink-0">
+                            <Layers className="h-3.5 w-3.5" />
+                          </div>
+                          <div className="truncate">
+                            <div className="font-bold text-slate-100">All Distributors</div>
+                            <div className="text-[10px] text-slate-400 font-normal">Consolidated multi-entity overview</div>
+                          </div>
+                        </div>
+                        {selectedDistributor === 'All Distributors' && (
+                          <Check className="h-4 w-4 text-emerald-400 shrink-0 ml-1" />
+                        )}
+                      </button>
+                    )}
+
+                    <div className="my-1 border-t border-slate-800/80" />
+
+                    {/* Specific Distributors */}
+                    {filteredDistributors.length === 0 ? (
+                      <div className="p-3 text-center text-xs text-slate-500">
+                        No distributors found matching "{distributorSearchQuery}"
+                      </div>
+                    ) : (
+                      filteredDistributors.map((d) => {
+                        const isSelected = selectedDistributor.toLowerCase() === d.name.toLowerCase();
+                        return (
+                          <button
+                            key={d.id || d.name}
+                            id={`distributor-opt-${d.id || d.name.replace(/\s+/g, '-').toLowerCase()}`}
+                            type="button"
+                            role="option"
+                            aria-selected={isSelected}
+                            onClick={() => {
+                              onDistributorChange(d.name);
+                              setIsDistributorDropdownOpen(false);
+                            }}
+                            className={`w-full text-left px-2.5 py-2 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer group ${
+                              isSelected
+                                ? 'bg-emerald-950/60 text-emerald-300 border border-emerald-500/40 shadow-sm'
+                                : 'text-slate-300 hover:bg-slate-800/80 hover:text-white border border-transparent'
+                            }`}
+                          >
+                            <div className="min-w-0 pr-2">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`font-bold truncate ${isSelected ? 'text-emerald-300' : 'text-slate-200 group-hover:text-white'}`}>
+                                  {d.name}
+                                </span>
+                                {d.code && (
+                                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 border border-slate-700/60 shrink-0">
+                                    {d.code}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400 truncate">
+                                <span className="truncate">{d.region}</span>
+                                {d.status && (
+                                  <>
+                                    <span className="text-slate-600">•</span>
+                                    <span className={`${
+                                      d.status === 'Active Audit' ? 'text-emerald-400' :
+                                      d.status === 'Under Review' ? 'text-amber-400' :
+                                      'text-slate-400'
+                                    }`}>
+                                      {d.status}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            {isSelected && (
+                              <Check className="h-4 w-4 text-emerald-400 shrink-0 ml-1" />
+                            )}
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
