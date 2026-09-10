@@ -21,11 +21,13 @@ import {
   ChevronDown,
   Info,
   Check,
-  Send
+  Send,
+  KeyRound
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { UserSession } from './AuthModal';
 import { RequiredDataQuestionnaire } from './RequiredDataQuestionnaire';
+import { EditAccessRequestModal } from './EditAccessRequestModal';
 import { CurrencyMode, formatFinancialAmount, getCurrencySymbol } from '../utils/currencyFormatter';
 import { getDistributorsForClient } from '../data/clientsAndDistributors';
 import { EngagementWorkspaceActionBar } from './EngagementWorkspaceActionBar';
@@ -148,6 +150,14 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
 
   // Row Selection State for granular / single / multi push
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
+
+  // Edit Access & Locking State
+  const [samplingState, setSamplingState] = useState<any | null>(null);
+  const [isRequestEditModalOpen, setIsRequestEditModalOpen] = useState<boolean>(false);
+
+  const isSamplingLocked = Boolean(
+    samplingState?.isLocked && isDistributor && samplingState?.editAccessStatus !== 'APPROVED'
+  );
 
   // Add Custom Sample Request Modal State
   const [isAddSampleModalOpen, setIsAddSampleModalOpen] = useState<boolean>(false);
@@ -436,6 +446,11 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       // 2. Fetch active sampling state
       const stateRes = await fetch(`/api/sampling/state?distributorId=${distParam}&auditId=${auditParam}&client=${clientParam}`);
       const stateData = await stateRes.json();
+      if (stateData.success && stateData.state) {
+        setSamplingState(stateData.state);
+      } else {
+        setSamplingState(null);
+      }
       const activePopId = stateData.success && stateData.state ? stateData.state.activePopulationId : null;
 
       // 3. Determine active population
@@ -471,6 +486,17 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   useEffect(() => {
     loadPopulationData();
     fetchQuestionnaireResponses();
+  }, [selectedDistributor, selectedClient, selectedAuditFilter]);
+
+  useEffect(() => {
+    const handleEditAccessUpdated = () => {
+      loadPopulationData();
+      fetchQuestionnaireResponses();
+    };
+    window.addEventListener('edit-access-updated', handleEditAccessUpdated);
+    return () => {
+      window.removeEventListener('edit-access-updated', handleEditAccessUpdated);
+    };
   }, [selectedDistributor, selectedClient, selectedAuditFilter]);
 
   // Handle Switch Active Population
@@ -790,6 +816,17 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
               <RefreshCw className={`h-3.5 w-3.5 text-slate-400 ${isLoading ? 'animate-spin' : ''}`} />
               <span>Sync DB</span>
             </button>
+
+            {isDistributor && isSamplingLocked && (
+              <button
+                onClick={() => setIsRequestEditModalOpen(true)}
+                className="px-3.5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md"
+                title="Request edit access from the audit team"
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                <span>Request Edit Access</span>
+              </button>
+            )}
 
             {!isDistributor && (
               <EngagementWorkspaceActionBar
@@ -1408,6 +1445,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
           engagementId={selectedAuditFilter || 'eng-101'}
           currentUser={currentUser}
           isDistributorWorkflow={isDistributor}
+          isLocked={isSamplingLocked}
           currencyMode={currencyMode}
           selectedDistributor={selectedDistributor}
           selectedClient={selectedClient}
@@ -1538,6 +1576,20 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Edit Access Request Modal */}
+      <EditAccessRequestModal
+        isOpen={isRequestEditModalOpen}
+        onClose={() => setIsRequestEditModalOpen(false)}
+        client={selectedClient || 'Apex Electronics Corp'}
+        distributor={targetDistributorName}
+        auditId={selectedAuditFilter || 'eng-101'}
+        currentUser={currentUser}
+        onSuccess={() => {
+          loadPopulationData();
+          fetchQuestionnaireResponses();
+        }}
+      />
     </div>
   );
 };

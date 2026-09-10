@@ -340,6 +340,12 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     window.addEventListener('data360_iir_pushed_sync_event', handleCustomSync);
     window.addEventListener('storage', handleStorageChange);
 
+    const handleEditAccessRefresh = () => {
+      fetchServerState();
+      fetchEditRequests();
+    };
+    window.addEventListener('edit-access-updated', handleEditAccessRefresh);
+
     let channel: BroadcastChannel | null = null;
     try {
       channel = new BroadcastChannel('data360_iir_sync_channel');
@@ -356,6 +362,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       window.removeEventListener('data360_iir_sync_event', handleCustomSync);
       window.removeEventListener('data360_iir_pushed_sync_event', handleCustomSync);
       window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('edit-access-updated', handleEditAccessRefresh);
       if (channel) channel.close();
     };
   }, [selectedClientProp, selectedDistributorName]);
@@ -1522,10 +1529,6 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   // Handler: Request Edit (Distributor API call)
   const handleRequestEdit = async () => {
     const trimmed = editRequestReason.trim();
-    if (trimmed.length < 50) {
-      showToast(`Request reason must be at least 50 characters long (${trimmed.length}/50).`, 'error');
-      return;
-    }
 
     setIsSubmittingEditRequest(true);
     try {
@@ -1610,6 +1613,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       setSelectedEditRequestForReview(null);
       setIsAuditorReviewModalOpen(false);
 
+      window.dispatchEvent(new CustomEvent('edit-access-updated'));
       fetchEditRequests();
     } catch (err: any) {
       showToast(`Error approving request: ${err.message}`, 'error');
@@ -1653,6 +1657,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       setSelectedEditRequestForReview(null);
       setIsAuditorReviewModalOpen(false);
 
+      window.dispatchEvent(new CustomEvent('edit-access-updated'));
       fetchEditRequests();
     } catch (err: any) {
       showToast(`Error rejecting request: ${err.message}`, 'error');
@@ -3320,25 +3325,18 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
             {/* Reason Textarea with 50-char validation */}
             <div className="space-y-1.5 text-xs">
               <div className="flex justify-between items-center">
-                <label className="text-slate-300 font-semibold block">Reason for Edit Request (Mandatory, min 50 chars):</label>
-                <span className={`font-mono text-[10px] ${
-                  editRequestReason.trim().length < 50 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'
-                }`}>
-                  {editRequestReason.trim().length} / 50 min chars
+                <label className="text-slate-300 font-semibold block">Reason for Edit Request (Optional):</label>
+                <span className="font-mono text-[10px] text-slate-400">
+                  Optional
                 </span>
               </div>
               <textarea
                 value={editRequestReason}
                 onChange={(e) => setEditRequestReason(e.target.value)}
-                placeholder="State why responses or documents need updating (e.g., Updated Q2 Sales Register available, corrected inventory log uploaded, additional supporting documentation ready)..."
+                placeholder="Optional: State why responses or documents need updating (e.g., Updated Q2 Sales Register available, corrected inventory log uploaded, additional supporting documentation ready)..."
                 rows={4}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
               />
-              {editRequestReason.trim().length > 0 && editRequestReason.trim().length < 50 && (
-                <p className="text-[11px] text-amber-400">
-                  Please provide at least {50 - editRequestReason.trim().length} more characters explaining your request.
-                </p>
-              )}
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
@@ -3351,7 +3349,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
               </button>
               <button
                 onClick={handleRequestEdit}
-                disabled={editRequestReason.trim().length < 50 || isSubmittingEditRequest}
+                disabled={isSubmittingEditRequest}
                 className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow-md flex items-center gap-1.5 cursor-pointer"
               >
                 {isSubmittingEditRequest ? (

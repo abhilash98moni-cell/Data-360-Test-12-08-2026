@@ -23,8 +23,10 @@ import {
   Flag,
   Bookmark,
   Eye,
-  RefreshCw
+  RefreshCw,
+  KeyRound
 } from 'lucide-react';
+import { EditAccessRequestModal } from '../EditAccessRequestModal';
 import {
   BUSINESS_QUESTIONNAIRE_SECTIONS,
   TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS,
@@ -93,6 +95,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
   const [customSectionsDraft, setCustomSectionsDraft] = useState<any[]>([]);
   const [isEditRequesting, setIsEditRequesting] = useState<boolean>(false);
   const [isEditReviewing, setIsEditReviewing] = useState<boolean>(false);
+  const [isRequestEditModalOpen, setIsRequestEditModalOpen] = useState<boolean>(false);
 
   // Unified Push State
   const activeDistributors = useMemo(() => getDistributorsForClient(selectedClient), [selectedClient]);
@@ -105,6 +108,20 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
   };
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const isEffectivelyLocked = Boolean(
+    questionnaireState?.isLocked && isDistributor && questionnaireState?.editAccessStatus !== 'APPROVED'
+  );
+
+  useEffect(() => {
+    const handleEditAccessUpdated = () => {
+      loadState();
+    };
+    window.addEventListener('edit-access-updated', handleEditAccessUpdated);
+    return () => {
+      window.removeEventListener('edit-access-updated', handleEditAccessUpdated);
+    };
+  }, [selectedClient, selectedDistributor]);
   // Moved below
 
   // Load state from API
@@ -364,7 +381,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
 
   // Save answer handler
   const handleAnswerChange = (questionId: string, value: string, explanation?: string) => {
-    if (questionnaireState?.isLocked && isDistributor) return;
+    if (isEffectivelyLocked) return;
 
     const existing = localAnswers[questionId] || {
       questionId,
@@ -781,9 +798,14 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
               </span>
               <span className="text-slate-500">•</span>
               <span className="text-xs text-slate-400 font-medium">Audit Protocol BQ-FY26</span>
-              {questionnaireState?.isLocked && (
-                <span className="flex items-center gap-1 text-[11px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30 font-semibold">
+              {isEffectivelyLocked && (
+                <span className="flex items-center gap-1 text-[11px] bg-amber-500/20 text-amber-300 px-2 py-0.5 rounded border border-amber-500/30 font-semibold">
                   <Lock className="h-3 w-3" /> Submitted & Locked
+                </span>
+              )}
+              {questionnaireState?.editAccessStatus === 'APPROVED' && (
+                <span className="flex items-center gap-1 text-[11px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30 font-semibold">
+                  <Sparkles className="h-3 w-3" /> Edit Access Unlocked
                 </span>
               )}
             </div>
@@ -824,13 +846,24 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
               </button>
             </div>
 
-            {isDistributor && !questionnaireState?.isLocked && (
+            {isDistributor && !isEffectivelyLocked && (
               <button
                 onClick={() => setIsSubmitModalOpen(true)}
                 className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
               >
                 <Send className="h-3.5 w-3.5" />
                 Submit Questionnaire
+              </button>
+            )}
+
+            {isDistributor && isEffectivelyLocked && (
+              <button
+                onClick={() => setIsRequestEditModalOpen(true)}
+                className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-indigo-600/20 transition-all cursor-pointer"
+                title="Request edit access from audit team"
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                <span>Request Edit Access</span>
               </button>
             )}
 
@@ -1414,7 +1447,17 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
             </button>
 
             <div className="flex items-center gap-2">
-              {isDistributor && !questionnaireState?.isLocked && (
+              {isDistributor && isEffectivelyLocked && (
+                <button
+                  onClick={() => setIsRequestEditModalOpen(true)}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <KeyRound className="h-3.5 w-3.5" />
+                  <span>Request Edit Access</span>
+                </button>
+              )}
+
+              {isDistributor && !isEffectivelyLocked && (
                 <button
                   onClick={handleSaveDraft}
                   className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 transition-all cursor-pointer"
@@ -1426,7 +1469,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
               {activeSectionIdx < activeSections.length - 1 ? (
                 <button
                   onClick={() => {
-                    handleSaveDraft();
+                    if (!isEffectivelyLocked) handleSaveDraft();
                     setActiveSectionIdx((prev) => Math.min(activeSections.length - 1, prev + 1));
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}
@@ -1437,7 +1480,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                 </button>
               ) : (
                 isDistributor &&
-                !questionnaireState?.isLocked && (
+                !isEffectivelyLocked && (
                   <button
                     onClick={() => setIsSubmitModalOpen(true)}
                     className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-600/30 transition-all cursor-pointer"
@@ -1517,6 +1560,16 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
           </div>
         </div>
       )}
+
+      {/* Edit Access Request Modal */}
+      <EditAccessRequestModal
+        isOpen={isRequestEditModalOpen}
+        onClose={() => setIsRequestEditModalOpen(false)}
+        client={selectedClient}
+        distributor={selectedDistributor}
+        currentUser={currentUser}
+        onSuccess={() => loadState()}
+      />
     </div>
   );
 };

@@ -29,11 +29,13 @@ import {
   MessageSquare,
   ShieldCheck,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  KeyRound
 } from 'lucide-react';
 import { UserSession } from '../types';
 import { CurrencyMode, formatFinancialAmount } from '../utils/currencyFormatter';
 import { DocumentViewerModal } from './DocumentViewerModal';
+import { EditAccessRequestModal } from './EditAccessRequestModal';
 
 export interface UploadedDocument {
   id: string;
@@ -83,6 +85,7 @@ export interface QuestionnaireProps {
   isAuditor?: boolean;
   isDistributor?: boolean;
   onRefresh?: () => void;
+  isLocked?: boolean;
 }
 
 export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) => {
@@ -96,8 +99,11 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
     currencyMode = 'INR',
     selectedDistributor,
     distributorName,
-    selectedClient
+    selectedClient,
+    isLocked: propIsLocked = false
   } = props;
+
+  const [isRequestEditModalOpen, setIsRequestEditModalOpen] = useState(false);
 
   const activeCurrency: CurrencyMode = currencyMode === 'USD' ? 'USD' : 'INR';
   const isDistributor = isDistributorWorkflow || currentUser?.role?.includes('Distributor') || currentUser?.role === 'Distributor';
@@ -1660,12 +1666,22 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
 
           <div className="flex items-center gap-2.5">
             {/* READ-ONLY / FINAL REVIEW CONTROLS */}
-            {isReadOnly ? (
+            {isReadOnly || propIsLocked ? (
               <div className="flex items-center gap-3">
-                <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400" />
-                  <span>Final Review Only — Read-Only</span>
+                <div className="flex items-center gap-1.5 text-xs text-amber-400 font-medium">
+                  <CheckCircle2 className="h-4 w-4 text-amber-400" />
+                  <span>Read-Only Mode</span>
                 </div>
+                {isDistributor && (
+                  <button
+                    type="button"
+                    onClick={() => setIsRequestEditModalOpen(true)}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shadow-md shadow-indigo-600/20 cursor-pointer"
+                  >
+                    <KeyRound className="h-3.5 w-3.5" />
+                    <span>Request Edit Access</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={onClose}
@@ -1949,6 +1965,19 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = (props) =
         onClose={() => setPreviewDoc(null)}
       />
 
+      {/* Edit Access Request Modal */}
+      <EditAccessRequestModal
+        isOpen={isRequestEditModalOpen}
+        onClose={() => setIsRequestEditModalOpen(false)}
+        client={selectedClient || 'Apex Electronics Corp'}
+        distributor={activeDistributor}
+        auditId={engagementId || 'eng-101'}
+        currentUser={currentUser}
+        onSuccess={() => {
+          if (props.onRefresh) props.onRefresh();
+          window.dispatchEvent(new CustomEvent('edit-access-updated'));
+        }}
+      />
     </div>
   );
 };
