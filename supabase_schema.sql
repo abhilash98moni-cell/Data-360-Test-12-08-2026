@@ -227,6 +227,3 @@ CREATE POLICY "Allow all access to audit_reports" ON public.audit_reports
     WITH CHECK (true);
 
 -- Done!
-CREATE TABLE IF NOT EXISTS public.test_table_auto_apply (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid()
-);

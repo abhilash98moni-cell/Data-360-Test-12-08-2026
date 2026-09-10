@@ -1,4 +1,3 @@
-import { supabase } from './lib/supabaseClient';
 import React, { useState } from 'react';
 import { Header } from './components/Header';
 import { NavigationSidebar, ActiveTab } from './components/NavigationSidebar';
@@ -116,18 +115,20 @@ export default function App() {
   };
 
   // Audit Engagements State
-  
-const [engagements, setEngagements] = useState<AuditEngagement[]>([]);
-React.useEffect(() => {
-  fetch('/api/engagements', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('supabase.auth.token') || '') } })
-  .then(res => res.json())
-  .then(data => {
-    if (data.success && data.engagements && data.engagements.length > 0) {
-      setEngagements(data.engagements);
+  const [engagements, setEngagements] = useState<AuditEngagement[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem('data360_engagements');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            return parsed;
+          }
+        }
+      } catch (e) {}
     }
-  }).catch(e => console.error(e));
-}, []);
-
+    return INITIAL_ENGAGEMENTS;
+  });
   const [selectedEngId, setSelectedEngId] = useState<string>('eng-101');
 
   // Findings & CAPAs State
@@ -157,38 +158,14 @@ React.useEffect(() => {
   const [targetVoucherNo, setTargetVoucherNo] = useState<string | null>(null);
 
   // Active User Session State — Loaded from localStorage if available
-  
-  // Sync Supabase Auth state with our app state
-  React.useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_OUT') {
-        setCurrentUser(null);
-        localStorage.removeItem('data360_active_user');
-      } else if (event === 'SIGNED_IN' && session) {
-        // If there's no currentUser, but we just signed in, it might be handled by LoginPage already,
-        // but we can ensure they stay in sync. Let's not blindly overwrite currentUser if they just logged in,
-        // because LoginPage builds the userSession object with role/organization.
-      } else if (event === 'INITIAL_SESSION' && !session) {
-         // If Supabase says absolutely no session on load, clear our local storage mock just in case
-         setCurrentUser(null);
-         localStorage.removeItem('data360_active_user');
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
-
   const [currentUser, setCurrentUser] = useState<UserSession | null>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('data360_active_user');
-      if (saved && saved !== 'undefined') {
+      if (saved) {
         try {
           return JSON.parse(saved);
         } catch (err) {
           console.error('Failed to parse saved user session:', err);
-          localStorage.removeItem('data360_active_user');
         }
       }
     }
@@ -266,12 +243,11 @@ React.useEffect(() => {
     }
   };
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     setCurrentUser(null);
     if (typeof window !== 'undefined') {
       localStorage.removeItem('data360_active_user');
     }
-    await supabase.auth.signOut();
   };
 
   // Effective distributor scope
@@ -309,13 +285,7 @@ React.useEffect(() => {
       const updated = [newEng, ...prev];
       if (typeof window !== 'undefined') {
         try {
-          
-fetch('/api/engagements', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('supabase.auth.token') || '') },
-  body: JSON.stringify({ engagements: updated })
-});
-
+          localStorage.setItem('data360_engagements', JSON.stringify(updated));
         } catch (e) {}
       }
       return updated;
