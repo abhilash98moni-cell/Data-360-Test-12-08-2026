@@ -25,7 +25,7 @@ import {
 } from 'lucide-react';
 
 import { CurrencyMode } from '../utils/currencyFormatter';
-import { CLIENT_TENANTS, getDistributorsForClient, getAllRegisteredDistributors } from '../data/clientsAndDistributors';
+import { CLIENT_TENANTS, getDistributorsForClient, getAllRegisteredDistributors, DistributorInfo } from '../data/clientsAndDistributors';
 import { UserSession } from './AuthModal';
 
 interface HeaderProps {
@@ -71,11 +71,95 @@ export const Header: React.FC<HeaderProps> = ({
   const [distributorSearchQuery, setDistributorSearchQuery] = useState('');
   const distributorDropdownRef = React.useRef<HTMLDivElement>(null);
 
+  // Initial pre-seeded demo distributor names to hide from the current audit engagement
+  const HIDDEN_SEED_DISTRIBUTORS = React.useMemo(() => [
+    'horizon logistics india',
+    'pacific rim distribution',
+    'nexus logistics ltd',
+    'middle east company',
+    'eurotech supply chains',
+    'latam trading network'
+  ], []);
+
   const availableDistributors = React.useMemo(() => {
     const all = getAllRegisteredDistributors();
-    if (all && all.length > 0) return all;
-    return getDistributorsForClient(selectedClient);
-  }, [selectedClient]);
+    const sourceList: DistributorInfo[] = (all && all.length > 0) ? all : getDistributorsForClient(selectedClient);
+
+    // Identify any distributors attached to newly created audit engagements
+    const newEngagementDistributors: DistributorInfo[] = [];
+    const newEngagementDistributorNames = new Set<string>();
+
+    if (typeof window !== 'undefined') {
+      try {
+        const storedEngs = localStorage.getItem('data360_engagements');
+        if (storedEngs) {
+          const parsed = JSON.parse(storedEngs);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((eng: any) => {
+              // Any engagement beyond the initial baseline (eng-101, eng-102, eng-103)
+              if (eng && eng.id && !['eng-101', 'eng-102', 'eng-103'].includes(eng.id)) {
+                const distName = (eng.distributorName || '').trim();
+                if (distName) {
+                  newEngagementDistributorNames.add(distName.toLowerCase());
+                  if (!sourceList.some(d => d.name.toLowerCase().trim() === distName.toLowerCase())) {
+                    newEngagementDistributors.push({
+                      id: `dist-${eng.id}`,
+                      name: distName,
+                      code: eng.distributorCode || `${distName.substring(0, 3).toUpperCase()}-001`,
+                      region: eng.location || 'Active Engagement Territory',
+                      status: eng.status || 'Planning'
+                    });
+                  }
+                }
+                sourceList.forEach(d => {
+                  if (
+                    (eng.title && eng.title.toLowerCase().includes(d.name.toLowerCase())) ||
+                    (eng.location && eng.location.toLowerCase().includes(d.name.toLowerCase())) ||
+                    (d.code && eng.location && eng.location.toLowerCase().includes(d.code.toLowerCase()))
+                  ) {
+                    newEngagementDistributorNames.add(d.name.toLowerCase().trim());
+                  }
+                });
+              }
+            });
+          }
+        }
+      } catch (e) {}
+    }
+
+    const combinedList = [...sourceList, ...newEngagementDistributors];
+
+    // Filter to show:
+    // 1. Midwest Trading Co. (MDT-8092) for current audit engagement
+    // 2. Any distributor belonging to a newly created audit engagement
+    // 3. Any newly registered distributor entity created later
+    return combinedList.filter(d => {
+      const lower = d.name.toLowerCase().trim();
+      if (lower === 'midwest trading co.' || d.code === 'MDT-8092') {
+        return true;
+      }
+      if (newEngagementDistributorNames.has(lower)) {
+        return true;
+      }
+      if (!HIDDEN_SEED_DISTRIBUTORS.includes(lower)) {
+        return true;
+      }
+      return false;
+    });
+  }, [selectedClient, isDistributorDropdownOpen, HIDDEN_SEED_DISTRIBUTORS]);
+
+  // If the active distributor was previously pointing to a hidden distributor without an engagement, fallback to Midwest Trading Co.
+  React.useEffect(() => {
+    const isHidden = HIDDEN_SEED_DISTRIBUTORS.includes(selectedDistributor.toLowerCase().trim());
+    if (isHidden) {
+      const isAllowedByNewEngagement = availableDistributors.some(
+        d => d.name.toLowerCase().trim() === selectedDistributor.toLowerCase().trim()
+      );
+      if (!isAllowedByNewEngagement) {
+        onDistributorChange('Midwest Trading Co.');
+      }
+    }
+  }, [selectedDistributor, availableDistributors, onDistributorChange, HIDDEN_SEED_DISTRIBUTORS]);
 
   const filteredDistributors = React.useMemo(() => {
     if (!distributorSearchQuery.trim()) return availableDistributors;
