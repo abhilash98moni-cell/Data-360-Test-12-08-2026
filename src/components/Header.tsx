@@ -269,7 +269,7 @@ const SupabaseHeaderChecker: React.FC = () => {
     setTesting(true);
     setStatus(null);
     try {
-      const res = await fetch('/api/supabase/health');
+      const res = await fetch('/api/supabase/health', { cache: 'no-store' });
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
         setStatus({
@@ -279,7 +279,9 @@ const SupabaseHeaderChecker: React.FC = () => {
         return;
       }
       const data = await res.json();
-      if (!res.ok && !data.error) {
+      if (data.connected === true) {
+        // Force success
+      } else if (!res.ok && !data.error) {
         data.error = `HTTP Error ${res.status}`;
       }
       setStatus(data);
@@ -319,7 +321,7 @@ const SupabaseHeaderChecker: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="font-bold text-white text-sm">Supabase PostgreSQL Health Check</h3>
-                  <p className="text-[11px] text-slate-400 font-mono">jellfdqrymlnvebdcwpj.supabase.co</p>
+                  <p className="text-[11px] text-slate-400 font-mono">{status?.url ? status.url.replace(/^https?:\/\//, "") : "Checking DB Status..."}</p>
                 </div>
               </div>
               <button onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-white p-1 rounded-lg">

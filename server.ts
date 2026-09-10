@@ -4793,7 +4793,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         full_name: fullName || cleanEmail.split('@')[0],
         role: validRole as 'Admin' | 'Auditor' | 'Distributor',
         organization: formattedOrg,
-        status: 'Pending'
+        status: 'Pending' as 'Pending'
       });
 
       if (error) {
@@ -4817,7 +4817,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       role: validRole as 'Admin' | 'Auditor' | 'Distributor',
       organization: formattedOrg,
       requestedAt: new Date().toISOString(),
-      status: 'Pending'
+      status: 'Pending' as 'Pending'
     };
 
     pendingSignupRequests.push(newRequest);
@@ -4851,7 +4851,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
             role: r.role === 'admin' ? 'Admin' : r.role === 'distributor' ? 'Distributor' : 'Auditor',
             organization: r.organization,
             requestedAt: r.requested_at,
-            status: 'Pending' as const
+            status: 'Pending' as 'Pending'
           }));
 
         const approvedList = dbRequests
@@ -4908,7 +4908,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         if (dbRow) {
           request = {
             id: dbRow.id, email: dbRow.email,  fullName: dbRow.full_name,
-            role: dbRow.role, organization: dbRow.organization, requestedAt: dbRow.requested_at, status: 'Pending'
+            role: dbRow.role, organization: dbRow.organization, requestedAt: dbRow.requested_at, status: 'Pending' as 'Pending'
           };
         }
       } catch (err) {}

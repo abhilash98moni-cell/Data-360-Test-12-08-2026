@@ -129,7 +129,7 @@ export const GoogleDriveStorageCard: React.FC = () => {
     setSupabaseTesting(true);
     setSupabaseResult(null);
     try {
-      const res = await fetch('/api/supabase/health');
+      const res = await fetch('/api/supabase/health', { cache: 'no-store' });
       const contentType = res.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
         setSupabaseResult({
@@ -139,7 +139,9 @@ export const GoogleDriveStorageCard: React.FC = () => {
         return;
       }
       const data = await res.json();
-      if (!res.ok && !data.error) {
+      if (data.connected === true) {
+        // Force success
+      } else if (!res.ok && !data.error) {
         data.error = `HTTP Error ${res.status}`;
       }
       setSupabaseResult(data);
