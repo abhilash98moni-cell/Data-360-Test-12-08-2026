@@ -11,6 +11,7 @@ import { dbStore } from '../src/services/dbStore.js';
 import { getItemCompletionDetails } from '../src/utils/irlValidation.js';
 import {
   getSupabaseServerClient,
+  getSupabaseServerUrl,
   getAuthoritativeIRLState,
   saveAuthoritativeIRLState,
   getAuthoritativeSubmissions,
@@ -106,14 +107,14 @@ app.get('/api/supabase/health', async (req, res) => {
         connected: false,
         error: error.message,
         latencyMs,
-        url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+        url: getSupabaseServerUrl()
       });
     }
 
     return res.json({
       connected: true,
       latencyMs,
-      url: process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
+      url: getSupabaseServerUrl(),
       message: 'Successfully connected to Supabase PostgreSQL database!',
       timestamp: new Date().toISOString()
     });
