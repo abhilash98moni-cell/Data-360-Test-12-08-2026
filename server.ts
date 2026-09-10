@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
@@ -40,17 +41,6 @@ const getFilename = () => {
 };
 const __filename = getFilename();
 const __dirname = path.dirname(__filename);
-const isDistBuild = __dirname.includes('dist') || __filename.endsWith('.cjs');
-if (isDistBuild && !process.env.NODE_ENV) {
-  process.env.NODE_ENV = 'production';
-}
-
-process.on('uncaughtException', (err) => {
-  console.error('Unhandled Exception:', err);
-});
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-});
 
 let geminiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI | null {
@@ -68,7 +58,7 @@ async function startServer() {
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Health check endpoint
-  app.get(['/api/health', '/health'], (req, res) => {
+  app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
   });
 
@@ -6501,18 +6491,14 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   });
 
   // Vite middleware for development or static file serving for production
-  const isProduction = process.env.NODE_ENV === 'production' || isDistBuild;
-  if (!isProduction) {
-    const { createServer: createViteServer } = await import('vite');
+  if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: 'spa',
     });
     app.use(vite.middlewares);
   } else {
-    const distPath = fs.existsSync(path.join(__dirname, 'index.html'))
-      ? __dirname
-      : path.join(process.cwd(), 'dist');
+    const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
