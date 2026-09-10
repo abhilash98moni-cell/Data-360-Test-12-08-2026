@@ -76,38 +76,7 @@ export default function App() {
   };
 
   const [selectedClient, setSelectedClient] = useState<string>('Apex Electronics Corp');
-  const [selectedDistributor, setSelectedDistributor] = useState<string>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const params = new URLSearchParams(window.location.search);
-        const urlDist = params.get('distributor');
-        if (urlDist && urlDist.trim()) return urlDist.trim();
-
-        const saved = localStorage.getItem('data360_selected_distributor');
-        if (saved && saved.trim()) return saved.trim();
-      } catch (e) {}
-    }
-    return 'Midwest Trading Co.';
-  });
-
-  const handleDistributorChange = (newDist: string) => {
-    if (!newDist) return;
-    setSelectedDistributor(newDist);
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('data360_selected_distributor', newDist);
-      } catch (e) {}
-    }
-  };
-
-  React.useEffect(() => {
-    if (typeof window !== 'undefined' && selectedDistributor) {
-      try {
-        localStorage.setItem('data360_selected_distributor', selectedDistributor);
-      } catch (e) {}
-    }
-  }, [selectedDistributor]);
-
+  const [selectedDistributor, setSelectedDistributor] = useState<string>('Midwest Trading Co.');
   const [currencyMode, setCurrencyMode] = useState<CurrencyMode>(() => {
     const saved = localStorage.getItem('data360_currency_mode');
     return (saved === 'USD' || saved === 'INR') ? (saved as CurrencyMode) : 'INR';
@@ -129,16 +98,13 @@ export default function App() {
   const handleClientChange = (newClient: string) => {
     setSelectedClient(newClient);
     if (newClient === 'All Clients') {
-      handleDistributorChange('All Distributors');
+      setSelectedDistributor('All Distributors');
     } else {
       const dists = getDistributorsForClient(newClient);
       if (dists.length > 0) {
-        const stillValid = dists.some(d => d.name.toLowerCase() === selectedDistributor.toLowerCase());
-        if (!stillValid) {
-          handleDistributorChange(dists[0].name);
-        }
+        setSelectedDistributor(dists[0].name);
       } else {
-        handleDistributorChange('All Distributors');
+        setSelectedDistributor('All Distributors');
       }
     }
   };
@@ -353,7 +319,7 @@ export default function App() {
         selectedClient={selectedClient}
         onClientChange={handleClientChange}
         selectedDistributor={selectedDistributor}
-        onDistributorChange={handleDistributorChange}
+        onDistributorChange={setSelectedDistributor}
         currencyMode={currencyMode}
         onCurrencyModeChange={handleCurrencyModeChange}
         themeMode={themeMode}
@@ -426,8 +392,8 @@ export default function App() {
             />
           ) : activeTab === 'dashboard' ? (
             <DashboardView 
-              engagements={activeDistributorFilter === 'All Distributors' ? engagements : filteredEngagements}
-              findings={activeDistributorFilter === 'All Distributors' ? findings : filteredFindings}
+              engagements={filteredEngagements.length > 0 ? filteredEngagements : engagements}
+              findings={filteredFindings.length > 0 ? filteredFindings : findings}
               samplingRuns={samplingRuns}
               assignments={assignments}
               onSelectEngagement={(id) => {
@@ -436,12 +402,12 @@ export default function App() {
                 if (eng) {
                   if (eng.clientName) setSelectedClient(eng.clientName);
                   if (eng.distributorName) {
-                    handleDistributorChange(eng.distributorName);
+                    setSelectedDistributor(eng.distributorName);
                   } else {
                     const dists = getDistributorsForClient(eng.clientName);
                     const matched = dists.find(d => eng.title.includes(d.name) || eng.location.includes(d.name) || (d.code && eng.location.includes(d.code)));
                     if (matched) {
-                      handleDistributorChange(matched.name);
+                      setSelectedDistributor(matched.name);
                     }
                   }
                 }
@@ -466,7 +432,7 @@ export default function App() {
               initialSubTab={activeTab === 'iir' ? 'iir' : 'questionnaire'}
               isIIRFullScreen={isIIRFullScreen}
               onToggleIIRFullScreen={() => setIsIIRFullScreen(prev => !prev)}
-              onDistributorChangeGlobal={handleDistributorChange}
+              onDistributorChangeGlobal={setSelectedDistributor}
               targetVoucherNo={targetVoucherNo}
             />
           ) : activeTab === 'evidence' ? (
