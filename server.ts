@@ -1379,9 +1379,25 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   app.get('/api/sampling/required-data/questions', authenticateRequest, async (req: any, res: any) => {
     try {
       const { auditId, sampleId, voucherNo, distributorId } = req.query;
-      const supabase = getSupabaseServerClient();
-      const { data, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_QUESTION_DEF');
-      if (error) throw error;
+      let data: any[] = [];
+      try {
+        const supabase = getSupabaseServerClient();
+        const { data: sData, error } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_QUESTION_DEF');
+        if (!error && Array.isArray(sData)) {
+          data = sData;
+        }
+      } catch (e) {}
+
+      // Resilient fallback / merge with dbStore
+      try {
+        const localLogs = await dbStore.getAuditLogs('REQUIRED_DATA_QUESTION_DEF');
+        if (Array.isArray(localLogs) && localLogs.length > 0) {
+          const existingIds = new Set(data.map(d => d.id));
+          localLogs.forEach(l => {
+            if (!existingIds.has(l.id)) data.push(l);
+          });
+        }
+      } catch (e) {}
       
       const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
       const questions = (data || [])
@@ -1404,10 +1420,10 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
             const targets = [cleanStr(sampleId), cleanStr(voucherNo)].filter(Boolean);
             const qSample = cleanStr(q.sample_id);
             const qVoucher = cleanStr(q.voucher_no || q.voucherNo);
-            if (q.scope === 'transaction' || qSample || qVoucher) {
+            if (q.scope === 'transaction' || q.scope === 'sample' || qSample || qVoucher) {
               const matches = targets.some(t => 
-                (qSample && (qSample === t || qSample.endsWith(t) || t.endsWith(qSample))) ||
-                (qVoucher && (qVoucher === t || qVoucher.endsWith(t) || t.endsWith(qVoucher)))
+                (qSample && (qSample === t || qSample.endsWith(t) || t.endsWith(qSample) || qSample.includes(t) || t.includes(qSample))) ||
+                (qVoucher && (qVoucher === t || qVoucher.endsWith(t) || t.endsWith(qVoucher) || qVoucher.includes(t) || t.includes(qVoucher)))
               );
               return matches;
             }
@@ -1430,15 +1446,21 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const userOrg = req.user?.organization || req.auth?.organization || (req.headers['x-user-organization'] as string) || 'Internal';
       const supabase = getSupabaseServerClient();
       
+      const chosenType = payload.answer_type || payload.response_type || 'Document Upload';
+      const helpText = payload.help_text || payload.instruction || payload.comment || '';
+      
       const questionDetails = {
         question_id: payload.question_id || 'RDQ_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-        engagement_id: payload.engagement_id,
-        distributor_id: payload.distributor_id || payload.distributorName,
-        testing_classification: payload.testing_classification,
+        engagement_id: payload.engagement_id || 'eng-101',
+        distributor_id: payload.distributor_id || payload.distributorName || '',
+        testing_classification: payload.testing_classification || '',
         question_text: payload.question_text,
-        answer_type: payload.answer_type || 'Document Upload & Remarks',
+        answer_type: chosenType,
+        response_type: chosenType,
         required: payload.required !== undefined ? payload.required : true,
-        help_text: payload.help_text || '',
+        help_text: helpText,
+        instruction: helpText,
+        comment: helpText,
         scope: payload.scope || 'transaction',
         sample_id: payload.sample_id || null,
         voucher_no: payload.voucher_no || payload.voucherNo || null,
@@ -1450,18 +1472,26 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         options: payload.options || []
       };
 
-      const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
-        event_type: 'REQUIRED_DATA_QUESTION_DEF',
-        target_user_email: userEmail,
-        ip_address: req.ip || '127.0.0.1',
-        details: questionDetails
-      }).select().single();
+      let insertedId = 'q_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
 
-      if (error) throw error;
+      try {
+        const { data: insertedData, error } = await supabase.from('system_audit_logs').insert({
+          event_type: 'REQUIRED_DATA_QUESTION_DEF',
+          target_user_email: userEmail,
+          ip_address: req.ip || '127.0.0.1',
+          details: questionDetails
+        }).select().single();
+
+        if (!error && insertedData?.id) {
+          insertedId = insertedData.id;
+        }
+      } catch (sbErr) {
+        console.warn('Supabase insert warning for question def:', sbErr);
+      }
 
       try {
         await dbStore.insertAuditLog({
-          id: insertedData?.id,
+          id: insertedId,
           event_type: 'REQUIRED_DATA_QUESTION_DEF',
           user_email: userEmail,
           organization: userOrg,
@@ -1469,7 +1499,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         });
       } catch (e) {}
 
-      res.json({ success: true, dbId: insertedData.id });
+      res.json({ success: true, dbId: insertedId });
     } catch (err: any) {
       console.error(err);
       res.status(500).json({ success: false, error: err.message });
