@@ -108,52 +108,12 @@ export class GoogleDriveStorageService implements StorageService {
     for (const key of additionalKeys) {
       if (key) this.binaryBufferStore.set(key, entry);
     }
-
-    try {
-      if (!fs.existsSync(this.uploadsDir)) {
-        fs.mkdirSync(this.uploadsDir, { recursive: true });
-      }
-      if (fileId) {
-        const safePath = path.join(this.uploadsDir, fileId.replace(/[/\\?%*:|"<>]/g, '_'));
-        fs.writeFileSync(safePath, buffer);
-        fs.writeFileSync(`${safePath}.meta.json`, JSON.stringify({ fileName, mimeType, fileId }));
-      }
-    } catch (err: any) {
-      console.warn('Disk storage save notice:', err.message);
-    }
   }
 
   private getBinaryBuffer(fileId: string): { buffer: Buffer; fileName: string; mimeType: string } | null {
     if (this.binaryBufferStore.has(fileId)) {
       return this.binaryBufferStore.get(fileId)!;
     }
-
-    try {
-      const safePath = path.join(this.uploadsDir, fileId.replace(/[/\\?%*:|"<>]/g, '_'));
-      if (fs.existsSync(safePath)) {
-        const buffer = fs.readFileSync(safePath);
-        let fileName = `Document_${fileId}.pdf`;
-        let mimeType = 'application/pdf';
-
-        const metaPath = `${safePath}.meta.json`;
-        if (fs.existsSync(metaPath)) {
-          try {
-            const meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'));
-            if (meta.fileName) fileName = meta.fileName;
-            if (meta.mimeType) mimeType = meta.mimeType;
-          } catch (e) {
-            // ignore
-          }
-        }
-
-        const entry = { buffer, fileName, mimeType };
-        this.binaryBufferStore.set(fileId, entry);
-        return entry;
-      }
-    } catch (err: any) {
-      console.warn('Disk storage read notice:', err.message);
-    }
-
     return null;
   }
 
@@ -264,10 +224,7 @@ startxref
     }
 
     if (!this.drive) {
-      const mockId = `mock-root-${Date.now()}`;
-      this.rootFolderId = mockId;
-      this.folderCache.set('Data360_Test', mockId);
-      return mockId;
+      throw new Error("Google Drive storage client is not initialized or authenticated.");
     }
 
     try {
@@ -303,10 +260,7 @@ startxref
     } catch (err: any) {
       console.error('Error finding/creating root folder Data360_Test:', err.message);
       this.lastDriveError = err.message || 'Error initializing root folder';
-      const fallbackId = `fallback-root-${Date.now()}`;
-      this.rootFolderId = fallbackId;
-      this.folderCache.set('Data360_Test', fallbackId);
-      return fallbackId;
+      throw new Error(`Google Drive root folder initialization failed: ${err.message}`);
     }
   }
 
@@ -316,9 +270,7 @@ startxref
     }
 
     if (!this.drive) {
-      const mockFolderId = `folder-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-      this.folderCache.set(pathKey, mockFolderId);
-      return mockFolderId;
+      throw new Error("Google Drive storage client is not initialized or authenticated.");
     }
 
     try {
@@ -352,9 +304,7 @@ startxref
     } catch (err: any) {
       console.error(`Error creating folder ${folderName} under ${parentId}:`, err.message);
       this.lastDriveError = err.message || `Error creating folder ${folderName}`;
-      const mockFolderId = `folder-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
-      this.folderCache.set(pathKey, mockFolderId);
-      return mockFolderId;
+      throw new Error(`Google Drive folder creation failed for ${folderName}: ${err.message}`);
     }
   }
 
@@ -543,14 +493,12 @@ startxref
       } catch (fallbackErr: any) {
         console.error('Fatal Google Drive upload failure:', fallbackErr.message);
         console.error(`Google Drive storage upload failed: ${fallbackErr.message || createErr.message}`);
-        // Fallback to local memory instead of failing
-        realDriveFileId = `file-${Date.now()}`;
-        this.saveBinaryBuffer(realDriveFileId, fileName, mimeType, fileBuffer, [realDriveFileId]);
+        throw new Error(`Google Drive storage upload failed: ${fallbackErr.message || createErr.message}`);
       }
     }
 
     if (!realDriveFileId) {
-      realDriveFileId = `file-${Date.now()}`;
+      throw new Error(`Google Drive storage upload failed: API returned an empty file ID.`);
     }
 
     const fileSizeMB = Number((fileBuffer.length / (1024 * 1024)).toFixed(2));
@@ -709,111 +657,68 @@ startxref
     let fileName = resolvedMeta ? resolvedMeta.fileName : (fallbackFileName || (googleDriveFileId.includes('.') ? googleDriveFileId : `Document_${googleDriveFileId}.pdf`));
     let mimeType = resolvedMeta ? resolvedMeta.fileType : 'application/pdf';
 
-    // 1. Authoritative Primary Storage: Google Drive API retrieval
-    if (this.drive && !targetDriveFileId.startsWith('gdrive-mock') && !targetDriveFileId.startsWith('gdrive-') && !targetDriveFileId.startsWith('file-') && !targetDriveFileId.startsWith('doc-') && !targetDriveFileId.startsWith('ev-') && !targetDriveFileId.startsWith('EVD-')) {
+    if (!this.drive) {
+      throw new Error('Google Drive API client is not initialized.');
+    }
+
+    if (targetDriveFileId.startsWith('gdrive-mock') || targetDriveFileId.startsWith('gdrive-') || targetDriveFileId.startsWith('file-') || targetDriveFileId.startsWith('doc-') || targetDriveFileId.startsWith('ev-') || targetDriveFileId.startsWith('EVD-')) {
+      throw new Error(`Legacy-record error: The requested file uses a fake or legacy file ID ('${targetDriveFileId}') and cannot be retrieved from Google Drive.`);
+    }
+
+    try {
+      let driveMimeType = mimeType;
       try {
-        let driveMimeType = mimeType;
-        try {
-          const fileInfo = await this.drive.files.get({
-            fileId: targetDriveFileId,
-            fields: 'id, name, mimeType'
-          });
-          if (fileInfo.data.name) fileName = fileInfo.data.name;
-          if (fileInfo.data.mimeType) driveMimeType = fileInfo.data.mimeType;
-        } catch (infoErr) {
-          // ignore
-        }
-
-        let resData: ArrayBuffer | null = null;
-
-        // Handle native Google Workspace spreadsheets / docs export if needed
-        if (driveMimeType === 'application/vnd.google-apps.spreadsheet') {
-          const exportRes = await this.drive.files.export(
-            { fileId: targetDriveFileId, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
-            { responseType: 'arraybuffer' }
-          );
-          resData = exportRes.data as ArrayBuffer;
-          mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-          if (!fileName.endsWith('.xlsx')) fileName = `${fileName}.xlsx`;
-        } else if (driveMimeType === 'application/vnd.google-apps.document') {
-          const exportRes = await this.drive.files.export(
-            { fileId: targetDriveFileId, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
-            { responseType: 'arraybuffer' }
-          );
-          resData = exportRes.data as ArrayBuffer;
-          mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-          if (!fileName.endsWith('.docx')) fileName = `${fileName}.docx`;
-        } else {
-          const getRes = await this.drive.files.get(
-            { fileId: targetDriveFileId, alt: 'media' },
-            { responseType: 'arraybuffer' }
-          );
-          resData = getRes.data as ArrayBuffer;
-          if (driveMimeType && !driveMimeType.startsWith('application/vnd.google-apps')) {
-            mimeType = driveMimeType;
-          }
-        }
-
-        if (resData) {
-          const buffer = Buffer.from(resData);
-          if (buffer.length > 0) {
-            // Save to temporary cache
-            this.saveBinaryBuffer(googleDriveFileId, fileName, mimeType, buffer, [targetDriveFileId]);
-            return { buffer, fileName, mimeType };
-          }
-        }
-      } catch (err: any) {
-        console.error(`Error downloading file '${targetDriveFileId}' from Google Drive API:`, err.message);
+        const fileInfo = await this.drive.files.get({
+          fileId: targetDriveFileId,
+          fields: 'id, name, mimeType'
+        });
+        if (fileInfo.data.name) fileName = fileInfo.data.name;
+        if (fileInfo.data.mimeType) driveMimeType = fileInfo.data.mimeType;
+      } catch (infoErr) {
+        // ignore
       }
-    }
 
-    // 2. Check temporary local binary cache (speedup for same container execution)
-    const stored = this.getBinaryBuffer(googleDriveFileId) || this.getBinaryBuffer(targetDriveFileId);
-    if (stored) {
-      return stored;
-    }
+      let resData: ArrayBuffer | null = null;
 
-    // 3. Fallback for pre-seeded demo/mock files
-    const isSeedFile = googleDriveFileId === 'ev-101' || googleDriveFileId === 'ev-102';
-    
-    if (isSeedFile) {
-      const pdfBuffer = this.generateValidPdfBuffer(
-         `DATA360 DEMO DOCUMENT: ${fileName}`,
-         `File Name: ${fileName} | ID: ${googleDriveFileId} | Pre-seeded Reference Stream`
-      );
-      return {
-         buffer: pdfBuffer,
-         fileName,
-         mimeType: mimeType.includes('pdf') || mimeType === 'application/octet-stream' ? 'application/pdf' : mimeType
-      };
-    }
-    
-    // 4. Fallback for Excel files to avoid download errors in demo mode
-    console.log('Fallback checking fileName:', fileName); 
-    if (fileName && (fileName.toLowerCase().endsWith('.xlsx') || fileName.toLowerCase().endsWith('.xls') || fileName.toLowerCase().endsWith('.csv'))) {
-      const workbook = XLSX.utils.book_new();
-      const mockData = [
-        { ID: 'TX-1001', Date: '2026-01-15', Entity: 'Test Vendor A', Description: 'Consulting Services', Amount: 5000 },
-        { ID: 'TX-1002', Date: '2026-01-22', Entity: 'Employee B', Description: 'Travel Reimbursement', Amount: 1250 },
-        { ID: 'TX-1003', Date: '2026-02-05', Entity: 'Test Vendor C', Description: 'Software License', Amount: 3400 }
-      ];
-      const worksheet = XLSX.utils.json_to_sheet(mockData);
-      XLSX.utils.book_append_sheet(workbook, worksheet, 'Transactions');
-      
-      const isCsv = fileName.toLowerCase().endsWith('.csv');
-      const outBuffer = isCsv 
-          ? Buffer.from(XLSX.write(workbook, { type: 'string', bookType: 'csv' }))
-          : XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-          
-      return {
-         buffer: outBuffer,
-         fileName,
-         mimeType: isCsv ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-      };
-    }
+      if (driveMimeType === 'application/vnd.google-apps.spreadsheet') {
+        const exportRes = await this.drive.files.export(
+          { fileId: targetDriveFileId, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+          { responseType: 'arraybuffer' }
+        );
+        resData = exportRes.data as ArrayBuffer;
+        mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+        if (!fileName.endsWith('.xlsx')) fileName = `${fileName}.xlsx`;
+      } else if (driveMimeType === 'application/vnd.google-apps.document') {
+        const exportRes = await this.drive.files.export(
+          { fileId: targetDriveFileId, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+          { responseType: 'arraybuffer' }
+        );
+        resData = exportRes.data as ArrayBuffer;
+        mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+        if (!fileName.endsWith('.docx')) fileName = `${fileName}.docx`;
+      } else {
+        const getRes = await this.drive.files.get(
+          { fileId: targetDriveFileId, alt: 'media' },
+          { responseType: 'arraybuffer' }
+        );
+        resData = getRes.data as ArrayBuffer;
+        if (driveMimeType && !driveMimeType.startsWith('application/vnd.google-apps')) {
+          mimeType = driveMimeType;
+        }
+      }
 
-    // 5. For user-uploaded documents that cannot be retrieved, throw a clear error instead of generating dummy text
-    throw new Error(`Requested document binary for '${googleDriveFileId}' was not found in Google Drive storage. fileName was: ${fileName} fallbackFileName was: ${fallbackFileName}`);
+      if (resData) {
+        const buffer = Buffer.from(resData);
+        if (buffer.length > 0) {
+          this.saveBinaryBuffer(googleDriveFileId, fileName, mimeType, buffer, [targetDriveFileId]);
+          return { buffer, fileName, mimeType };
+        }
+      }
+      throw new Error(`Downloaded buffer is empty for Google Drive file ID: ${targetDriveFileId}`);
+    } catch (err: any) {
+      console.error(`Error downloading file '${targetDriveFileId}' from Google Drive API:`, err.message);
+      throw new Error(`Requested document binary for '${targetDriveFileId}' could not be downloaded from Google Drive: ${err.message}`);
+    }
   }
 
   public async getFileMetadata(googleDriveFileId: string): Promise<FileMetadata | null> {

@@ -68,8 +68,9 @@ async function startServer() {
     try {
       const supabase = getSupabaseServerClient();
       const { error } = await supabase
-        .from('pending_signup_requests')
-        .select('*', { count: 'exact', head: true });
+        .from('system_audit_logs')
+        .select('id')
+        .limit(1);
 
       const latencyMs = Date.now() - startTime;
 
@@ -868,8 +869,6 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       return serverUserSessions.get(token)!;
     }
 
-    const userEmail = (req.headers['x-user-email'] as string || req.query.userEmail as string || '').trim().toLowerCase();
-
     const supabase = getSupabaseServerClient();
 
     // 2. Validate Supabase Auth token if standard JWT
@@ -881,9 +880,10 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           const rawRole = (metadata.role || 'Auditor').toLowerCase();
           const role = rawRole === 'admin' ? 'Admin' : rawRole === 'distributor' ? 'Distributor' : 'Auditor';
           const organization = metadata.organization || (role === 'Auditor' ? 'Apex Audit Practice' : 'Midwest Trading Co.');
+
           const authUser: AuthenticatedUser = {
             id: data.user.id,
-            email: data.user.email || userEmail || 'user@data360.io',
+            email: data.user.email || 'user@data360.io',
             role,
             organization,
             name: metadata.full_name || data.user.email?.split('@')[0] || 'User'
@@ -892,51 +892,11 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           return authUser;
         }
       } catch (e) {
-        // Continue
+        console.warn('Token validation failed', e);
       }
     }
 
-    // 3. Fallback: Lookup user in Supabase pending_signup_requests DB table by email
-    if (userEmail) {
-      try {
-        const { data: dbUser } = await supabase
-          .from('pending_signup_requests')
-          .select('*')
-          .eq('email', userEmail)
-          .eq('status', 'approved')
-          .maybeSingle();
-
-        if (dbUser) {
-          const rawRole = (dbUser.role || 'auditor').toLowerCase();
-          const role = rawRole === 'admin' ? 'Admin' : rawRole === 'distributor' ? 'Distributor' : 'Auditor';
-          const authUser: AuthenticatedUser = {
-            id: dbUser.id || `usr-${Date.now()}`,
-            email: dbUser.email,
-            role,
-            organization: dbUser.organization || (role === 'Auditor' ? 'Apex Audit Practice' : 'Midwest Trading Co.'),
-            name: dbUser.full_name || dbUser.email.split('@')[0]
-          };
-          if (token) serverUserSessions.set(token, authUser);
-          return authUser;
-        }
-      } catch (e) {
-        // Ignore DB error
-      }
-    }
-
-    // 4. Verification from request headers or fallback auditor session
-    const headerRole = (req.headers['x-user-role'] as string || '').toLowerCase();
-    const defaultRole = headerRole.includes('distributor') ? 'Distributor' : 'Auditor';
-    const defaultOrg = (req.headers['x-user-organization'] as string) || (req.headers['x-user-org'] as string) || (defaultRole === 'Distributor' ? 'Midwest Trading Co.' : 'Apex Audit Practice (AA)');
-    const authUser: AuthenticatedUser = {
-      id: 'usr-default',
-      email: userEmail || (req.headers['x-user-email'] as string) || 'auditor@data360.io',
-      role: defaultRole,
-      organization: defaultOrg,
-      name: userEmail ? userEmail.split('@')[0] : (req.headers['x-user-name'] as string) || 'Sarah Jenkins (Auditor)'
-    };
-    if (token) serverUserSessions.set(token, authUser);
-    return authUser;
+    return null;
   }
 
   async function authenticateRequest(req: any, res: any, next: any) {
@@ -5058,27 +5018,6 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
     const cleanEmail = email.trim().toLowerCase();
 
-    // Check Production Admin Credentials
-    if (cleanEmail === 'abhilash98moni@gmail.com') {
-      if (password !== 'Ey@2026@test') {
-        return res.status(401).json({ error: 'Invalid email or password' });
-      }
-
-      return res.json({
-        success: true,
-        message: 'Welcome back, Production System Admin!',
-        user: {
-          id: 'usr-admin-prod',
-          name: 'Abhilash Moni',
-          email: 'abhilash98moni@gmail.com',
-          role: 'Admin',
-          title: 'System Owner & Super Admin',
-          organization: 'Data360 Platform Core',
-          avatarInitials: 'AM'
-        }
-      });
-    }
-
     // Check if user is pending in DB table
     try {
       const client = getSupabaseServerClient();
@@ -5139,57 +5078,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         });
       }
 
-      // 2. Check if user is approved in pending_signup_requests DB table with password match
-      const { data: dbApproved } = await client
-        .from('pending_signup_requests')
-        .select('*')
-        .eq('email', cleanEmail)
-        .eq('status', 'approved')
-        .single();
-
-      if (dbApproved) {
-        if (dbApproved.password_hash && dbApproved.password_hash !== password) {
-          return res.status(401).json({ error: 'Invalid email or password' });
-        }
-        const role = dbApproved.role === 'admin' ? 'Admin' : dbApproved.role === 'distributor' ? 'Distributor' : 'Auditor';
-        const fullName = dbApproved.full_name || cleanEmail.split('@')[0];
-        const initials = fullName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2) || cleanEmail.slice(0, 2).toUpperCase();
-
-        return res.json({
-          success: true,
-          message: 'Welcome back! Approved user logged in.',
-          user: {
-            id: dbApproved.id,
-            name: fullName,
-            email: dbApproved.email,
-            role,
-            title: role === 'Admin' ? 'Platform Owner / Admin' : role === 'Auditor' ? 'Senior Audit Reviewer' : 'Distributor Operations Lead',
-            organization: dbApproved.organization,
-            avatarInitials: initials
-          }
-        });
-      }
-
-      // 3. Check approvedUsersList memory store
-      const inMemoryApproved = approvedUsersList.find(u => u.email.toLowerCase() === cleanEmail);
-      if (inMemoryApproved) {
-        const initials = inMemoryApproved.name.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2);
-        return res.json({
-          success: true,
-          message: 'Welcome back! Approved user logged in.',
-          user: {
-            id: inMemoryApproved.id,
-            name: inMemoryApproved.name,
-            email: inMemoryApproved.email,
-            role: inMemoryApproved.role,
-            title: inMemoryApproved.role === 'Admin' ? 'Platform Owner / Admin' : inMemoryApproved.role === 'Auditor' ? 'Senior Audit Reviewer' : 'Distributor Operations Lead',
-            organization: inMemoryApproved.organization,
-            avatarInitials: initials
-          }
-        });
-      }
-
-      return res.status(401).json({ error: 'Invalid email or password' });
+      return res.status(401).json({ error: error?.message || 'Invalid email or password' });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || 'Login processing error' });
     }

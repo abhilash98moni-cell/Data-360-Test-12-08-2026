@@ -104,7 +104,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
           setErrorMessage(data.error || 'Invalid email or password');
         }
       } catch (err: any) {
-        setErrorMessage('Login failed. Ensure your account has been approved by the Admin.');
+        setErrorMessage(err.message || 'Login failed due to a network or server error.');
       } finally {
         setIsSubmitting(false);
       }
