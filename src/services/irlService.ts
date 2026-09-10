@@ -235,11 +235,14 @@ export async function createAuthoritativeEditRequest(params: {
 }) {
   const { client, distributor, auditId, scope, affectedRequirements, reason, requestedBy, userRole, ipAddress } = params;
 
-  if (!client || !distributor) {
-    throw new Error('Client and distributor are required.');
+  if (!client || !distributor || !reason) {
+    throw new Error('Client, distributor, and reason are required.');
   }
 
-  const trimmedReason = String(reason || '').trim();
+  const trimmedReason = String(reason).trim();
+  if (trimmedReason.length < 50) {
+    throw new Error(`Request reason must be at least 50 characters long. Current length: ${trimmedReason.length} characters.`);
+  }
 
   const supabase = getSupabaseServerClient();
   const stateKey = `${client}::${distributor}`;
@@ -441,168 +444,14 @@ export async function reviewAuthoritativeEditRequest(params: {
     throw new Error(`Failed to record review update in database: ${insertRes.error.message}`);
   }
 
-  // Unlock or lock across Business Questionnaire, IRL, and Sampling
-  const targetAuditId = updatedEditRequest.audit_id || 'eng-101';
-  const qStateKey = `${targetClient}::${targetDistributor}::${targetAuditId}`;
-
+  // If approved, unlock the authoritative submission state in Supabase
   if (action === 'APPROVED') {
-    // 1. IRL Unlock
-    const current = await getAuthoritativeIRLState(targetClient, targetDistributor, targetAuditId);
+    const current = await getAuthoritativeIRLState(targetClient, targetDistributor, updatedEditRequest.audit_id || 'eng-101');
     await saveAuthoritativeIRLState(targetClient, targetDistributor, {
       ...current.state,
       isLocked: false,
       status: 'In Progress'
     });
-
-    // 2. Business Questionnaire Unlock
-    try {
-      const { data: qLogs } = await supabase
-        .from('system_audit_logs')
-        .select('*')
-        .eq('event_type', 'QUESTIONNAIRE_DISTRIBUTOR_STATE')
-        .eq('target_user_email', qStateKey)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      const existingQ = qLogs && qLogs[0] ? qLogs[0].details : {};
-      const updatedQ = {
-        ...existingQ,
-        client: targetClient,
-        distributor: targetDistributor,
-        auditId: targetAuditId,
-        isLocked: false,
-        editAccessStatus: 'APPROVED',
-        status: existingQ.status === 'Submitted' ? 'In Progress' : (existingQ.status || 'In Progress'),
-        editAccessApprovedAt: nowIso,
-        editAccessApprovedBy: reviewedBy || 'APEX Auditor',
-        version: (existingQ.version || 1) + 1,
-        updatedAt: nowIso,
-        updatedBy: reviewedBy || 'APEX Auditor'
-      };
-
-      await supabase.from('system_audit_logs').insert({
-        event_type: 'QUESTIONNAIRE_DISTRIBUTOR_STATE',
-        target_user_email: qStateKey,
-        details: updatedQ,
-        created_at: nowIso
-      });
-    } catch (err) {
-      console.warn('Could not unlock Questionnaire state:', err);
-    }
-
-    // 3. Sampling Unlock
-    try {
-      const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const { data: existingSamp } = await supabase
-        .from('system_audit_logs')
-        .select('*')
-        .eq('event_type', 'SAMPLING_STATE');
-
-      const matchingSamp = (existingSamp || []).find(d => {
-        const det = d.details || {};
-        return (!det.distributorId || cleanStr(det.distributorId) === cleanStr(targetDistributor));
-      });
-
-      const updatedSamp = {
-        ...(matchingSamp?.details || {}),
-        distributorId: targetDistributor,
-        auditId: targetAuditId,
-        clientName: targetClient,
-        isLocked: false,
-        editAccessStatus: 'APPROVED',
-        unlockedAt: nowIso,
-        unlockedBy: reviewedBy || 'APEX Auditor',
-        updatedAt: nowIso
-      };
-
-      await supabase.from('system_audit_logs').insert({
-        event_type: 'SAMPLING_STATE',
-        target_user_email: `${targetClient}::${targetDistributor}`,
-        details: updatedSamp,
-        created_at: nowIso
-      });
-    } catch (err) {
-      console.warn('Could not unlock Sampling state:', err);
-    }
-  } else if (action === 'REJECTED') {
-    // 1. IRL Lock
-    const current = await getAuthoritativeIRLState(targetClient, targetDistributor, targetAuditId);
-    await saveAuthoritativeIRLState(targetClient, targetDistributor, {
-      ...current.state,
-      isLocked: true,
-      status: 'Submitted'
-    });
-
-    // 2. Business Questionnaire Lock
-    try {
-      const { data: qLogs } = await supabase
-        .from('system_audit_logs')
-        .select('*')
-        .eq('event_type', 'QUESTIONNAIRE_DISTRIBUTOR_STATE')
-        .eq('target_user_email', qStateKey)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      const existingQ = qLogs && qLogs[0] ? qLogs[0].details : {};
-      const updatedQ = {
-        ...existingQ,
-        client: targetClient,
-        distributor: targetDistributor,
-        auditId: targetAuditId,
-        isLocked: true,
-        editAccessStatus: 'REJECTED',
-        editAccessRejectedAt: nowIso,
-        editAccessRejectedBy: reviewedBy || 'APEX Auditor',
-        status: 'Submitted',
-        version: (existingQ.version || 1) + 1,
-        updatedAt: nowIso,
-        updatedBy: reviewedBy || 'APEX Auditor'
-      };
-
-      await supabase.from('system_audit_logs').insert({
-        event_type: 'QUESTIONNAIRE_DISTRIBUTOR_STATE',
-        target_user_email: qStateKey,
-        details: updatedQ,
-        created_at: nowIso
-      });
-    } catch (err) {
-      console.warn('Could not lock Questionnaire state:', err);
-    }
-
-    // 3. Sampling Lock
-    try {
-      const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-      const { data: existingSamp } = await supabase
-        .from('system_audit_logs')
-        .select('*')
-        .eq('event_type', 'SAMPLING_STATE');
-
-      const matchingSamp = (existingSamp || []).find(d => {
-        const det = d.details || {};
-        return (!det.distributorId || cleanStr(det.distributorId) === cleanStr(targetDistributor));
-      });
-
-      const updatedSamp = {
-        ...(matchingSamp?.details || {}),
-        distributorId: targetDistributor,
-        auditId: targetAuditId,
-        clientName: targetClient,
-        isLocked: true,
-        editAccessStatus: 'REJECTED',
-        rejectedAt: nowIso,
-        rejectedBy: reviewedBy || 'APEX Auditor',
-        updatedAt: nowIso
-      };
-
-      await supabase.from('system_audit_logs').insert({
-        event_type: 'SAMPLING_STATE',
-        target_user_email: `${targetClient}::${targetDistributor}`,
-        details: updatedSamp,
-        created_at: nowIso
-      });
-    } catch (err) {
-      console.warn('Could not lock Sampling state:', err);
-    }
   }
 
   // Audit log

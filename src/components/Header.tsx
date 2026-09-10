@@ -25,8 +25,7 @@ import {
 } from 'lucide-react';
 
 import { CurrencyMode } from '../utils/currencyFormatter';
-import { CLIENT_TENANTS, getDistributorsForClient, getAllRegisteredDistributors, getDistributorsForEngagement, DistributorInfo } from '../data/clientsAndDistributors';
-import { AuditEngagement } from '../types';
+import { CLIENT_TENANTS, getDistributorsForClient, getAllRegisteredDistributors, DistributorInfo } from '../data/clientsAndDistributors';
 import { UserSession } from './AuthModal';
 
 interface HeaderProps {
@@ -47,8 +46,6 @@ interface HeaderProps {
   onOpenNotifications?: () => void;
   onLogout?: () => void;
   onNavigateToProfile?: (tab: 'profile' | 'security') => void;
-  currentEngagement?: AuditEngagement | null;
-  availableDistributors?: DistributorInfo[];
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -68,23 +65,94 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuth,
   onOpenNotifications,
   onLogout,
-  onNavigateToProfile,
-  currentEngagement,
-  availableDistributors: availableDistributorsProp
+  onNavigateToProfile
 }) => {
   const [isDistributorDropdownOpen, setIsDistributorDropdownOpen] = useState(false);
   const [distributorSearchQuery, setDistributorSearchQuery] = useState('');
   const distributorDropdownRef = React.useRef<HTMLDivElement>(null);
 
+  // Baseline initial demo engagement IDs to distinguish from newly created audit engagements
+  const BASELINE_DEMO_ENGAGEMENT_IDS = React.useMemo(() => new Set([
+    'eng-101', 'eng-102', 'eng-103', 'eng-104', 'eng-105', 'eng-106'
+  ]), []);
+
   const availableDistributors = React.useMemo(() => {
-    if (availableDistributorsProp && availableDistributorsProp.length > 0) {
-      return availableDistributorsProp;
+    const all = getAllRegisteredDistributors();
+    const sourceList: DistributorInfo[] = (all && all.length > 0) ? all : getDistributorsForClient(selectedClient);
+
+    // Identify any distributors attached to newly created audit engagements
+    const newEngagementDistributors: DistributorInfo[] = [];
+    const newEngagementDistributorNames = new Set<string>();
+
+    if (typeof window !== 'undefined') {
+      try {
+        const storedEngs = localStorage.getItem('data360_engagements');
+        if (storedEngs) {
+          const parsed = JSON.parse(storedEngs);
+          if (Array.isArray(parsed)) {
+            parsed.forEach((eng: any) => {
+              // Any engagement beyond the initial baseline demo set
+              if (eng && eng.id && !BASELINE_DEMO_ENGAGEMENT_IDS.has(eng.id)) {
+                const distName = (eng.distributorName || '').trim();
+                if (distName) {
+                  newEngagementDistributorNames.add(distName.toLowerCase());
+                  if (!sourceList.some(d => d.name.toLowerCase().trim() === distName.toLowerCase())) {
+                    newEngagementDistributors.push({
+                      id: `dist-${eng.id}`,
+                      name: distName,
+                      code: eng.distributorCode || `${distName.substring(0, 3).toUpperCase()}-001`,
+                      region: eng.location || 'Active Engagement Territory',
+                      status: eng.status || 'Planning'
+                    });
+                  }
+                }
+                sourceList.forEach(d => {
+                  if (
+                    (eng.title && eng.title.toLowerCase().includes(d.name.toLowerCase())) ||
+                    (eng.location && eng.location.toLowerCase().includes(d.name.toLowerCase())) ||
+                    (d.code && eng.location && eng.location.toLowerCase().includes(d.code.toLowerCase()))
+                  ) {
+                    newEngagementDistributorNames.add(d.name.toLowerCase().trim());
+                  }
+                });
+              }
+            });
+          }
+        }
+      } catch (e) {}
     }
-    if (currentEngagement) {
-      return getDistributorsForEngagement(currentEngagement);
+
+    const combinedList = [...sourceList, ...newEngagementDistributors];
+
+    // For current audit engagement: show only Midwest Trading Co. (MDT-8092).
+    // Dynamically include additional distributors only if attached to a newly created audit engagement.
+    return combinedList.filter(d => {
+      const lower = d.name.toLowerCase().trim();
+      if (lower === 'midwest trading co.' || d.code === 'MDT-8092' || lower.includes('midwest trading')) {
+        return true;
+      }
+      if (newEngagementDistributorNames.has(lower)) {
+        return true;
+      }
+      return false;
+    });
+  }, [selectedClient, isDistributorDropdownOpen, BASELINE_DEMO_ENGAGEMENT_IDS]);
+
+  // If the active distributor was previously pointing to an excluded distributor without an engagement, fallback to Midwest Trading Co.
+  React.useEffect(() => {
+    const lowerSelected = selectedDistributor.toLowerCase().trim();
+    if (lowerSelected === 'all distributors') return;
+
+    const isValid = availableDistributors.some(
+      d => d.name.toLowerCase().trim() === lowerSelected ||
+           (d.code && lowerSelected.includes(d.code.toLowerCase())) ||
+           lowerSelected.includes(d.name.toLowerCase().trim()) ||
+           (lowerSelected.includes('midwest') && d.name.toLowerCase().includes('midwest'))
+    );
+    if (!isValid) {
+      onDistributorChange('Midwest Trading Co.');
     }
-    return getDistributorsForEngagement(null);
-  }, [availableDistributorsProp, currentEngagement]);
+  }, [selectedDistributor, availableDistributors, onDistributorChange]);
 
   const filteredDistributors = React.useMemo(() => {
     if (!distributorSearchQuery.trim()) return availableDistributors;
@@ -265,7 +333,9 @@ export const Header: React.FC<HeaderProps> = ({
                       </div>
                     ) : (
                       filteredDistributors.map((d) => {
-                        const isSelected = selectedDistributor.toLowerCase() === d.name.toLowerCase();
+                        const isSelected = selectedDistributor.toLowerCase() === d.name.toLowerCase() ||
+                          (selectedDistributor.toLowerCase().includes('midwest') && d.name.toLowerCase().includes('midwest'));
+                        const displayName = d.code && !d.name.includes(d.code) ? `${d.name} (${d.code})` : d.name;
                         return (
                           <button
                             key={d.id || d.name}
@@ -286,13 +356,8 @@ export const Header: React.FC<HeaderProps> = ({
                             <div className="min-w-0 pr-2">
                               <div className="flex items-center gap-1.5">
                                 <span className={`font-bold truncate ${isSelected ? 'text-emerald-300' : 'text-slate-200 group-hover:text-white'}`}>
-                                  {d.name}
+                                  {displayName}
                                 </span>
-                                {d.code && (
-                                  <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-slate-300 border border-slate-700/60 shrink-0">
-                                    {d.code}
-                                  </span>
-                                )}
                               </div>
                               <div className="flex items-center gap-1.5 mt-0.5 text-[10px] text-slate-400 truncate">
                                 <span className="truncate">{d.region}</span>

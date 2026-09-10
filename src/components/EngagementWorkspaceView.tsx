@@ -15,7 +15,6 @@ import {
 import { BusinessQuestionnaireView } from './questionnaire/BusinessQuestionnaireView';
 import { InitialInformationRequestView } from './InitialInformationRequestView';
 import { SamplingUploadView } from './SamplingUploadView';
-import { AuditorAccessRequestBanner } from './AuditorAccessRequestBanner';
 import { INITIAL_IIR_REQUESTS, INITIAL_IIR_AUDIT_TRAIL } from '../data/iirData';
 import { UserSession } from './AuthModal';
 
@@ -129,16 +128,6 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
             </button>
           </div>
         </div>
-      )}
-
-      {/* Auditor Edit Access Request Notification Banner */}
-      {isAuditor && (
-        <AuditorAccessRequestBanner
-          client={selectedClient}
-          distributor={distributorProp}
-          auditId={selectedAuditFilter || 'eng-101'}
-          currentUser={currentUser}
-        />
       )}
 
       {/* Sub-Tab Content Rendering */}

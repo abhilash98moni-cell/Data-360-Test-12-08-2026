@@ -441,11 +441,17 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
     try {
       const { client, distributor, auditId, scope, affectedRequirements, reason, requestedBy, userRole } = req.body;
 
-      if (!client || !distributor) {
-        return res.status(400).json({ success: false, error: 'Client and distributor are required.' });
+      if (!client || !distributor || !reason) {
+        return res.status(400).json({ success: false, error: 'Client, distributor, and reason are required.' });
       }
 
-      const trimmedReason = String(reason || '').trim();
+      const trimmedReason = String(reason).trim();
+      if (trimmedReason.length < 50) {
+        return res.status(400).json({
+          success: false,
+          error: `Request reason must be at least 50 characters long. Current length: ${trimmedReason.length} characters.`
+        });
+      }
 
       const supabase = getSupabaseServerClient();
       const stateKey = `${client}::${distributor}`;
@@ -475,13 +481,11 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         client_name: client,
         distributor_name: distributor,
         audit_id: auditId || 'eng-101',
-        scope: scope || 'All Sections (Questionnaire, IRL, Sampling)',
+        scope: scope || 'Entire IRL',
         affected_requirements: affectedRequirements || [],
         requested_by: requestedBy || distributor,
         request_reason: trimmedReason,
         status: 'PENDING',
-        decision: 'PENDING',
-        access_status: 'PENDING',
         requested_at: nowIso,
         created_at: nowIso,
         updated_at: nowIso
@@ -498,60 +502,6 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         throw new Error(`Failed to save edit request to database: ${insertRes.error.message}`);
       }
 
-      try {
-        await supabase.from('irl_edit_requests').upsert({
-          id: requestId,
-          client_name: client,
-          distributor_name: distributor,
-          audit_id: auditId || 'eng-101',
-          scope: scope || 'All Sections (Questionnaire, IRL, Sampling)',
-          affected_requirements: affectedRequirements || [],
-          requested_by: requestedBy || distributor,
-          request_reason: trimmedReason,
-          status: 'PENDING',
-          requested_at: nowIso,
-          created_at: nowIso,
-          updated_at: nowIso
-        });
-      } catch (e) {
-        // Fallback safely if table not available
-      }
-
-      // Update Questionnaire distributor state to record pending request
-      const targetAuditId = auditId || 'eng-101';
-      const qStateKey = `${client}::${distributor}::${targetAuditId}`;
-      try {
-        const { data: qLogs } = await supabase
-          .from('system_audit_logs')
-          .select('*')
-          .eq('event_type', 'QUESTIONNAIRE_DISTRIBUTOR_STATE')
-          .eq('target_user_email', qStateKey)
-          .order('created_at', { ascending: false })
-          .limit(1);
-
-        const existingQ = qLogs && qLogs[0] ? qLogs[0].details : {};
-        const updatedQ = {
-          ...existingQ,
-          client,
-          distributor,
-          auditId: targetAuditId,
-          editAccessStatus: 'REQUESTED',
-          editAccessRequestedAt: nowIso,
-          editAccessRequestedBy: requestedBy || distributor,
-          editAccessReason: trimmedReason,
-          version: (existingQ.version || 1) + 1,
-          updatedAt: nowIso,
-          updatedBy: requestedBy || distributor
-        };
-
-        await supabase.from('system_audit_logs').insert({
-          event_type: 'QUESTIONNAIRE_DISTRIBUTOR_STATE',
-          target_user_email: qStateKey,
-          details: updatedQ,
-          created_at: nowIso
-        });
-      } catch (err) {}
-
       // Notifications
       try {
         await dispatchNotification({
@@ -559,16 +509,15 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           target_organization: distributor,
           category: 'Edit Access Requested',
           title: `Edit Access Requested: ${distributor}`,
-          message: `${distributor} requested edit access for ${client} audit across Questionnaire, IRL, and Sampling.${trimmedReason ? ` Reason: "${trimmedReason}"` : ''}`,
-          link_tab: 'engagement_workspace',
+          message: `${distributor} requested edit access for ${client} audit. Scope: ${scope || 'Entire IRL'}. Request ID: ${requestId}.`,
+          link_tab: 'iir',
           metadata: {
             distributorName: distributor,
             client,
             requestId,
-            scope: scope || 'All Sections (Questionnaire, IRL, Sampling)',
-            linkTab: 'engagement_workspace',
-            targetRole: 'Auditor',
-            reason: trimmedReason
+            scope,
+            linkTab: 'iir',
+            targetRole: 'Auditor'
           }
         });
       } catch (e) {
@@ -681,13 +630,10 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const reqObj = targetLog?.details || {};
       const targetClient = client || reqObj.client_name || reqObj.client;
       const targetDistributor = distributor || reqObj.distributor_name || reqObj.distributor;
-      const targetAuditId = reqObj.audit_id || 'eng-101';
 
       const updatedRequest = {
         ...reqObj,
         status: 'APPROVED',
-        decision: 'APPROVED',
-        access_status: 'APPROVED',
         reviewed_by: reviewedBy || 'APEX Auditor',
         reviewed_at: nowIso,
         approved_at: nowIso,
@@ -702,101 +648,14 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         created_at: nowIso
       });
 
-      try {
-        await supabase.from('irl_edit_requests').upsert({
-          id: requestId,
-          client_name: targetClient,
-          distributor_name: targetDistributor,
-          audit_id: targetAuditId,
-          status: 'APPROVED',
-          reviewer_comment: comment || 'Edit access approved by APEX Lead Auditor.',
-          reviewed_by: reviewedBy || 'APEX Auditor',
-          reviewed_at: nowIso,
-          approved_at: nowIso,
-          updated_at: nowIso
-        });
-      } catch (e) {}
-
-      // 1. Unlock IRL in Supabase
+      // Unlock the IRL in Supabase
       if (targetClient && targetDistributor) {
-        const current = await getAuthoritativeIRLState(targetClient, targetDistributor, targetAuditId);
+        const current = await getAuthoritativeIRLState(targetClient, targetDistributor);
         await saveAuthoritativeIRLState(targetClient, targetDistributor, {
           ...current.state,
           isLocked: false,
           status: 'In Progress'
         });
-      }
-
-      // 2. Unlock Business Questionnaire in Supabase
-      const qStateKey = `${targetClient}::${targetDistributor}::${targetAuditId}`;
-      try {
-        const { data: qLogs } = await supabase
-          .from('system_audit_logs')
-          .select('*')
-          .eq('event_type', 'QUESTIONNAIRE_DISTRIBUTOR_STATE')
-          .eq('target_user_email', qStateKey)
-          .order('created_at', { ascending: false })
-          .limit(1);
-
-        const existingQ = qLogs && qLogs[0] ? qLogs[0].details : {};
-        const updatedQ = {
-          ...existingQ,
-          client: targetClient,
-          distributor: targetDistributor,
-          auditId: targetAuditId,
-          isLocked: false,
-          editAccessStatus: 'APPROVED',
-          status: existingQ.status === 'Submitted' ? 'In Progress' : (existingQ.status || 'In Progress'),
-          editAccessApprovedAt: nowIso,
-          editAccessApprovedBy: reviewedBy || 'APEX Auditor',
-          version: (existingQ.version || 1) + 1,
-          updatedAt: nowIso,
-          updatedBy: reviewedBy || 'APEX Auditor'
-        };
-
-        await supabase.from('system_audit_logs').insert({
-          event_type: 'QUESTIONNAIRE_DISTRIBUTOR_STATE',
-          target_user_email: qStateKey,
-          details: updatedQ,
-          created_at: nowIso
-        });
-      } catch (err) {
-        console.warn('Could not unlock Questionnaire state in approve:', err);
-      }
-
-      // 3. Unlock Sampling in Supabase
-      try {
-        const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const { data: existingSamp } = await supabase
-          .from('system_audit_logs')
-          .select('*')
-          .eq('event_type', 'SAMPLING_STATE');
-
-        const matchingSamp = (existingSamp || []).find(d => {
-          const det = d.details || {};
-          return (!det.distributorId || cleanStr(det.distributorId) === cleanStr(targetDistributor));
-        });
-
-        const updatedSamp = {
-          ...(matchingSamp?.details || {}),
-          distributorId: targetDistributor,
-          auditId: targetAuditId,
-          clientName: targetClient,
-          isLocked: false,
-          editAccessStatus: 'APPROVED',
-          unlockedAt: nowIso,
-          unlockedBy: reviewedBy || 'APEX Auditor',
-          updatedAt: nowIso
-        };
-
-        await supabase.from('system_audit_logs').insert({
-          event_type: 'SAMPLING_STATE',
-          target_user_email: `${targetClient}::${targetDistributor}`,
-          details: updatedSamp,
-          created_at: nowIso
-        });
-      } catch (err) {
-        console.warn('Could not unlock Sampling state in approve:', err);
       }
 
       // System audit log & Notification
@@ -806,9 +665,9 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           user_email: 'auditor@data360.com',
           user_role: 'Auditor',
           organization: targetClient || 'APEX Audit',
-          action: 'Edit Access Approved',
+          action: 'IRL Edit Access Approved',
           ip_address: req.ip || '127.0.0.1',
-          details: `Edit access approved for request ${requestId} (${targetDistributor} / ${targetClient}). Business Questionnaire, IRL, and Sampling unlocked. Comment: "${comment || 'Approved'}"`
+          details: `Edit access approved for request ${requestId} (${targetDistributor} / ${targetClient}). Submission unlocked. Comment: "${comment || 'Approved'}"`
         });
 
         await dispatchNotification({
@@ -816,13 +675,13 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           target_organization: targetDistributor || 'Midwest Trading Co.',
           category: 'Edit Access Approved',
           title: 'Edit Access Approved',
-          message: `Your request for edit access for ${targetClient || 'the audit'} has been approved by ${reviewedBy || 'APEX Auditor'}. Editing is unlocked across Business Questionnaire, IRL, and Sampling.${comment ? ` Note: "${comment}"` : ''}`,
-          link_tab: 'engagement_workspace',
+          message: `Your request for edit access for ${targetClient || 'the audit'} has been approved by APEX. You may now edit permitted requirements.`,
+          link_tab: 'iir',
           metadata: {
             distributorName: targetDistributor,
             client: targetClient,
             requestId,
-            linkTab: 'engagement_workspace',
+            linkTab: 'iir',
             targetRole: 'Distributor'
           }
         });
@@ -830,7 +689,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
 
       return res.json({
         success: true,
-        message: 'Edit access request approved! Editing is unlocked across Business Questionnaire, IRL, and Sampling.',
+        message: 'Edit access request approved and IRL submission unlocked successfully!',
         requestId,
         status: 'APPROVED',
         isLocked: false
@@ -860,6 +719,13 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         });
       }
 
+      if (!comment || String(comment).trim().length === 0) {
+        return res.status(400).json({
+          success: false,
+          error: 'A rejection comment/reason is required.'
+        });
+      }
+
       const supabase = getSupabaseServerClient();
       const nowIso = new Date().toISOString();
 
@@ -873,19 +739,14 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const reqObj = targetLog?.details || {};
       const targetClient = client || reqObj.client_name || reqObj.client;
       const targetDistributor = distributor || reqObj.distributor_name || reqObj.distributor;
-      const targetAuditId = reqObj.audit_id || 'eng-101';
-
-      const rejectionComment = String(comment || 'Request declined by auditor.').trim();
 
       const updatedRequest = {
         ...reqObj,
         status: 'REJECTED',
-        decision: 'REJECTED',
-        access_status: 'REJECTED',
         reviewed_by: reviewedBy || 'APEX Auditor',
         reviewed_at: nowIso,
         rejected_at: nowIso,
-        reviewer_comment: rejectionComment,
+        reviewer_comment: String(comment).trim(),
         updated_at: nowIso
       };
 
@@ -897,125 +758,28 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       });
 
       try {
-        await supabase.from('irl_edit_requests').upsert({
-          id: requestId,
-          client_name: targetClient,
-          distributor_name: targetDistributor,
-          audit_id: targetAuditId,
-          status: 'REJECTED',
-          reviewer_comment: rejectionComment,
-          reviewed_by: reviewedBy || 'APEX Auditor',
-          reviewed_at: nowIso,
-          rejected_at: nowIso,
-          updated_at: nowIso
-        });
-      } catch (e) {}
-
-      // 1. Lock IRL
-      if (targetClient && targetDistributor) {
-        const current = await getAuthoritativeIRLState(targetClient, targetDistributor, targetAuditId);
-        await saveAuthoritativeIRLState(targetClient, targetDistributor, {
-          ...current.state,
-          isLocked: true,
-          status: 'Submitted'
-        });
-      }
-
-      // 2. Lock Business Questionnaire
-      const qStateKey = `${targetClient}::${targetDistributor}::${targetAuditId}`;
-      try {
-        const { data: qLogs } = await supabase
-          .from('system_audit_logs')
-          .select('*')
-          .eq('event_type', 'QUESTIONNAIRE_DISTRIBUTOR_STATE')
-          .eq('target_user_email', qStateKey)
-          .order('created_at', { ascending: false })
-          .limit(1);
-
-        const existingQ = qLogs && qLogs[0] ? qLogs[0].details : {};
-        const updatedQ = {
-          ...existingQ,
-          client: targetClient,
-          distributor: targetDistributor,
-          auditId: targetAuditId,
-          isLocked: true,
-          editAccessStatus: 'REJECTED',
-          editAccessRejectedAt: nowIso,
-          editAccessRejectedBy: reviewedBy || 'APEX Auditor',
-          status: 'Submitted',
-          version: (existingQ.version || 1) + 1,
-          updatedAt: nowIso,
-          updatedBy: reviewedBy || 'APEX Auditor'
-        };
-
-        await supabase.from('system_audit_logs').insert({
-          event_type: 'QUESTIONNAIRE_DISTRIBUTOR_STATE',
-          target_user_email: qStateKey,
-          details: updatedQ,
-          created_at: nowIso
-        });
-      } catch (err) {
-        console.warn('Could not lock Questionnaire state in reject:', err);
-      }
-
-      // 3. Lock Sampling
-      try {
-        const cleanStr = (s: any) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-        const { data: existingSamp } = await supabase
-          .from('system_audit_logs')
-          .select('*')
-          .eq('event_type', 'SAMPLING_STATE');
-
-        const matchingSamp = (existingSamp || []).find(d => {
-          const det = d.details || {};
-          return (!det.distributorId || cleanStr(det.distributorId) === cleanStr(targetDistributor));
-        });
-
-        const updatedSamp = {
-          ...(matchingSamp?.details || {}),
-          distributorId: targetDistributor,
-          auditId: targetAuditId,
-          clientName: targetClient,
-          isLocked: true,
-          editAccessStatus: 'REJECTED',
-          rejectedAt: nowIso,
-          rejectedBy: reviewedBy || 'APEX Auditor',
-          updatedAt: nowIso
-        };
-
-        await supabase.from('system_audit_logs').insert({
-          event_type: 'SAMPLING_STATE',
-          target_user_email: `${targetClient}::${targetDistributor}`,
-          details: updatedSamp,
-          created_at: nowIso
-        });
-      } catch (err) {
-        console.warn('Could not lock Sampling state in reject:', err);
-      }
-
-      try {
         await supabase.from('system_audit_logs').insert({
           user_name: reviewedBy || 'APEX Auditor',
           user_email: 'auditor@data360.com',
           user_role: 'Auditor',
           organization: targetClient || 'APEX Audit',
-          action: 'Edit Access Rejected',
+          action: 'IRL Edit Access Rejected',
           ip_address: req.ip || '127.0.0.1',
-          details: `Edit access rejected for request ${requestId} (${targetDistributor} / ${targetClient}). Reason: "${rejectionComment}"`
+          details: `Edit access rejected for request ${requestId} (${targetDistributor} / ${targetClient}). Reason: "${String(comment).trim()}"`
         });
 
         await dispatchNotification({
           target_role: 'Distributor',
           target_organization: targetDistributor || 'Midwest Trading Co.',
           category: 'Edit Access Rejected',
-          title: 'Edit Access Request Rejected',
-          message: `Your request for edit access for ${targetClient || 'the audit'} was rejected by ${reviewedBy || 'APEX Auditor'}. Reason: "${rejectionComment}". All sections remain in read-only mode.`,
-          link_tab: 'engagement_workspace',
+          title: 'Edit Access Rejected',
+          message: `Your request for edit access for ${targetClient || 'the audit'} has been rejected by APEX. Reason: "${String(comment).trim()}".`,
+          link_tab: 'iir',
           metadata: {
             distributorName: targetDistributor,
             client: targetClient,
             requestId,
-            linkTab: 'engagement_workspace',
+            linkTab: 'iir',
             targetRole: 'Distributor'
           }
         });
@@ -1023,7 +787,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
 
       return res.json({
         success: true,
-        message: 'Edit access request rejected. All sections remain in read-only mode.',
+        message: 'Edit access request rejected.',
         requestId,
         status: 'REJECTED',
         isLocked: true
@@ -4462,7 +4226,25 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       });
       // SERVER-SIDE TENANT ISOLATION: Force distributorName to user's organization if role is Distributor
       if (targetDistributor && targetDistributor !== 'All Distributors') {
-        dbRecords = dbRecords.filter(r => r.distributorName === targetDistributor);
+        const normTarget = targetDistributor.toLowerCase().trim();
+        dbRecords = dbRecords.filter(r => {
+          const normDist = (r.distributorName || '').toLowerCase().trim();
+          if (normTarget.includes('midwest') && normDist.includes('midwest')) return true;
+          return normDist === normTarget;
+        });
+      } else {
+        // "All Distributors" must currently show ONLY Midwest Trading Co. data, since Midwest is the only distributor included in this audit.
+        // Do NOT load, display, or aggregate data from Horizon Logistics, Pacific Rim, Nexus, or any other excluded distributor.
+        // Keep the “All Distributors” option for future use when additional distributors are added to a new audit engagement.
+        const EXCLUDED_DEMO_NAMES = ['horizon', 'pacific rim', 'nexus', 'middle east', 'eurotech', 'latam'];
+        const EXCLUDED_ENGAGEMENT_IDS = ['eng-102', 'eng-103', 'eng-104', 'eng-105', 'eng-106'];
+        dbRecords = dbRecords.filter(r => {
+          const rAudit = String(r.auditId || '').toLowerCase();
+          if (EXCLUDED_ENGAGEMENT_IDS.includes(rAudit)) return false;
+          const rDist = String(r.distributorName || '').toLowerCase();
+          if (EXCLUDED_DEMO_NAMES.some(ex => rDist.includes(ex))) return false;
+          return true;
+        });
       }
 
       if (client && client !== 'All Clients') {
