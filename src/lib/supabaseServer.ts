@@ -24,7 +24,16 @@ export function isSupabaseServerConfigured(): boolean {
   return Boolean(url && serviceKey && !url.includes('placeholder'));
 }
 
-export function getSupabaseServerClient(): SupabaseClient {
+export function getSupabaseServerClient(token?: string): SupabaseClient {
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || 'https://placeholder-data360.supabase.co';
+  
+  if (token) {
+    const anonKey = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY || 'placeholder-anon-key';
+    return createClient(url, anonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } }
+    });
+  }
+
   if (!serverClientInstance) {
     const url =
       process.env.SUPABASE_URL ||

@@ -252,7 +252,16 @@ CREATE POLICY "Distributor Evidence Isolation Policy" ON public.evidence_files
       SELECT organization_name FROM public.users WHERE id = auth.uid()
     ) OR (
       SELECT role FROM public.users WHERE id = auth.uid()
-    ) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Auditor', 'Reviewer', 'service_role')
+    ) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Reviewer', 'service_role')
+    OR (
+      (SELECT role FROM public.users WHERE id = auth.uid()) = 'Auditor' AND
+      EXISTS (
+        SELECT 1 FROM public.auditor_distributor_access ada
+        WHERE ada.auditor_user_id = auth.uid()
+        AND ada.distributor_name = public.evidence_files.distributor_name
+        AND ada.is_active = true
+      )
+    )
   );
 
 -- Policy: Distributors can ONLY access IRL request items matching their organization name
@@ -262,7 +271,16 @@ CREATE POLICY "Distributor IRL Isolation Policy" ON public.irl_request_items
       SELECT organization_name FROM public.users WHERE id = auth.uid()
     ) OR (
       SELECT role FROM public.users WHERE id = auth.uid()
-    ) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Auditor', 'Reviewer', 'service_role')
+    ) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Reviewer', 'service_role')
+    OR (
+      (SELECT role FROM public.users WHERE id = auth.uid()) = 'Auditor' AND
+      EXISTS (
+        SELECT 1 FROM public.auditor_distributor_access ada
+        WHERE ada.auditor_user_id = auth.uid()
+        AND ada.distributor_name = public.irl_request_items.distributor_name
+        AND ada.is_active = true
+      )
+    )
   );
 
 -- Policy: System Audit Logs insertion policy
@@ -303,7 +321,16 @@ CREATE POLICY "Distributor Edit Requests Isolation Policy" ON public.irl_edit_re
       SELECT organization_name FROM public.users WHERE id = auth.uid()
     ) OR (
       SELECT role FROM public.users WHERE id = auth.uid()
-    ) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Auditor', 'Reviewer', 'service_role')
+    ) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Reviewer', 'service_role')
+    OR (
+      (SELECT role FROM public.users WHERE id = auth.uid()) = 'Auditor' AND
+      EXISTS (
+        SELECT 1 FROM public.auditor_distributor_access ada
+        WHERE ada.auditor_user_id = auth.uid()
+        AND ada.distributor_name = public.irl_edit_requests.distributor_name
+        AND ada.is_active = true
+      )
+    )
   );
 
 -- 13. Audit Reports Table
@@ -346,11 +373,45 @@ ALTER TABLE public.audit_reports ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Auditors can access all reports" ON public.audit_reports
   FOR ALL USING (
-    (SELECT role FROM public.users WHERE id = auth.uid()) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Auditor', 'Reviewer', 'service_role')
+    (SELECT role FROM public.users WHERE id = auth.uid()) IN ('Platform Super Admin', 'AA Super Admin', 'Audit Manager', 'Reviewer', 'service_role')
+    OR (
+      (SELECT role FROM public.users WHERE id = auth.uid()) = 'Auditor' AND
+      EXISTS (
+        SELECT 1 FROM public.auditor_distributor_access ada
+        WHERE ada.auditor_user_id = auth.uid()
+        AND ada.distributor_name = public.audit_reports.distributor_name
+        AND ada.is_active = true
+      )
+    )
   );
 
 CREATE POLICY "Distributors can access their final reports" ON public.audit_reports
   FOR SELECT USING (
     status = 'FINAL' AND
     distributor_name = (SELECT organization_name FROM public.users WHERE id = auth.uid())
+  );
+
+-- 14. Auditor Distributor Access Mapping
+CREATE TABLE IF NOT EXISTS public.auditor_distributor_access (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  auditor_user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  distributor_name VARCHAR(255) NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  created_by VARCHAR(255),
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+  updated_by VARCHAR(255),
+  UNIQUE(auditor_user_id, distributor_name)
+);
+
+ALTER TABLE public.auditor_distributor_access ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Admins full access auditor_distributor" ON public.auditor_distributor_access
+  FOR ALL USING (
+    (SELECT role FROM public.users WHERE id = auth.uid()) IN ('Platform Super Admin', 'AA Super Admin', 'Admin', 'service_role')
+  );
+
+CREATE POLICY "Auditors read own access" ON public.auditor_distributor_access
+  FOR SELECT USING (
+    auditor_user_id = auth.uid()
   );

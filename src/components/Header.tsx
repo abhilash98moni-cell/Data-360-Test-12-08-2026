@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Building2, 
   ShieldAlert, 
@@ -67,7 +67,34 @@ export const Header: React.FC<HeaderProps> = ({
   onNavigateToProfile
 }) => {
   // No longer needed: const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
-  const currentDistributors = getDistributorsForClient(selectedClient);
+  const [authorizedDistributors, setAuthorizedDistributors] = useState<string[]>([]);
+  useEffect(() => {
+    if (currentUser?.role === 'Auditor') {
+       fetch('/api/users/me/distributors', {
+          headers: {
+             'Authorization': 'Bearer ' + localStorage.getItem('supabase_token')
+          }
+       }).then(res => res.json()).then(data => {
+          if (data.success && data.distributors) {
+             setAuthorizedDistributors(data.distributors);
+             if (data.distributors.length === 1) {
+                // Auto-select if there is exactly one
+                onDistributorChange(data.distributors[0]);
+             } else if (data.distributors.length > 0 && selectedDistributor === 'All Distributors') {
+                // Default to the first one instead of 'All Distributors' to avoid confusion if needed
+                onDistributorChange(data.distributors[0]);
+             } else if (data.distributors.length === 0) {
+                onDistributorChange('No Distributors Assigned');
+             }
+          }
+       }).catch(console.error);
+    }
+  }, [currentUser]);
+
+  const allDists = getDistributorsForClient(selectedClient);
+  const currentDistributors = currentUser?.role === 'Auditor' 
+     ? allDists.filter(d => authorizedDistributors.includes(d.name))
+     : allDists;
 
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 px-3 sm:px-4 lg:px-6 py-2.5 shadow-md w-full max-w-full">
@@ -115,9 +142,11 @@ export const Header: React.FC<HeaderProps> = ({
                   onChange={(e) => onDistributorChange(e.target.value)}
                   className="bg-transparent text-emerald-300 text-xs font-semibold focus:outline-none cursor-pointer"
                 >
+                  {currentUser?.role !== 'Auditor' && (
                   <option value="All Distributors" className="bg-slate-900 text-slate-200">
                     All Distributors ({currentDistributors.length})
                   </option>
+                  )}
                   {currentDistributors.map(d => (
                     <option key={d.id} value={d.name} className="bg-slate-900 text-slate-200">
                       {d.name} ({d.code})

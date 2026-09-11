@@ -140,6 +140,65 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
 
   // New Invitation Modal State
   const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+
+  const [selectedAuditorForAccess, setSelectedAuditorForAccess] = useState<any | null>(null);
+  const [auditorAccessMap, setAuditorAccessMap] = useState<Record<string, boolean>>({});
+  const [isLoadingAccess, setIsLoadingAccess] = useState(false);
+  const [allDistributorsList, setAllDistributorsList] = useState<any[]>([]);
+
+  useEffect(() => {
+     if (activeTab === 'users') {
+        fetch('/api/distributors', {
+           headers: { 'Authorization': 'Bearer ' + localStorage.getItem('supabase_token') }
+        }).then(r => r.json()).then(d => {
+           if (d.success) setAllDistributorsList(d.distributors);
+        }).catch(console.error);
+     }
+  }, [activeTab]);
+
+  const openManageAccess = async (user: any) => {
+     setSelectedAuditorForAccess(user);
+     setIsLoadingAccess(true);
+     try {
+        const res = await fetch('/api/admin/auditor-access', {
+           headers: { 'Authorization': 'Bearer ' + localStorage.getItem('supabase_token') }
+        });
+        const data = await res.json();
+        if (data.success) {
+           const map: Record<string, boolean> = {};
+           data.mappings.forEach((m: any) => {
+              if (m.auditor_user_id === user.id) {
+                 map[m.distributor_name] = m.is_active;
+              }
+           });
+           setAuditorAccessMap(map);
+        }
+     } catch (err) {
+        console.error(err);
+     } finally {
+        setIsLoadingAccess(false);
+     }
+  };
+
+  const toggleDistributorAccess = async (userId: string, distName: string, isActive: boolean) => {
+     // Optimistic update
+     setAuditorAccessMap(prev => ({ ...prev, [distName]: isActive }));
+     try {
+        await fetch('/api/admin/auditor-access', {
+           method: 'POST',
+           headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer ' + localStorage.getItem('supabase_token')
+           },
+           body: JSON.stringify({ auditor_user_id: userId, distributor_name: distName, is_active: isActive })
+        });
+     } catch (err) {
+        console.error(err);
+        // Revert on error
+        setAuditorAccessMap(prev => ({ ...prev, [distName]: !isActive }));
+     }
+  };
+
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteName, setInviteName] = useState('');
   const [inviteRole, setInviteRole] = useState<SystemUser['role']>('AA Auditor');
@@ -424,10 +483,10 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
 
                       <td className="py-3.5 px-4 text-right">
                         <button
-                          onClick={onOpenAuth}
+                          onClick={() => user.role.includes('Auditor') ? openManageAccess(user) : onOpenAuth()}
                           className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-semibold rounded-lg transition-colors cursor-pointer"
                         >
-                          Manage Permissions
+                          {user.role.includes('Auditor') ? 'Manage Distributor Access' : 'Manage Permissions'}
                         </button>
                       </td>
                     </tr>
@@ -595,6 +654,55 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
               </div>
               <p className="text-2xl font-black text-white">100% Captured</p>
               <p className="text-xs text-slate-400">Immutable audit trial tracking every document upload, review decision, and permission change.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+
+      {/* DISTRIBUTOR ACCESS MODAL */}
+      {selectedAuditorForAccess && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <h3 className="font-bold text-white text-base flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-indigo-400" />
+                <span>Manage Distributor Access</span>
+              </h3>
+              <button onClick={() => setSelectedAuditorForAccess(null)} className="text-slate-400 hover:text-white">✕</button>
+            </div>
+            
+            <div className="space-y-2">
+               <p className="text-sm text-slate-300">
+                 Authorized distributors for <strong>{selectedAuditorForAccess.name}</strong> ({selectedAuditorForAccess.email}):
+               </p>
+               
+               {isLoadingAccess ? (
+                 <div className="text-xs text-slate-400 animate-pulse py-4 text-center">Loading distributor access...</div>
+               ) : (
+                 <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-2">
+                    {allDistributorsList.map(dist => {
+                       const isActive = auditorAccessMap[dist.name] || false;
+                       return (
+                         <div key={dist.id} className="flex items-center justify-between p-3 bg-slate-950 border border-slate-800 rounded-xl">
+                            <span className="text-sm font-semibold text-slate-200">{dist.name}</span>
+                            <button 
+                               onClick={() => toggleDistributorAccess(selectedAuditorForAccess.id, dist.name, !isActive)}
+                               className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none ${isActive ? 'bg-emerald-500' : 'bg-slate-700'}`}
+                            >
+                               <span className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${isActive ? 'translate-x-5' : 'translate-x-1'}`} />
+                            </button>
+                         </div>
+                       );
+                    })}
+                 </div>
+               )}
+            </div>
+            
+            <div className="pt-4 border-t border-slate-800 text-right">
+              <button onClick={() => setSelectedAuditorForAccess(null)} className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold transition-colors">
+                Done
+              </button>
             </div>
           </div>
         </div>

@@ -104,6 +104,13 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   try {
     const supabase = getSupabaseServerClient();
     let query = supabase.from('distributors').select('*');
+    const role = req.auth?.role;
+    if (role === 'Auditor') {
+      const { data: access } = await supabase.from('auditor_distributor_access').select('distributor_name').eq('auditor_user_id', req.auth.sub).eq('is_active', true);
+      const allowed = (access || []).map(a => a.distributor_name);
+      if (allowed.length === 0) return res.json({ success: true, distributors: [] });
+      query = query.in('entity_name', allowed);
+    }
     if (req.query.name) {
       query = query.eq('entity_name', req.query.name);
     }
@@ -898,6 +905,58 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
 
     return null;
   }
+
+
+  // Global Middleware for Distributor Authorization
+  app.use('/api', async (req: any, res: any, next: any) => {
+    // Skip public/auth routes
+    const openRoutes = ['/api/auth/', '/api/health', '/api/supabase/health', '/api/gdrive/status'];
+    if (openRoutes.some(route => req.path.startsWith(route))) {
+      return next();
+    }
+
+    // Attempt to authenticate
+    let userAuth = req.auth;
+    if (!userAuth) {
+       try {
+          userAuth = await resolveAuthSession(req);
+          if (userAuth) {
+             req.auth = userAuth;
+             req.user = userAuth;
+          }
+       } catch (e) {
+          // ignore error here, some endpoints might not require it or handle it themselves
+       }
+    }
+    
+    if (!userAuth) {
+        // Enforce auth strictly on all non-open API routes to prevent bypass
+        return res.status(401).json({ success: false, error: 'HTTP 401 Unauthorized: Valid authentication token required.' });
+    }
+
+    // ENFORCE DISTRIBUTOR ACCESS FOR AUDITORS
+    const role = req.headers['x-user-role'] || userAuth.role || '';
+    if (role === 'Auditor') {
+       const distributor = req.query.distributor || req.body.distributor || req.body.distributor_name || req.body.distributorName || req.query.distributor_name;
+       
+       if (!distributor || distributor === 'All Distributors' || distributor === 'all') {
+           // To prevent RLS bypass on endpoints using service_role, Auditors MUST specify a single authorized distributor.
+           return res.status(403).json({ success: false, error: 'Access Denied: Auditors must specify a single authorized distributor.' });
+       }
+       
+       const supabase = getSupabaseServerClient();
+       const { data } = await supabase.from('auditor_distributor_access')
+          .select('id')
+          .eq('auditor_user_id', userAuth.sub)
+          .eq('distributor_name', distributor)
+          .eq('is_active', true)
+          .maybeSingle();
+       if (!data) {
+          return res.status(403).json({ success: false, error: 'Access Denied: You are not authorized for this distributor.' });
+       }
+    }
+    next();
+  });
 
   async function authenticateRequest(req: any, res: any, next: any) {
     try {
@@ -6225,7 +6284,8 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
   app.put('/api/reports/:id', authenticateRequest, async (req: any, res: any) => {
     try {
-      const supabase = getSupabaseServerClient();
+      const token = req.headers.authorization?.split(' ')[1];
+      const supabase = getSupabaseServerClient(token);
       const updates = req.body;
       const { id } = req.params;
       if (!id) {
@@ -6253,7 +6313,8 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
   app.delete('/api/reports/:id', authenticateRequest, async (req: any, res: any) => {
     try {
-      const supabase = getSupabaseServerClient();
+      const token = req.headers.authorization?.split(' ')[1];
+      const supabase = getSupabaseServerClient(token);
       const { id } = req.params;
       if (!id) {
         return res.status(400).json({ success: false, error: 'Report ID is required' });
@@ -6335,7 +6396,89 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    
+  // ====================================================================
+  // Auditor Distributor Access API
+  // ====================================================================
+  
+  app.get('/api/admin/auditor-access', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const supabase = getSupabaseServerClient();
+      const role = req.headers['x-user-role'] || req.auth?.role || '';
+      if (!['Platform Super Admin', 'AA Super Admin', 'Admin'].includes(role)) {
+        return res.status(403).json({ error: 'Only administrators can view auditor access mappings' });
+      }
+      const { data, error } = await supabase.from('auditor_distributor_access').select('*');
+      if (error) throw error;
+      res.json({ success: true, mappings: data || [] });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.post('/api/admin/auditor-access', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const supabase = getSupabaseServerClient();
+      const role = req.headers['x-user-role'] || req.auth?.role || '';
+      if (!['Platform Super Admin', 'AA Super Admin', 'Admin'].includes(role)) {
+        return res.status(403).json({ error: 'Only administrators can manage auditor access' });
+      }
+      const { auditor_user_id, distributor_name, is_active } = req.body;
+      if (!auditor_user_id || !distributor_name) {
+         return res.status(400).json({ error: 'Missing required fields' });
+      }
+
+      // Check if exists
+      const { data: existing } = await supabase.from('auditor_distributor_access')
+         .select('*').eq('auditor_user_id', auditor_user_id).eq('distributor_name', distributor_name).maybeSingle();
+      
+      if (existing) {
+         const { error } = await supabase.from('auditor_distributor_access')
+            .update({ is_active, updated_at: new Date().toISOString() })
+            .eq('id', existing.id);
+         if (error) throw error;
+      } else {
+         const { error } = await supabase.from('auditor_distributor_access')
+            .insert({ auditor_user_id, distributor_name, is_active });
+         if (error) throw error;
+      }
+      
+      // Log it
+      await supabase.from('system_audit_logs').insert({
+         action: is_active ? 'GRANTED_ACCESS' : 'REVOKED_ACCESS',
+         user_email: req.auth?.email || 'admin',
+         user_name: 'Admin',
+         user_role: 'Admin',
+         organization: 'Data360',
+         ip_address: req.ip || '0.0.0.0',
+         details: JSON.stringify({ target_auditor: auditor_user_id, distributor: distributor_name })
+      });
+      
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('/api/users/me/distributors', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const supabase = getSupabaseServerClient();
+      const userId = req.auth?.sub;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      
+      const { data, error } = await supabase.from('auditor_distributor_access')
+         .select('distributor_name')
+         .eq('auditor_user_id', userId)
+         .eq('is_active', true);
+         
+      if (error) throw error;
+      res.json({ success: true, distributors: (data || []).map((d: any) => d.distributor_name) });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
