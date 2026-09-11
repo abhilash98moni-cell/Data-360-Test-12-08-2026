@@ -23,13 +23,14 @@ import {
 
 interface NewAuditModalProps {
   isOpen: boolean;
+  selectedDistributor?: string;
   onClose: () => void;
   onAddEngagement: (newEng: AuditEngagement, newDistributorName: string, newClientName: string) => void;
   defaultClient?: string;
   currentUser?: UserSession | null;
 }
 
-export const NewAuditModal: React.FC<NewAuditModalProps> = ({
+export const NewAuditModal: React.FC<NewAuditModalProps> = ({ selectedDistributor, 
   isOpen,
   onClose,
   onAddEngagement,
@@ -37,7 +38,7 @@ export const NewAuditModal: React.FC<NewAuditModalProps> = ({
   currentUser
 }) => {
   const [clientName, setClientName] = useState(defaultClient || 'Apex Electronics Corp');
-  const [distributorName, setDistributorName] = useState('');
+  const [distributorName, setDistributorName] = useState(selectedDistributor && selectedDistributor !== 'All Distributors' && selectedDistributor !== 'No Distributors Assigned' ? selectedDistributor : '');
   const [distributorCode, setDistributorCode] = useState('');
   const [region, setRegion] = useState('North America / West Division');
   const [auditId, setAuditId] = useState('');
@@ -59,6 +60,9 @@ export const NewAuditModal: React.FC<NewAuditModalProps> = ({
 
   // Generate default ID and title whenever distributor name or type changes
   useEffect(() => {
+    if (isOpen && selectedDistributor && selectedDistributor !== 'All Distributors' && selectedDistributor !== 'No Distributors Assigned') {
+      setDistributorName(selectedDistributor);
+    }
     if (!isOpen) return;
 
     const randNum = Math.floor(100 + Math.random() * 900);
@@ -112,7 +116,7 @@ export const NewAuditModal: React.FC<NewAuditModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -133,6 +137,27 @@ export const NewAuditModal: React.FC<NewAuditModalProps> = ({
       const cleanClient = clientName.trim() || 'Apex Electronics Corp';
       const cleanAuditId = auditId.trim();
       const cleanDistCode = distributorCode.trim() || `${cleanDistributor.substring(0, 3).toUpperCase()}-1001`;
+
+      // Validate against the server
+      const token = localStorage.getItem('supabase_token');
+      if (token) {
+        const res = await fetch('/api/audits/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({
+             title: title.trim(),
+             code: cleanDistCode,
+             distributorName: cleanDistributor
+          })
+        });
+        if (!res.ok) {
+           const errData = await res.json();
+           throw new Error(errData.error || 'Server rejected audit creation.');
+        }
+      }
 
       // 1. Register new distributor in master tenant directory so it appears in all dropdowns
       registerNewDistributor(cleanClient, {

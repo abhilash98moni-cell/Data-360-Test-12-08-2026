@@ -127,7 +127,7 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
           ) : (
-            <div className="hidden 2xl:flex items-center gap-2 bg-slate-950/80 border border-slate-800 rounded-xl p-1 text-xs">
+            <div className="hidden lg:flex items-center gap-2 bg-slate-950/80 border border-slate-800 rounded-xl p-1 text-xs">
               <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1">
                 <Building2 className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
                 <span className="text-slate-100 text-xs font-semibold">Apex Electronics</span>

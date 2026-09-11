@@ -274,6 +274,27 @@ export default function App() {
     return matchesClient && matchesDistributor;
   });
 
+  
+  const filteredAssignments = assignments.filter(a => {
+    const eng = engagements.find(e => e.id === a.engagementId);
+    if (!eng) return false;
+    const matchesClient = selectedClient === 'All Clients' || eng.clientName === selectedClient;
+    const matchesDistributor = activeDistributorFilter === 'All Distributors' ||
+      eng.title.toLowerCase().includes(activeDistributorFilter.toLowerCase()) ||
+      eng.code.toLowerCase().includes(activeDistributorFilter.toLowerCase());
+    return matchesClient && matchesDistributor;
+  });
+
+  const filteredSamplingRuns = samplingRuns.filter(s => {
+    const eng = engagements.find(e => e.id === s.engagementId);
+    if (!eng) return false;
+    const matchesClient = selectedClient === 'All Clients' || eng.clientName === selectedClient;
+    const matchesDistributor = activeDistributorFilter === 'All Distributors' ||
+      eng.title.toLowerCase().includes(activeDistributorFilter.toLowerCase()) ||
+      eng.code.toLowerCase().includes(activeDistributorFilter.toLowerCase());
+    return matchesClient && matchesDistributor;
+  });
+
   // Update Finding Status handler
   const handleUpdateFindingStatus = (id: string, newStatus: any) => {
     setFindings(prev => prev.map(f => f.id === id ? { ...f, status: newStatus } : f));
@@ -392,10 +413,10 @@ export default function App() {
             />
           ) : activeTab === 'dashboard' ? (
             <DashboardView 
-              engagements={filteredEngagements.length > 0 ? filteredEngagements : engagements}
-              findings={filteredFindings.length > 0 ? filteredFindings : findings}
-              samplingRuns={samplingRuns}
-              assignments={assignments}
+              engagements={filteredEngagements}
+              findings={filteredFindings}
+              samplingRuns={filteredSamplingRuns}
+              assignments={filteredAssignments}
               onSelectEngagement={(id) => {
                 setSelectedEngId(id);
                 const eng = engagements.find(e => e.id === id);
@@ -500,7 +521,7 @@ export default function App() {
 
       <NewAuditModal 
         isOpen={isNewAuditOpen}
-        onClose={() => setIsNewAuditOpen(false)}
+        onClose={() => setIsNewAuditOpen(false)} selectedDistributor={selectedDistributor}
         onAddEngagement={handleAddEngagement}
         defaultClient={selectedClient}
         currentUser={currentUser}
