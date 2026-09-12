@@ -455,7 +455,7 @@ export default function App() {
               targetVoucherNo={targetVoucherNo}
             />
 
-          ) : activeTab === 'reporting' ? (
+          ) : activeTab === 'reporting' && currentUser?.role !== 'Distributor' ? (
             <ReportingView 
               currentUser={currentUser}
               selectedClient={selectedClient}

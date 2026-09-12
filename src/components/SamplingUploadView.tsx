@@ -751,22 +751,14 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
         
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 relative z-10">
           <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 uppercase tracking-wide">
-                Engagement Workspace • Population Intake
-              </span>
-              <span className="text-slate-500">•</span>
-              <span className="text-xs text-slate-400 font-medium">Authoritative Database Storage</span>
-            </div>
             <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-2">
               <FileSpreadsheet className="h-5 w-5 text-indigo-400" />
               General Ledger Population Management
             </h1>
             <p className="text-xs text-slate-400 max-w-2xl leading-relaxed">
-              Upload, map, and prepare complete General Ledger populations for audit testing. Files uploaded here are automatically saved to the database and instantly available in <strong className="text-indigo-300 font-semibold">Sampling Review</strong>.
+              Upload and prepare General Ledger populations for audit testing.
             </p>
           </div>
-
           <div className="flex items-center gap-3 shrink-0">
             {!isDistributor && (
               <button
@@ -1013,9 +1005,6 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                 {filteredRecords.length} of {records.length} transactions
               </span>
             </h3>
-            <p className="text-[11px] text-slate-400 mt-0.5">
-              Review imported entries and verify voucher references before conducting sampling classification in Sampling Review.
-            </p>
           </div>
 
           <div className="flex items-center gap-2.5">
@@ -1202,7 +1191,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
           </span>
           <span className="text-[11px] text-slate-500">
             {isDistributor ? (
-              <span>Provide required transaction evidence and questionnaire responses for audit attribute verification.</span>
+              <span>Provide transaction evidence and responses.</span>
             ) : (
               <span>For audit attribute testing and sample selection, navigate to <strong className="text-indigo-400 font-semibold">Sampling Review</strong> in the main navigation.</span>
             )}

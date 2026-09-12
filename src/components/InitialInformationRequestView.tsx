@@ -1779,9 +1779,11 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                 <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
                   {activeDistributorName}
                 </h1>
-                <span className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  {viewRole === 'Distributor' ? 'Document & Information Submission Portal' : 'Audit Request Manager'}
-                </span>
+                {viewRole === 'Auditor' && (
+                  <span className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                    Audit Request Manager
+                  </span>
+                )}
                 {isLocked ? (
                   <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
                     <Lock className="h-3 w-3" /> Locked & Submitted
@@ -1793,9 +1795,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                 )}
               </div>
               <p className="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-2">
-                <span className="text-slate-200 font-semibold">{auditName}</span>
-                <span>&bull; Period: <strong className="text-slate-300">{auditPeriod}</strong></span>
-                <span>&bull; Submission Due: <strong className="text-amber-300">{dueDate}</strong></span>
+                <span>Submission Due: <strong className="text-amber-300">{dueDate}</strong></span>
               </p>
             </div>
           </div>
@@ -1826,7 +1826,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                 <div>
                   <p className="font-bold text-white text-sm">Welcome, {activeDistributorName}</p>
                   <p className="text-indigo-300">
-                    Please upload the requested operational, financial, and compliance documentation for the review period. You can save your draft at any time and return later before final submission.
+                    Please upload the requested documentation below.
                   </p>
                 </div>
               </div>
@@ -2009,7 +2009,6 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                         {req.scope}
                       </span>
                     </div>
-                    <p className="text-[11px] opacity-90 mt-1 italic">Reason: "{req.requestReason}"</p>
                     {req.reviewerComment && (
                       <p className="text-[11px] font-semibold mt-1.5 p-2 rounded-lg bg-black/40 border border-white/10 text-slate-100">
                         <strong>Auditor Comment:</strong> {req.reviewerComment}

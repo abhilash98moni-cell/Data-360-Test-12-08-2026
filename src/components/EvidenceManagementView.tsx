@@ -504,19 +504,20 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950/70 to-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="px-2.5 py-0.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold rounded-full uppercase tracking-wider">
-              {isDistributor ? 'Distributor Evidence Vault' : 'Stage 4A — Auditor Evidence Review Module'}
-            </span>
-            <span className="text-xs text-slate-400">• Independent Evidence Audit Layer</span>
-          </div>
+          {!isDistributor && (
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="px-2.5 py-0.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold rounded-full uppercase tracking-wider">
+                Stage 4A — Auditor Evidence Review Module
+              </span>
+            </div>
+          )}
           <h1 className="text-2xl font-extrabold text-white flex items-center gap-2.5">
             <FolderArchive className="h-6 w-6 text-indigo-400" />
             <span>{isDistributor ? 'My Evidence Uploads & Review Status' : 'Auditor Evidence Review Console'}</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl">
             {isDistributor 
-              ? 'Track uploaded compliance evidence, view auditor evaluation decisions, inspect version history, and respond to clarification requests.'
+              ? 'Track uploaded compliance evidence and view auditor evaluation decisions.'
               : 'Independently inspect uploaded distributor evidence files against IRL requirements, verify file versions, preview documents, and issue review decisions.'
             }
           </p>
@@ -879,7 +880,6 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                 <th className="py-3.5 px-4">Source</th>
                 <th className="py-3.5 px-4">Distributor Entity</th>
                 <th className="py-3.5 px-4">Uploader</th>
-                <th className="py-3.5 px-4">Version</th>
                 <th className="py-3.5 px-4">Review Status</th>
                 <th className="py-3.5 px-4 text-right">Actions</th>
               </tr>
@@ -935,7 +935,6 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                             <p className="font-bold text-slate-100 hover:text-indigo-300 transition-colors cursor-pointer" onClick={() => handleOpenRecordModal(item)}>
                               {item.fileName}
                             </p>
-                            <p className="text-[10px] text-slate-400">{item.fileSizeMB} MB • {item.fileType.split('/')[1]?.toUpperCase() || 'FILE'}</p>
                           </div>
                         </div>
                       </td>
@@ -965,12 +964,6 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                         {item.uploadedDate && (
                           <p className="text-[10px] text-slate-400 mt-1">{item.uploadedDate}</p>
                         )}
-                      </td>
-
-                      <td className="py-3.5 px-4">
-                        <span className="px-2 py-0.5 bg-slate-950 border border-slate-800 text-[10px] font-bold text-slate-300 rounded-md">
-                          v{item.version}
-                        </span>
                       </td>
 
                       <td className="py-3.5 px-4">

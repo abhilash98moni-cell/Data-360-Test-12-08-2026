@@ -254,20 +254,22 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
             </button>
 
             {/* 5. Reporting */}
-            <button
-              title={isCollapsed ? "Reporting Workspace" : undefined}
-              onClick={() => onTabChange('reporting')}
-              className={`w-full flex items-center ${isCollapsed ? "justify-center px-0" : "justify-between px-3"} py-2.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === 'reporting'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
-                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-              }`}
-            >
-              <div className={`flex items-center gap-3 min-w-0 ${isCollapsed ? "justify-center" : ""}`}>
-                <FileText className={`h-4 w-4 shrink-0 ${activeTab === 'reporting' ? 'text-white' : 'text-slate-400'}`} />
-                {!isCollapsed && <span className="truncate">Reporting</span>}
-              </div>
-            </button>
+            {!isDistributor && (
+              <button
+                title={isCollapsed ? "Reporting Workspace" : undefined}
+                onClick={() => onTabChange('reporting')}
+                className={`w-full flex items-center ${isCollapsed ? "justify-center px-0" : "justify-between px-3"} py-2.5 rounded-lg text-xs font-medium transition-all ${
+                  activeTab === 'reporting'
+                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+                }`}
+              >
+                <div className={`flex items-center gap-3 min-w-0 ${isCollapsed ? "justify-center" : ""}`}>
+                  <FileText className={`h-4 w-4 shrink-0 ${activeTab === 'reporting' ? 'text-white' : 'text-slate-400'}`} />
+                  {!isCollapsed && <span className="truncate">Reporting</span>}
+                </div>
+              </button>
+            )}
 
             {/* 6. Admin Control (Grouped Collapsible - Auditor / Admin only) */}
             {!isDistributor && (

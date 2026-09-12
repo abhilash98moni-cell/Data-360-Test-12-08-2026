@@ -693,16 +693,6 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
                       </div>
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-xs text-white">{msg.senderName}</span>
-                        <span className={`px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider border ${
-                          isAuditorRole
-                            ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
-                            : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-                        }`}>
-                          {isAuditorRole ? 'AUDITOR' : 'DISTRIBUTOR'}
-                        </span>
-                        <span className="text-[10px] text-slate-400 font-medium hidden sm:inline">
-                          &bull; {msg.senderOrganization}
-                        </span>
                       </div>
                     </div>
 
@@ -789,32 +779,12 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
       {/* Top Header */}
       <div className={`bg-gradient-to-r from-slate-900 via-indigo-950/50 to-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-xl flex flex-col md:flex-row md:items-center md:justify-between gap-3 shrink-0 ${isFullscreen ? 'mb-1' : ''}`}>
         <div>
-          <div className="flex items-center gap-2 mb-1 flex-wrap">
-            <span className="px-2.5 py-0.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold rounded-full uppercase tracking-wider flex items-center gap-1">
-              <ShieldCheck className="h-3 w-3 text-indigo-400" />
-              <span>DATA360 Audit Workspace</span>
-            </span>
-            <span className="px-2.5 py-0.5 bg-emerald-500/20 border border-emerald-500/30 text-emerald-300 text-[10px] font-bold rounded-full flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-ping" />
-              <span>Live Sync</span>
-            </span>
-            <span className="text-xs text-slate-400 hidden sm:inline">&bull; Step 10 Multi-Tenant Threaded Conversations</span>
-          </div>
           <h1 className="text-lg sm:text-2xl font-extrabold text-white flex items-center gap-2.5">
             <MessageSquare className="h-6 w-6 text-indigo-400" />
             <span>Audit Communication & Clarification Threads</span>
           </h1>
         </div>
-
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="px-3 py-1.5 bg-slate-950/90 border border-slate-800 rounded-xl text-xs text-slate-300 flex items-center gap-2.5 shadow-inner">
-            <Building2 className="h-4 w-4 text-indigo-400" />
-            <div className="flex flex-col">
-              <span className="text-[10px] text-slate-400 font-medium">Organization</span>
-              <span className="font-bold text-white">{currentUser?.organization}</span>
-            </div>
-          </div>
-
           <button
             type="button"
             onClick={() => setIsFullscreen(prev => !prev)}
