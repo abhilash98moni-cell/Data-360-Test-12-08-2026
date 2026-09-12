@@ -114,22 +114,53 @@ export default function App() {
     localStorage.setItem('data360_theme_mode', mode);
   };
 
-  // Audit Engagements State
-  const [engagements, setEngagements] = useState<AuditEngagement[]>(() => {
+  // Active User Session State — Loaded from localStorage if available
+  const [currentUser, setCurrentUser] = useState<UserSession | null>(() => {
     if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('data360_active_user');
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (err) {
+          console.error('Failed to parse saved user session:', err);
+        }
+      }
+    }
+    return null; // Start unauthenticated so user can sign in / sign up dynamically!
+  });
+
+  // Audit Engagements State
+  const [engagements, setEngagements] = useState<AuditEngagement[]>(INITIAL_ENGAGEMENTS);
+  const [selectedEngId, setSelectedEngId] = useState<string>('eng-101');
+  const [isLoadingEngagements, setIsLoadingEngagements] = useState(false);
+
+  // Fetch engagements from backend authoritative source
+  React.useEffect(() => {
+    const fetchAudits = async () => {
+      if (!currentUser) return;
+      setIsLoadingEngagements(true);
       try {
-        const stored = localStorage.getItem('data360_engagements');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            return parsed;
+        const token = localStorage.getItem('supabase_token');
+        const res = await fetch('/api/audits', {
+          headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+        });
+        const data = await res.json();
+        if (res.ok && data.success && data.audits) {
+          setEngagements(data.audits);
+          if (data.audits.length > 0) {
+            setSelectedEngId(data.audits[0].id);
+          } else {
+            setSelectedEngId('');
           }
         }
-      } catch (e) {}
-    }
-    return INITIAL_ENGAGEMENTS;
-  });
-  const [selectedEngId, setSelectedEngId] = useState<string>('eng-101');
+      } catch (err) {
+        console.error('Failed to fetch audit workspaces', err);
+      } finally {
+        setIsLoadingEngagements(false);
+      }
+    };
+    fetchAudits();
+  }, [currentUser]);
 
   // Findings & CAPAs State
   const [findings, setFindings] = useState<AuditFinding[]>(INITIAL_FINDINGS);
@@ -156,21 +187,6 @@ export default function App() {
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
   const [isIIRFullScreen, setIsIIRFullScreen] = useState(false);
   const [targetVoucherNo, setTargetVoucherNo] = useState<string | null>(null);
-
-  // Active User Session State — Loaded from localStorage if available
-  const [currentUser, setCurrentUser] = useState<UserSession | null>(() => {
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('data360_active_user');
-      if (saved) {
-        try {
-          return JSON.parse(saved);
-        } catch (err) {
-          console.error('Failed to parse saved user session:', err);
-        }
-      }
-    }
-    return null; // Start unauthenticated so user can sign in / sign up dynamically!
-  });
 
   // Periodic polling for unread notifications
   React.useEffect(() => {
@@ -283,12 +299,8 @@ export default function App() {
   // Add New Engagement handler
   const handleAddEngagement = (newEng: AuditEngagement, newDistributorName?: string, newClientName?: string) => {
     setEngagements(prev => {
+      // Re-fetch could also be done here, but since the component passes the new one, we just append it
       const updated = [newEng, ...prev];
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('data360_engagements', JSON.stringify(updated));
-        } catch (e) {}
-      }
       return updated;
     });
     setSelectedEngId(newEng.id);

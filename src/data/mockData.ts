@@ -47,30 +47,32 @@ export const INITIAL_FINDINGS: AuditFinding[] = [
 export const INITIAL_SAMPLING_RUNS: SamplingRun[] = [
   {
     id: 'smp-1',
-    engagementId: 'eng-101',
-    title: 'Q2 Midwest Freight Deductions',
-    datasetName: 'midwest_q2_freight_log.xlsx',
+    auditId: 'eng-101',
+    populationName: 'Q2 Midwest Freight Deductions',
     populationSize: 450,
-    sampleSize: 45,
+    totalPopulationValue: 450000,
     methodology: 'Stratified Random',
-    status: 'Completed',
-    runDate: '2026-07-22',
+    confidenceLevel: 95,
+    tolerableMisstatement: 22500,
+    sampleSize: 45,
+    sampledValue: 45000,
     exceptionsFound: 3,
-    confidenceLevel: 95
+    projectedError: 15000,
+    status: 'Verified',
   }
 ];
 
 export const INITIAL_FORENSIC_ANOMALIES: ForensicAnomaly[] = [
   {
     id: 'ano-1',
-    engagementId: 'eng-101',
-    title: 'Sequential Invoice Numbers Detected',
-    category: 'Falsified Records',
+    transactionRef: 'INV-40992',
+    vendorOrPartner: 'Midwest Trading Co.',
+    amount: 45000,
+    date: '2026-07-25',
+    anomalyType: 'Duplicate Invoice / Account',
     description: 'Vendor invoices 40992 through 41015 submitted sequentially on weekends.',
     riskScore: 92,
-    amountImplicated: 45000,
-    status: 'Investigating',
-    flaggedDate: '2026-07-25'
+    status: 'Unreviewed'
   }
 ];
 
@@ -78,18 +80,26 @@ export const INITIAL_ASSIGNMENTS: AuditAssignment[] = [
   {
     id: 'asg-1',
     engagementId: 'eng-101',
-    auditorName: 'Sarah Jenkins',
-    role: 'Lead Auditor',
-    assignedTasks: ['Risk Assessment', 'Revenue Testing', 'Management Interviews'],
-    completionPercent: 80
+    engagementTitle: 'FY26 Midwest Trading Co. Rebates & Inventory Audit',
+    taskTitle: 'Risk Assessment',
+    assignee: 'Sarah Jenkins',
+    role: 'Audit Manager',
+    module: 'Questionnaire',
+    status: 'On Progress',
+    dueDate: '2026-08-15',
+    priority: 'High'
   },
   {
     id: 'asg-2',
     engagementId: 'eng-101',
-    auditorName: 'David Chen',
-    role: 'IT/Data Specialist',
-    assignedTasks: ['ERP Data Extraction', 'Journal Entry Analytics'],
-    completionPercent: 100
+    engagementTitle: 'FY26 Midwest Trading Co. Rebates & Inventory Audit',
+    taskTitle: 'ERP Data Extraction',
+    assignee: 'David Chen',
+    role: 'Auditor',
+    module: 'Forensic Testing',
+    status: 'Completed',
+    dueDate: '2026-08-10',
+    priority: 'High'
   }
 ];
 

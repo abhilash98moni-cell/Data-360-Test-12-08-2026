@@ -112,7 +112,7 @@ export const NewAuditModal: React.FC<NewAuditModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
@@ -120,14 +120,12 @@ export const NewAuditModal: React.FC<NewAuditModalProps> = ({
       setErrorMsg('Please enter a valid Distributor Name.');
       return;
     }
-
     if (!auditId.trim()) {
       setErrorMsg('Please provide a unique Engagement ID.');
       return;
     }
 
     setIsSubmitting(true);
-
     try {
       const cleanDistributor = distributorName.trim();
       const cleanClient = clientName.trim() || 'Apex Electronics Corp';
@@ -142,33 +140,41 @@ export const NewAuditModal: React.FC<NewAuditModalProps> = ({
         status: 'Planning'
       });
 
-      // 2. Construct the fresh, isolated AuditEngagement object
-      const newAudit: AuditEngagement = {
-        id: cleanAuditId,
-        code: auditCode.trim() || `AUD-2026-${type.substring(0, 3).toUpperCase()}-001`,
-        title: title.trim() || `FY26 ${cleanDistributor} Audit Engagement`,
-        clientName: cleanClient,
-        clientIndustry: 'Consumer Technology & Enterprise Distribution',
-        distributorName: cleanDistributor,
-        distributorCode: cleanDistCode,
-        auditPeriod: auditPeriod.trim() || 'FY 2025-26',
-        type,
-        status: 'Planning',
-        riskRating,
-        leadAuditor: leadAuditor.trim() || 'Sarah Jenkins',
-        teamSize: 2,
-        startDate,
-        targetCompletion,
-        progressPercent: 0,
-        financialExposure: 0,
-        sampledRecordsCount: 0,
-        totalPopulationCount: 0,
-        findingsCount: { critical: 0, high: 0, medium: 0, low: 0 },
-        location: `${region.trim()} (${cleanDistCode})`
-      };
+      // 2. Call API to persist audit engagement
+      const token = localStorage.getItem('supabase_token');
+      const res = await fetch('/api/audits/create', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({
+          code: auditCode.trim() || `AUD-2026-${type.substring(0, 3).toUpperCase()}-001`,
+          title: title.trim() || `FY26 ${cleanDistributor} Audit Engagement`,
+          clientName: cleanClient,
+          clientIndustry: 'Consumer Technology & Enterprise Distribution',
+          distributorName: cleanDistributor,
+          distributorCode: cleanDistCode,
+          auditPeriod: auditPeriod.trim() || 'FY 2025-26',
+          type,
+          status: 'Planning',
+          riskRating,
+          leadAuditor: leadAuditor.trim() || 'Sarah Jenkins',
+          teamSize: 2,
+          startDate,
+          targetCompletion,
+          location: `${region.trim()} (${cleanDistCode})`
+        })
+      });
+
+      const data = await res.json();
+      
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'Failed to persist audit engagement.');
+      }
 
       // 3. Trigger callback to open engagement workspace in fresh state
-      onAddEngagement(newAudit, cleanDistributor, cleanClient);
+      onAddEngagement(data.audit, cleanDistributor, cleanClient);
       onClose();
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to initialize audit engagement.');

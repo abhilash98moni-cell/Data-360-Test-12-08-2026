@@ -5218,39 +5218,144 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   // ====================================================================
   // STEP 5: AUDIT CREATION & ASSIGNMENT API
   // ====================================================================
-  app.post('/api/audits/create', (req, res) => {
+  // ====================================================================
+  // GET /api/audits
+  app.get('/api/audits', authenticateRequest, async (req: any, res: any) => {
+    try {
+      const supabase = getSupabaseServerClient();
+      const role = req.auth?.role;
+      const userId = req.auth?.sub;
+
+      let query = supabase.from('audits').select('*').order('created_at', { ascending: false });
+
+      if (role === 'Auditor') {
+        const { data: access } = await supabase
+          .from('auditor_distributor_access')
+          .select('distributor_name')
+          .eq('auditor_user_id', userId)
+          .eq('is_active', true);
+        const allowed = (access || []).map(a => a.distributor_name);
+        if (allowed.length === 0) return res.json({ success: true, audits: [] });
+        query = query.in('distributor_name', allowed);
+      } else if (role === 'Distributor') {
+        // Find distributor's organization name
+        const { data: userData } = await supabase.auth.admin.getUserById(userId);
+        const org = userData?.user?.user_metadata?.organization;
+        if (!org) return res.json({ success: true, audits: [] });
+        query = query.eq('distributor_name', org);
+      }
+      
+      const { data, error } = await query;
+      if (error) throw error;
+      
+      // Map to frontend expected format
+      const mapped = (data || []).map(d => ({
+        id: d.id,
+        code: d.audit_code,
+        title: d.title,
+        clientName: d.client_name,
+        clientIndustry: 'Consumer Electronics', // Default or from joined table if existed
+        distributorName: d.distributor_name,
+        type: d.audit_type,
+        status: d.status,
+        riskRating: d.risk_rating,
+        leadAuditor: d.lead_auditor,
+        teamSize: 4, // Default as not in schema
+        startDate: d.start_date,
+        targetCompletion: d.target_completion,
+        progressPercent: d.progress_percent,
+        financialExposure: Number(d.financial_exposure || 0),
+        sampledRecordsCount: 0,
+        totalPopulationCount: 1000,
+        findingsCount: { critical: 0, high: 0, medium: 0, low: 0 },
+        location: '' // Not in schema
+      }));
+      
+      res.json({ success: true, audits: mapped });
+    } catch (err: any) {
+      res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  // POST /api/audits/create
+  app.post('/api/audits/create', authenticateRequest, async (req: any, res: any) => {
     const auditData = req.body;
     if (!auditData.code || !auditData.title) {
       return res.status(400).json({ error: 'Audit code and title are required' });
     }
+    
+    try {
+      const supabase = getSupabaseServerClient();
+      const role = req.auth?.role;
+      const userId = req.auth?.sub;
+      const distributorName = auditData.distributorName || 'Midwest Trading Co.';
+      
+      // Authorization Check
+      if (role === 'Auditor') {
+        const { data: access } = await supabase
+          .from('auditor_distributor_access')
+          .select('id')
+          .eq('auditor_user_id', userId)
+          .eq('distributor_name', distributorName)
+          .eq('is_active', true)
+          .maybeSingle();
+          
+        if (!access) {
+          return res.status(403).json({ error: 'Access Denied: You are not authorized for this distributor.' });
+        }
+      }
 
-    const newAudit = {
-      id: `eng-${Date.now()}`,
-      code: auditData.code,
-      title: auditData.title,
-      clientName: auditData.clientName || 'Apex Electronics Corp',
-      distributorName: auditData.distributorName || 'Midwest Trading Co.',
-      clientIndustry: auditData.clientIndustry || 'Consumer Electronics',
-      type: auditData.type || 'Distributor',
-      status: auditData.status || 'Planning',
-      riskRating: auditData.riskRating || 'High',
-      leadAuditor: auditData.leadAuditor || 'Sarah Jenkins',
-      teamSize: auditData.teamSize || 4,
-      startDate: auditData.startDate || new Date().toISOString().split('T')[0],
-      targetCompletion: auditData.targetCompletion || '2026-10-31',
-      progressPercent: 0,
-      financialExposure: auditData.financialExposure || 0,
-      sampledRecordsCount: 0,
-      totalPopulationCount: 1000,
-      findingsCount: { critical: 0, high: 0, medium: 0, low: 0 },
-      location: auditData.location || 'Chicago, IL'
-    };
+      // Check if distributor exists, if not maybe we shouldn't insert blindly, but frontend used to register it
+      // To prevent complex breakage, we will rely on frontend registering it via another API or existing data.
+      
+      const { data: dbAudit, error: insertError } = await supabase.from('audits').insert({
+        audit_code: auditData.code,
+        title: auditData.title,
+        client_name: auditData.clientName || 'Apex Electronics Corp',
+        distributor_name: distributorName,
+        audit_type: auditData.type || 'Distributor',
+        status: auditData.status || 'Planning',
+        risk_rating: auditData.riskRating || 'High',
+        lead_auditor: req.auth?.name || req.auth?.email || auditData.leadAuditor || 'Sarah Jenkins',
+        start_date: auditData.startDate || new Date().toISOString().split('T')[0],
+        target_completion: auditData.targetCompletion || '2026-10-31',
+        progress_percent: 0,
+        financial_exposure: auditData.financialExposure || 0
+      }).select().single();
 
-    return res.json({
-      success: true,
-      audit: newAudit,
-      message: `Audit engagement ${auditData.code} created successfully`
-    });
+      if (insertError) throw insertError;
+
+      const newAudit = {
+        id: dbAudit.id,
+        code: dbAudit.audit_code,
+        title: dbAudit.title,
+        clientName: dbAudit.client_name,
+        distributorName: dbAudit.distributor_name,
+        clientIndustry: auditData.clientIndustry || 'Consumer Electronics',
+        type: dbAudit.audit_type,
+        status: dbAudit.status,
+        riskRating: dbAudit.risk_rating,
+        leadAuditor: dbAudit.lead_auditor,
+        teamSize: auditData.teamSize || 4,
+        startDate: dbAudit.start_date,
+        targetCompletion: dbAudit.target_completion,
+        progressPercent: dbAudit.progress_percent,
+        financialExposure: Number(dbAudit.financial_exposure),
+        sampledRecordsCount: 0,
+        totalPopulationCount: 1000,
+        findingsCount: { critical: 0, high: 0, medium: 0, low: 0 },
+        location: auditData.location || 'Chicago, IL'
+      };
+
+      return res.json({
+        success: true,
+        audit: newAudit,
+        message: `Audit engagement ${dbAudit.audit_code} created successfully`
+      });
+    } catch (err: any) {
+      console.error('Audit create error:', err);
+      return res.status(500).json({ success: false, error: err.message });
+    }
   });
 
   // ====================================================================
