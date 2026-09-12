@@ -760,16 +760,6 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
             </p>
           </div>
           <div className="flex items-center gap-3 shrink-0">
-            {!isDistributor && (
-              <button
-                onClick={handleDownloadTemplate}
-                className="px-3 py-2 bg-slate-800/80 hover:bg-slate-700 text-slate-200 hover:text-white border border-slate-700 rounded-xl text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer shadow"
-              >
-                <Download className="h-3.5 w-3.5 text-slate-400" />
-                <span>Sample GL Template</span>
-              </button>
-            )}
-
             <button
               onClick={() => {
                 loadPopulationData();
@@ -833,7 +823,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
             </div>
             
             <p className="text-xs text-slate-400 mb-4">
-              Upload your company's full year General Ledger or transaction register. The system will open the Column Mapping interface to standardize headers.
+              Upload your General Ledger file.
             </p>
 
             <div

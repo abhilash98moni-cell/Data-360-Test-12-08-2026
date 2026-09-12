@@ -815,7 +815,6 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
                   <Building2 className="h-4 w-4 text-indigo-400" />
                   <span>DISTRIBUTORS</span>
                 </h2>
-                <p className="text-[10px] text-slate-400 font-mono mt-0.5">Audit: DATA360 Audit 2026</p>
               </div>
               <button 
                 onClick={() => fetchConversations()}

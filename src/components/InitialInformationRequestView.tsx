@@ -1779,11 +1779,6 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                 <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight">
                   {activeDistributorName}
                 </h1>
-                {viewRole === 'Auditor' && (
-                  <span className="text-[10px] uppercase font-bold tracking-wider px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                    Audit Request Manager
-                  </span>
-                )}
                 {isLocked ? (
                   <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
                     <Lock className="h-3 w-3" /> Locked & Submitted

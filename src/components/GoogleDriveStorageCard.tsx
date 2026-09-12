@@ -317,7 +317,7 @@ export const GoogleDriveStorageCard: React.FC = () => {
                 ACTIVE INTEGRATION
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-0.5">Physical document vault integrated with Supabase metadata & multi-tenant isolation</p>
+            <p className="text-xs text-slate-400 mt-0.5">Physical document vault with multi-tenant isolation</p>
           </div>
         </div>
 
@@ -436,7 +436,7 @@ export const GoogleDriveStorageCard: React.FC = () => {
             <span>Storage Integration & Diagnostic Controls</span>
           </h4>
           <p className="text-[11px] text-slate-400 mt-0.5">
-            Execute API diagnostics or perform real sample audit file uploads to test end-to-end folder creation and metadata sync.
+            Test API connectivity and file upload logic.
           </p>
         </div>
 
@@ -497,7 +497,7 @@ export const GoogleDriveStorageCard: React.FC = () => {
         {showFolderDetails && (
           <div className="pt-2 border-t border-slate-800/80 space-y-3 text-xs">
             <p className="text-slate-400 leading-relaxed text-[11px]">
-              Data360 isolates uploaded files by client, audit engagement, and distributor entity inside Google Drive under the designated root folder:
+              Files are isolated by client, engagement, and distributor within the Google Drive root folder:
             </p>
 
             {/* Folder Tree Diagram */}

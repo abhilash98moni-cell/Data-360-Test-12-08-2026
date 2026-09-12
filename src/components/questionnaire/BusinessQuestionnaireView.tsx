@@ -801,7 +801,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                 }`}
               />
               <span>
-                {syncStatus === 'synced' && `Supabase Authoritative • ${lastSyncTime}`}
+                {syncStatus === 'synced' && `${lastSyncTime}`}
                 {syncStatus === 'saving' && 'Saving to Supabase...'}
                 {syncStatus === 'error' && 'Sync error (check connection)'}
               </span>

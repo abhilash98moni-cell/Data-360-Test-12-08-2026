@@ -222,16 +222,9 @@ export const AdminApprovalView: React.FC<AdminApprovalViewProps> = ({ currentUse
               </span>
               <h1 className="text-xl font-bold text-slate-100 flex items-center gap-2">
                 <span>Admin Registration Approvals</span>
-                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-mono font-bold">
-                  LIVE SUPABASE SYNC
-                </span>
               </h1>
             </div>
-            <p className="text-xs text-slate-400 leading-relaxed max-w-2xl">
-              Owner Control Workspace — Review incoming user registration requests for <strong className="text-slate-200">Auditor</strong> and <strong className="text-slate-200">Distributor</strong> roles. Unapproved user requests are held in pending_signup_requests table until approved.
-            </p>
           </div>
-
           <div className="flex items-center gap-3">
             <button
               onClick={fetchDashboardData}
@@ -348,13 +341,7 @@ export const AdminApprovalView: React.FC<AdminApprovalViewProps> = ({ currentUse
             <div>
               <h2 className="font-bold text-slate-100 text-base flex items-center gap-2">
                 <span>Pending Signup Request Queue</span>
-                <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-mono font-semibold">
-                  {pendingRequests.length} ACTION REQUIRED
-                </span>
               </h2>
-              <p className="text-xs text-slate-400">
-                Review user credentials before provisioning them into live Supabase Authentication
-              </p>
             </div>
           </div>
         </div>
@@ -470,9 +457,6 @@ export const AdminApprovalView: React.FC<AdminApprovalViewProps> = ({ currentUse
             </h3>
             <p className="text-xs text-slate-400">Real-time listing of active accounts in Supabase database</p>
           </div>
-          <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-full font-mono font-bold">
-            PROVISIONED IN SUPABASE
-          </span>
         </div>
 
         {approvedUsersList.length === 0 ? (

@@ -504,13 +504,6 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950/70 to-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          {!isDistributor && (
-            <div className="flex items-center gap-2 mb-1.5">
-              <span className="px-2.5 py-0.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold rounded-full uppercase tracking-wider">
-                Stage 4A — Auditor Evidence Review Module
-              </span>
-            </div>
-          )}
           <h1 className="text-2xl font-extrabold text-white flex items-center gap-2.5">
             <FolderArchive className="h-6 w-6 text-indigo-400" />
             <span>{isDistributor ? 'My Evidence Uploads & Review Status' : 'Auditor Evidence Review Console'}</span>
@@ -518,7 +511,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
           <p className="text-xs text-slate-400 mt-1 max-w-2xl">
             {isDistributor 
               ? 'Track uploaded compliance evidence and view auditor evaluation decisions.'
-              : 'Independently inspect uploaded distributor evidence files against IRL requirements, verify file versions, preview documents, and issue review decisions.'
+              : 'Inspect and review uploaded distributor evidence files.'
             }
           </p>
         </div>

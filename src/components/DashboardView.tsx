@@ -174,7 +174,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             <button
-              onClick={() => onTabChange('iir')}
+              onClick={() => onTabChange('engagement_workspace')}
               className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
             >
               <FileSpreadsheet className="h-4 w-4" />
@@ -268,7 +268,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                   <p className="text-xs text-slate-400 mt-0.5">Submit required financial schedules, invoices, and warehouse logs for audit verification.</p>
                 </div>
                 <button
-                  onClick={() => onTabChange('iir')}
+                  onClick={() => onTabChange('engagement_workspace')}
                   className="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-bold rounded-lg transition-all"
                 >
                   Open Full IRL Portal →
@@ -298,7 +298,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <p className="text-[11px] text-amber-300/80">Audit Team Note: Clarification requested on gross vs net price basis.</p>
                   </div>
                   <button 
-                    onClick={() => onTabChange('iir')}
+                    onClick={() => onTabChange('engagement_workspace')}
                     className="px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 rounded-lg text-[10px] font-bold cursor-pointer"
                   >
                     Respond / Upload ⚠️
@@ -430,18 +430,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-white">
               Enterprise Executive Audit Dashboard
             </h1>
-            <p className="text-slate-300 text-sm max-w-2xl leading-relaxed">
-              Consolidated multi-engagement command center: Track fieldwork progress, sample coverage, identified observations, and team assignment velocity.
-            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             <button
-              onClick={() => onTabChange('iir')}
+              onClick={() => onTabChange('engagement_workspace')}
               className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-semibold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
             >
               <UserCheck className="h-4 w-4" />
-              <span>Information Request List (IRL)</span>
+              <span>Engagement Workspace</span>
             </button>
 
             <button
@@ -451,14 +448,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <Plus className="h-4 w-4" />
               <span>Initiate New Audit</span>
             </button>
+            
 
-            <button
-              onClick={onOpenCopilot}
-              className="flex items-center gap-2 bg-slate-800/90 hover:bg-slate-800 text-amber-300 border border-amber-500/30 font-medium text-xs px-4 py-2.5 rounded-xl transition-all cursor-pointer"
-            >
-              <Sparkles className="h-4 w-4 text-amber-400 animate-spin-slow" />
-              <span>AI Audit Assistant</span>
-            </button>
+            
           </div>
         </div>
       </div>

@@ -250,18 +250,12 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-slate-900 via-indigo-950/60 to-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <div className="px-2.5 py-0.5 bg-indigo-500/20 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold rounded-full uppercase tracking-wider">
-              Platform Governance & RBAC
-            </div>
-            <span className="text-xs text-slate-400">• Data360 Multi-Tenant Engine</span>
-          </div>
           <h1 className="text-2xl font-extrabold text-white flex items-center gap-2.5">
             <Sliders className="h-6 w-6 text-indigo-400" />
             <span>Master Control & User Management</span>
           </h1>
           <p className="text-xs text-slate-400 mt-1 max-w-2xl">
-            Control platform hierarchy, active user sessions, role-based access permissions (RBAC), client tenant configurations, and global security logs.
+            Control platform users, roles, and settings.
           </p>
         </div>
         <div className="flex items-center gap-3">
