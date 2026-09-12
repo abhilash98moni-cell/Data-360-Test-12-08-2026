@@ -58,7 +58,7 @@ interface DashboardViewProps {
   currentUser?: UserSession | null;
 }
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   engagements,

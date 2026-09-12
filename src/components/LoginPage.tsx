@@ -96,6 +96,9 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         const data = await res.json();
 
         if (res.ok && data.success) {
+          if (data.session?.access_token) {
+            localStorage.setItem('supabase_token', data.session.access_token);
+          }
           setSuccessMessage('Logged in successfully!');
           setTimeout(() => {
             onLogin(data.user);

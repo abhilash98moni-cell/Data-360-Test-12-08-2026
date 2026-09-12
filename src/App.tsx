@@ -247,6 +247,7 @@ export default function App() {
     setCurrentUser(null);
     if (typeof window !== 'undefined') {
       localStorage.removeItem('data360_active_user');
+      localStorage.removeItem('supabase_token');
     }
   };
 
@@ -271,27 +272,6 @@ export default function App() {
     const matchesDistributor = activeDistributorFilter === 'All Distributors' ||
       (f.auditedEntity && f.auditedEntity.toLowerCase().includes(activeDistributorFilter.toLowerCase())) ||
       (f.title && f.title.toLowerCase().includes(activeDistributorFilter.toLowerCase()));
-    return matchesClient && matchesDistributor;
-  });
-
-  
-  const filteredAssignments = assignments.filter(a => {
-    const eng = engagements.find(e => e.id === a.engagementId);
-    if (!eng) return false;
-    const matchesClient = selectedClient === 'All Clients' || eng.clientName === selectedClient;
-    const matchesDistributor = activeDistributorFilter === 'All Distributors' ||
-      eng.title.toLowerCase().includes(activeDistributorFilter.toLowerCase()) ||
-      eng.code.toLowerCase().includes(activeDistributorFilter.toLowerCase());
-    return matchesClient && matchesDistributor;
-  });
-
-  const filteredSamplingRuns = samplingRuns.filter(s => {
-    const eng = engagements.find(e => e.id === s.engagementId);
-    if (!eng) return false;
-    const matchesClient = selectedClient === 'All Clients' || eng.clientName === selectedClient;
-    const matchesDistributor = activeDistributorFilter === 'All Distributors' ||
-      eng.title.toLowerCase().includes(activeDistributorFilter.toLowerCase()) ||
-      eng.code.toLowerCase().includes(activeDistributorFilter.toLowerCase());
     return matchesClient && matchesDistributor;
   });
 
@@ -413,10 +393,10 @@ export default function App() {
             />
           ) : activeTab === 'dashboard' ? (
             <DashboardView 
-              engagements={filteredEngagements}
-              findings={filteredFindings}
-              samplingRuns={filteredSamplingRuns}
-              assignments={filteredAssignments}
+              engagements={filteredEngagements.length > 0 ? filteredEngagements : engagements}
+              findings={filteredFindings.length > 0 ? filteredFindings : findings}
+              samplingRuns={samplingRuns}
+              assignments={assignments}
               onSelectEngagement={(id) => {
                 setSelectedEngId(id);
                 const eng = engagements.find(e => e.id === id);
@@ -521,7 +501,7 @@ export default function App() {
 
       <NewAuditModal 
         isOpen={isNewAuditOpen}
-        onClose={() => setIsNewAuditOpen(false)} selectedDistributor={selectedDistributor}
+        onClose={() => setIsNewAuditOpen(false)}
         onAddEngagement={handleAddEngagement}
         defaultClient={selectedClient}
         currentUser={currentUser}

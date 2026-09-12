@@ -83,9 +83,6 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
                 <span className="text-slate-500">•</span>
                 <span className="text-xs text-emerald-400 font-semibold">{distributorProp}</span>
               </div>
-              <p className="text-[11px] text-slate-400">
-                Coordinated compliance workflow for business questionnaires, initial information requests (IRL), and fieldwork data.
-              </p>
             </div>
           </div>
 

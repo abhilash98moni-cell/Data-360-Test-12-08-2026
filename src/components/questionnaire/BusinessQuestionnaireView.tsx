@@ -775,27 +775,17 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 shadow-xl">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                Engagement Workspace
-              </span>
-              <span className="text-slate-500">•</span>
-              <span className="text-xs text-slate-400 font-medium">Audit Protocol BQ-FY26</span>
-              {questionnaireState?.isLocked && (
+            {questionnaireState?.isLocked && (
+              <div className="flex items-center gap-2 mb-1">
                 <span className="flex items-center gap-1 text-[11px] bg-emerald-500/20 text-emerald-300 px-2 py-0.5 rounded border border-emerald-500/30 font-semibold">
                   <Lock className="h-3 w-3" /> Submitted & Locked
                 </span>
-              )}
-            </div>
+              </div>
+            )}
             <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
               <FileText className="h-6 w-6 text-indigo-400" />
               Business Questionnaire
             </h1>
-            <p className="text-xs sm:text-sm text-slate-400 mt-1">
-              Formal compliance, anti-bribery, and third-party risk assessment for{' '}
-              <span className="text-emerald-300 font-semibold">{selectedDistributor}</span> under{' '}
-              <span className="text-slate-200 font-semibold">{selectedClient}</span>.
-            </p>
           </div>
 
           {/* Sync status & Actions */}
