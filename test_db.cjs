@@ -1,17 +1,12 @@
-const http = require('http');
+const { createClient } = require('@supabase/supabase-js');
+const supabase = createClient(
+  process.env.VITE_SUPABASE_URL,
+  process.env.SUPABASE_SECRET_KEY
+);
 
-const options = {
-  hostname: 'localhost',
-  port: 3000,
-  path: '/api/supabase/status',
-  method: 'GET'
-};
-
-const req = http.request(options, (res) => {
-  let data = '';
-  res.on('data', (chunk) => { data += chunk; });
-  res.on('end', () => {
-    console.log('Status Response:', data);
-  });
-});
-req.end();
+async function run() {
+  const { data, count } = await supabase.from('audit_reports').select('*', { count: 'exact' });
+  console.log(`Table audit_reports: ${count} rows`);
+  if (count > 0) console.log(data);
+}
+run();

@@ -111,7 +111,7 @@ const INITIAL_SYSTEM_USERS: SystemUser[] = [
     name: 'Karan Patel',
     email: 'k.patel@horizonlogistics.in',
     role: 'Distributor Employee',
-    organization: 'Horizon Logistics India',
+    organization: 'Midwest Trading Co.',
     tenantType: 'Distributor',
     status: 'Pending Invitation',
     lastActive: 'Invited 2 days ago',
@@ -629,7 +629,7 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
                 <ShieldCheck className="h-4 w-4 text-emerald-400" />
               </div>
               <p className="text-2xl font-black text-white">Active & Isolated</p>
-              <p className="text-xs text-slate-400">Strict database tenant key verification enabled for Apex Electronics, Midwest Trading & Horizon Logistics.</p>
+              <p className="text-xs text-slate-400">Strict database tenant key verification enabled for Apex Electronics Apex Electronics, Midwest Trading & Horizon Logistics Midwest Trading.</p>
             </div>
 
             <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3">

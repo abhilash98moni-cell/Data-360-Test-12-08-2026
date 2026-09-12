@@ -26,13 +26,7 @@ export const BASE_CLIENT_TENANTS: ClientTenantInfo[] = [
     name: 'Apex Electronics Corp',
     industry: 'Consumer Technology',
     distributors: [
-      { id: 'dist-1', name: 'Midwest Trading Co.', code: 'MDT-8092', region: 'Midwest Region (USA)', status: 'Active Audit' },
-      { id: 'dist-2', name: 'Horizon Logistics India', code: 'HLI-4022', region: 'South Asia / India', status: 'Active Audit' },
-      { id: 'dist-3', name: 'Pacific Rim Distribution', code: 'PRD-7712', region: 'Asia-Pacific (APAC)', status: 'Under Review' },
-      { id: 'dist-4', name: 'Nexus Logistics Ltd', code: 'NEX-1044', region: 'Western Division', status: 'Submitted' },
-      { id: 'dist-5', name: 'Middle East Company', code: 'MEC-5521', region: 'Middle East & Africa (MEA)', status: 'Planning' },
-      { id: 'dist-6', name: 'EuroTech Supply Chains', code: 'ETS-3091', region: 'European Union (EU)', status: 'Planning' },
-      { id: 'dist-7', name: 'LatAm Trading Network', code: 'LTN-9910', region: 'Latin America (LATAM)', status: 'Planning' }
+      { id: 'dist-1', name: 'Midwest Trading Co.', code: 'MDT-8092', region: 'Midwest Region (USA)', status: 'Active Audit' }
     ]
   }
 ];

@@ -1,6 +1,12 @@
-import { AuditEngagement, AuditFinding, SamplingRun, ForensicAnomaly, AuditAssignment } from '../types';
+const fs = require('fs');
 
-export const INITIAL_ENGAGEMENTS: AuditEngagement[] = [
+const content = fs.readFileSync('src/data/mockData.ts', 'utf8');
+
+let newContent = content.replace(
+  /export const INITIAL_ENGAGEMENTS: AuditEngagement\[\] = \[([\s\S]*?)\];/,
+  (match) => {
+    // We can just inject the filtered string.
+    return `export const INITIAL_ENGAGEMENTS: AuditEngagement[] = [
   {
     id: 'eng-101',
     code: 'AUD-2026-DIST-001',
@@ -21,9 +27,14 @@ export const INITIAL_ENGAGEMENTS: AuditEngagement[] = [
     findingsCount: { critical: 2, high: 4, medium: 7, low: 3 },
     location: 'Midwest Region (MDT-8092)'
   }
-];
+];`;
+  }
+);
 
-export const INITIAL_FINDINGS: AuditFinding[] = [
+newContent = newContent.replace(
+  /export const INITIAL_FINDINGS: AuditFinding\[\] = \[([\s\S]*?)\];/,
+  (match) => {
+    return `export const INITIAL_FINDINGS: AuditFinding[] = [
   {
     id: 'fnd-1',
     engagementId: 'eng-101',
@@ -42,9 +53,14 @@ export const INITIAL_FINDINGS: AuditFinding[] = [
     auditedEntity: 'Midwest Trading Co. (Distributor ID: DIST-882)',
     evidenceFilesCount: 4
   }
-];
+];`;
+  }
+);
 
-export const INITIAL_SAMPLING_RUNS: SamplingRun[] = [
+newContent = newContent.replace(
+  /export const INITIAL_SAMPLING_RUNS: SamplingRun\[\] = \[([\s\S]*?)\];/,
+  (match) => {
+    return `export const INITIAL_SAMPLING_RUNS: SamplingRun[] = [
   {
     id: 'smp-1',
     engagementId: 'eng-101',
@@ -58,9 +74,14 @@ export const INITIAL_SAMPLING_RUNS: SamplingRun[] = [
     exceptionsFound: 3,
     confidenceLevel: 95
   }
-];
+];`;
+  }
+);
 
-export const INITIAL_FORENSIC_ANOMALIES: ForensicAnomaly[] = [
+newContent = newContent.replace(
+  /export const INITIAL_FORENSIC_ANOMALIES: ForensicAnomaly\[\] = \[([\s\S]*?)\];/,
+  (match) => {
+    return `export const INITIAL_FORENSIC_ANOMALIES: ForensicAnomaly[] = [
   {
     id: 'ano-1',
     engagementId: 'eng-101',
@@ -72,9 +93,14 @@ export const INITIAL_FORENSIC_ANOMALIES: ForensicAnomaly[] = [
     status: 'Investigating',
     flaggedDate: '2026-07-25'
   }
-];
+];`;
+  }
+);
 
-export const INITIAL_ASSIGNMENTS: AuditAssignment[] = [
+newContent = newContent.replace(
+  /export const INITIAL_ASSIGNMENTS: AuditAssignment\[\] = \[([\s\S]*?)\];/,
+  (match) => {
+    return `export const INITIAL_ASSIGNMENTS: AuditAssignment[] = [
   {
     id: 'asg-1',
     engagementId: 'eng-101',
@@ -91,5 +117,9 @@ export const INITIAL_ASSIGNMENTS: AuditAssignment[] = [
     assignedTasks: ['ERP Data Extraction', 'Journal Entry Analytics'],
     completionPercent: 100
   }
-];
+];`;
+  }
+);
 
+fs.writeFileSync('src/data/mockData.ts', newContent);
+console.log('Done rewriting mockData.ts');

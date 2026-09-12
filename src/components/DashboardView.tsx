@@ -210,7 +210,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </div>
             <p className="text-xl font-bold text-emerald-400">Fieldwork Active</p>
-            <p className="text-[11px] text-slate-400">Target Completion: <span className="font-mono text-slate-200">Aug 25, 2026</span></p>
+            <p className="text-[11px] text-slate-400">Target Completion: <span className="font-mono text-slate-200">Pending</span></p>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2">
@@ -220,11 +220,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <FileSpreadsheet className="h-4 w-4" />
               </div>
             </div>
-            <p className="text-xl font-bold text-white">18 / 24 Items Done</p>
+            <p className="text-xl font-bold text-white">Pending Items</p>
             <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden mt-1 border border-slate-800">
-              <div className="bg-indigo-500 h-full w-[75%] rounded-full"></div>
+              <div className="bg-indigo-500 h-full w-[0%] rounded-full"></div>
             </div>
-            <p className="text-[10px] text-indigo-300 font-medium">75% Completion Rate</p>
+            <p className="text-[10px] text-indigo-300 font-medium">Tracking Pending</p>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2">
@@ -235,7 +235,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               </div>
             </div>
             <p className="text-xl font-bold text-amber-400">{distributorFindings.length} Observation</p>
-            <p className="text-[11px] text-slate-400">Action Plan Due: <span className="font-mono text-amber-300">Aug 15, 2026</span></p>
+            <p className="text-[11px] text-slate-400">Action Plan Due: <span className="font-mono text-amber-300">Pending</span></p>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2">
@@ -245,7 +245,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <FileText className="h-4 w-4" />
               </div>
             </div>
-            <p className="text-xl font-bold text-white">12 Files Uploaded</p>
+            <p className="text-xl font-bold text-white">0 Files Uploaded</p>
             <p className="text-[11px] text-emerald-400">✓ SHA-256 Encrypted & Validated</p>
           </div>
 
@@ -471,8 +471,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               {formatCurrency(totalExposure, currencyMode)}
             </div>
             <p className="text-xs text-emerald-400 flex items-center gap-1 mt-1 font-medium">
-              <TrendingUp className="h-3 w-3" />
-              +{formatCurrency(320000, currencyMode, true)} recovery pipeline across active audits
+              
+              Active audits impact tracked
             </p>
           </div>
         </div>
@@ -780,7 +780,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                     <div className="text-right min-w-[100px]">
                       <span className="text-[10px] uppercase tracking-wider text-slate-500 block">Exposure</span>
                       <span className="text-sm font-mono font-extrabold text-emerald-400 block mt-0.5">
-                        {formatCurrency(eng.financialExposure, currencyMode)}
+                        {formatCurrency(0, currencyMode)}
                       </span>
                     </div>
 
@@ -828,27 +828,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg">
                           <span className="text-[10px] uppercase text-slate-400 block">Sampled Dollar Value</span>
                           <span className="text-sm font-bold font-mono text-emerald-400 mt-0.5 block">
-                            {engSampling ? formatCurrency(engSampling.sampledValue, currencyMode, true) : formatCurrency(eng.financialExposure * 4, currencyMode, true)}
+                            {engSampling ? formatCurrency(engSampling.sampledValue, currencyMode, true) : formatCurrency(0, currencyMode, true)}
                           </span>
                           <span className="text-[10px] text-slate-400 mt-1 block">
-                            Out of {engSampling ? formatCurrency(engSampling.totalPopulationValue, currencyMode, true) : formatCurrency(eng.financialExposure * 15, currencyMode, true)}
+                            Out of {engSampling ? formatCurrency(engSampling.totalPopulationValue, currencyMode, true) : formatCurrency(0, currencyMode, true)}
                           </span>
                         </div>
 
                         <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg">
                           <span className="text-[10px] uppercase text-slate-400 block">Confidence Level</span>
                           <span className="text-sm font-bold font-mono text-indigo-300 mt-0.5 block">
-                            {engSampling?.confidenceLevel || 95}% Confidence
+                            {engSampling?.confidenceLevel || 0}% Confidence
                           </span>
                           <span className="text-[10px] text-slate-400 mt-1 block">
-                            Tolerable Error: {engSampling ? formatCurrency(engSampling.tolerableMisstatement, currencyMode) : formatCurrency(150000, currencyMode)}
+                            Tolerable Error: {engSampling ? formatCurrency(engSampling.tolerableMisstatement, currencyMode) : formatCurrency(0, currencyMode)}
                           </span>
                         </div>
 
                         <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-lg">
                           <span className="text-[10px] uppercase text-slate-400 block">Projected Error</span>
                           <span className="text-sm font-bold font-mono text-amber-400 mt-0.5 block">
-                            {engSampling ? formatCurrency(engSampling.projectedError, currencyMode) : formatCurrency(eng.financialExposure, currencyMode)}
+                            {engSampling ? formatCurrency(engSampling.projectedError, currencyMode) : formatCurrency(0, currencyMode)}
                           </span>
                           <span className="text-[10px] text-red-400 font-semibold mt-1 block">
                             {engFindings.length} Active Observations
