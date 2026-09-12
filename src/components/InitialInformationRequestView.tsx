@@ -1728,45 +1728,6 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden space-y-5">
         <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none"></div>
 
-        {/* Master Selector Bar (Auditor Dashboard Controls - Strictly Hidden from Distributor) */}
-        {viewRole === 'Auditor' && !currentUser?.role?.includes('Distributor') && (
-          <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-1.5 font-bold text-slate-300">
-                <Building2 className="h-4 w-4 text-indigo-400" />
-                <span>Select Distributor under {selectedClientProp}:</span>
-              </div>
-              <select
-                value={selectedDistributorName}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  setSelectedDistributorName(val);
-                  if (onDistributorChangeGlobal) {
-                    onDistributorChangeGlobal(val);
-                  }
-                }}
-                className="bg-slate-900 border border-slate-700 text-white font-bold rounded-lg px-3 py-1.5 focus:outline-none focus:border-indigo-500"
-              >
-                {activeDistributors.map(d => (
-                  <option key={d.id} value={d.name}>
-                    {d.name} ({d.region} - {d.code})
-                  </option>
-                ))}
-              </select>
-              
-              {isQuestionnairePushed ? (
-                <span className="px-2.5 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold flex items-center gap-1">
-                  <CheckCircle2 className="h-3 w-3" /> Questionnaire Pushed & Active
-                </span>
-              ) : (
-                <span className="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-bold flex items-center gap-1">
-                  <Clock className="h-3 w-3" /> Draft / Pending Push
-                </span>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Header Main Branding & Title */}
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4 border-b border-slate-800/80 pb-5">
           
@@ -1787,6 +1748,17 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                   <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
                     <Unlock className="h-3 w-3" /> Editing Active
                   </span>
+                )}
+                {viewRole === 'Auditor' && !currentUser?.role?.includes('Distributor') && (
+                  isQuestionnairePushed ? (
+                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 flex items-center gap-1">
+                      <CheckCircle2 className="h-3 w-3" /> Questionnaire Pushed
+                    </span>
+                  ) : (
+                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1">
+                      <Clock className="h-3 w-3" /> Draft / Pending Push
+                    </span>
+                  )
                 )}
               </div>
               <p className="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-2">

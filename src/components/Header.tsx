@@ -119,40 +119,11 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           {/* Scope Selector - Responsive Visibility */}
-          {currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor') ? (
+          {(currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor')) && (
             <div className="hidden xl:flex items-center gap-2 bg-emerald-950/40 border border-emerald-500/30 rounded-xl px-2.5 py-1 text-xs text-emerald-300 font-semibold shadow-inner">
               <UserCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
               <div className="truncate max-w-[200px]">
                 <span className="font-bold text-emerald-300 truncate">{currentUser.organization || selectedDistributor}</span>
-              </div>
-            </div>
-          ) : (
-            <div className="hidden 2xl:flex items-center gap-2 bg-slate-950/80 border border-slate-800 rounded-xl p-1 text-xs">
-              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1">
-                <Building2 className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                <span className="text-slate-100 text-xs font-semibold">Apex Electronics</span>
-              </div>
-
-              <span className="text-slate-600 font-bold">&gt;</span>
-
-              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 rounded-lg px-2 py-1">
-                <UserCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                <select 
-                  value={selectedDistributor} 
-                  onChange={(e) => onDistributorChange(e.target.value)}
-                  className="bg-transparent text-emerald-300 text-xs font-semibold focus:outline-none cursor-pointer"
-                >
-                  {currentUser?.role !== 'Auditor' && (
-                  <option value="All Distributors" className="bg-slate-900 text-slate-200">
-                    All Distributors ({currentDistributors.length})
-                  </option>
-                  )}
-                  {currentDistributors.map(d => (
-                    <option key={d.id} value={d.name} className="bg-slate-900 text-slate-200">
-                      {d.name} ({d.code})
-                    </option>
-                  ))}
-                </select>
               </div>
             </div>
           )}
@@ -202,6 +173,24 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
         </div>
+
+        {/* Global Auditor Context Dropdown */}
+        {currentUser?.role === 'Auditor' && (
+          <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-1 flex-1 max-w-sm justify-center mx-4">
+            <span className="text-slate-400 text-xs hidden sm:inline">Distributor:</span>
+            <select 
+              value={selectedDistributor} 
+              onChange={(e) => onDistributorChange(e.target.value)}
+              className="bg-transparent text-emerald-300 text-sm font-bold focus:outline-none cursor-pointer flex-1 text-center"
+            >
+              {currentDistributors.map(d => (
+                <option key={d.id} value={d.name} className="bg-slate-900 text-slate-200">
+                  {d.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Right Action Tools */}
         <div className="flex items-center gap-2 shrink-0">
