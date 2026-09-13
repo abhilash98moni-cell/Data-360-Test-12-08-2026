@@ -1,16 +1,5 @@
 import { AuthoritativeQuestionnaireState, QuestionnaireAnswerItem, QuestionnaireAuditorNoteItem } from './questionnaireService';
 
-
-function getAuthHeaders(userRole?: string, userOrg?: string) {
-  const token = typeof window !== 'undefined' ? localStorage.getItem('supabase_token') : null;
-  const headers: any = {
-    ...(token ? { 'Authorization': `Bearer ${token}` } : {})
-  };
-  if (userRole) headers['x-user-role'] = userRole;
-  if (userOrg) headers['x-user-org'] = userOrg;
-  return headers;
-}
-
 export async function fetchQuestionnaireState(
   client: string,
   distributor: string,
@@ -28,17 +17,13 @@ export async function fetchQuestionnaireState(
     });
 
     const res = await fetch(`/api/questionnaire/sync?${params.toString()}`, {
-      headers: getAuthHeaders(userRole, userOrg)
+      headers: {
+        'x-user-role': userRole || '',
+        'x-user-org': userOrg || ''
+      }
     });
 
     if (!res.ok) {
-      if (res.status === 401) {
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('supabase_token');
-          localStorage.removeItem('data360_active_user');
-          window.dispatchEvent(new Event('auth-expired'));
-        }
-      }
       const errJson = await res.json().catch(() => ({}));
       throw new Error(errJson.error || `HTTP ${res.status}: Failed to sync questionnaire state`);
     }
@@ -72,7 +57,8 @@ export async function saveQuestionnaireAnswers(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(userRole, userOrg)
+        'x-user-role': userRole || '',
+        'x-user-org': userOrg || ''
       },
       body: JSON.stringify({
         client,
@@ -88,11 +74,6 @@ export async function saveQuestionnaireAnswers(
     });
 
     if (!res.ok) {
-      if (res.status === 401 && typeof window !== 'undefined') {
-        localStorage.removeItem('supabase_token');
-        localStorage.removeItem('data360_active_user');
-        window.dispatchEvent(new Event('auth-expired'));
-      }
       const errJson = await res.json().catch(() => ({}));
       throw new Error(errJson.error || `HTTP ${res.status}: Failed to save questionnaire answers`);
     }
@@ -122,7 +103,8 @@ export async function submitQuestionnaire(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(userRole, userOrg)
+        'x-user-role': userRole || '',
+        'x-user-org': userOrg || ''
       },
       body: JSON.stringify({
         client,
@@ -136,11 +118,6 @@ export async function submitQuestionnaire(
     });
 
     if (!res.ok) {
-      if (res.status === 401 && typeof window !== 'undefined') {
-        localStorage.removeItem('supabase_token');
-        localStorage.removeItem('data360_active_user');
-        window.dispatchEvent(new Event('auth-expired'));
-      }
       const errJson = await res.json().catch(() => ({}));
       throw new Error(errJson.error || `HTTP ${res.status}: Failed to submit questionnaire`);
     }
@@ -170,7 +147,7 @@ export async function saveQuestionnaireAuditorNotes(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...getAuthHeaders(userRole)
+        'x-user-role': userRole || ''
       },
       body: JSON.stringify({
         client,
@@ -184,11 +161,6 @@ export async function saveQuestionnaireAuditorNotes(
     });
 
     if (!res.ok) {
-      if (res.status === 401 && typeof window !== 'undefined') {
-        localStorage.removeItem('supabase_token');
-        localStorage.removeItem('data360_active_user');
-        window.dispatchEvent(new Event('auth-expired'));
-      }
       const errJson = await res.json().catch(() => ({}));
       throw new Error(errJson.error || `HTTP ${res.status}: Failed to save auditor notes`);
     }
@@ -214,7 +186,7 @@ export async function requestEditAccessQuestionnaire(
   try {
     const res = await fetch('/api/questionnaire/edit-access-request', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ client, distributor, auditId, userEmail, userName })
     });
     const data = await res.json();
@@ -237,7 +209,7 @@ export async function reviewEditAccessQuestionnaire(
   try {
     const res = await fetch('/api/questionnaire/edit-access-review', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ client, distributor, auditId, action, userEmail, userName })
     });
     const data = await res.json();
@@ -260,7 +232,7 @@ export async function customizeQuestionnaire(
   try {
     const res = await fetch('/api/questionnaire/customize', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ client, distributor, auditId, customSections, userEmail, userName })
     });
     const data = await res.json();

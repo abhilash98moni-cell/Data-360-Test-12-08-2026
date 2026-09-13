@@ -66,18 +66,7 @@ export default function App() {
       setActiveTab('sampling');
     };
     window.addEventListener('NAVIGATE_TO_SAMPLING', handleNavToSampling);
-
-    const handleAuthExpired = () => {
-      localStorage.removeItem('supabase_token');
-      localStorage.removeItem('data360_active_user');
-      setCurrentUser(null);
-    };
-    window.addEventListener('auth-expired', handleAuthExpired);
-
-    return () => {
-      window.removeEventListener('NAVIGATE_TO_SAMPLING', handleNavToSampling);
-      window.removeEventListener('auth-expired', handleAuthExpired);
-    };
+    return () => window.removeEventListener('NAVIGATE_TO_SAMPLING', handleNavToSampling);
   }, []);
 
   const handleToggleNavCollapse = () => {
@@ -87,7 +76,7 @@ export default function App() {
   };
 
   const [selectedClient, setSelectedClient] = useState<string>('Apex Electronics Corp');
-  const [selectedDistributor, setSelectedDistributor] = useState<string>('');
+  const [selectedDistributor, setSelectedDistributor] = useState<string>('Midwest Trading Co.');
   const [currencyMode, setCurrencyMode] = useState<CurrencyMode>(() => {
     const saved = localStorage.getItem('data360_currency_mode');
     return (saved === 'USD' || saved === 'INR') ? (saved as CurrencyMode) : 'INR';
@@ -155,10 +144,6 @@ export default function App() {
         const res = await fetch('/api/audits', {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
-        if (res.status === 401) {
-          window.dispatchEvent(new Event('auth-expired'));
-          return;
-        }
         const data = await res.json();
         if (res.ok && data.success && data.audits) {
           setEngagements(data.audits);

@@ -68,38 +68,32 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   // No longer needed: const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [authorizedDistributors, setAuthorizedDistributors] = useState<string[]>([]);
-  const [isLoadingDistributors, setIsLoadingDistributors] = useState<boolean>(false);
-  const [authError, setAuthError] = useState<string | null>(null);
-
-  // DEMO MODE:
-  // Temporary distributor selector for client demonstration.
-  // Replace with authenticated auditor_distributor_access flow
-  // when multi-distributor authorization is re-enabled.
-  const DEMO_DISTRIBUTORS = [
-    'Midwest Trading Co.'
-  ];
-
-  const allDists = getDistributorsForClient(selectedClient);
-
   useEffect(() => {
     if (currentUser?.role === 'Auditor') {
-      setIsLoadingDistributors(true);
-      setAuthError(null);
-      
-      // Simulate network delay for demo realism
-      setTimeout(() => {
-        const demoList = allDists.length > 0 ? allDists.map(d => d.name) : DEMO_DISTRIBUTORS;
-        setAuthorizedDistributors(demoList);
-        if (demoList.length > 0 && !demoList.includes(selectedDistributor)) {
-          onDistributorChange(demoList[0]);
-        }
-        setIsLoadingDistributors(false);
-      }, 300);
+       fetch('/api/users/me/distributors', {
+          headers: {
+             'Authorization': 'Bearer ' + localStorage.getItem('supabase_token')
+          }
+       }).then(res => res.json()).then(data => {
+          if (data.success && data.distributors) {
+             setAuthorizedDistributors(data.distributors);
+             if (data.distributors.length === 1) {
+                // Auto-select if there is exactly one
+                onDistributorChange(data.distributors[0]);
+             } else if (data.distributors.length > 0 && selectedDistributor === 'All Distributors') {
+                // Default to the first one instead of 'All Distributors' to avoid confusion if needed
+                onDistributorChange(data.distributors[0]);
+             } else if (data.distributors.length === 0) {
+                onDistributorChange('No Distributors Assigned');
+             }
+          }
+       }).catch(console.error);
     }
-  }, [currentUser, selectedDistributor, onDistributorChange, allDists]);
+  }, [currentUser]);
 
-  const currentDistributors: { id: string; name: string }[] = currentUser?.role === 'Auditor' 
-     ? authorizedDistributors.map(name => ({ id: name, name }))
+  const allDists = getDistributorsForClient(selectedClient);
+  const currentDistributors = currentUser?.role === 'Auditor' 
+     ? allDists.filter(d => authorizedDistributors.includes(d.name))
      : allDists;
 
   return (
@@ -187,24 +181,8 @@ export const Header: React.FC<HeaderProps> = ({
             <select 
               value={selectedDistributor} 
               onChange={(e) => onDistributorChange(e.target.value)}
-              disabled={isLoadingDistributors || authorizedDistributors.length === 0}
-              className="bg-transparent text-emerald-300 text-sm font-bold focus:outline-none cursor-pointer flex-1 text-center disabled:cursor-not-allowed disabled:text-slate-400"
+              className="bg-transparent text-emerald-300 text-sm font-bold focus:outline-none cursor-pointer flex-1 text-center"
             >
-              {isLoadingDistributors && (
-                <option disabled value="" className="bg-slate-900 text-slate-400">
-                  Loading authorized distributors...
-                </option>
-              )}
-              {authError && !isLoadingDistributors && (
-                <option disabled value="" className="bg-slate-900 text-rose-400">
-                  {authError}
-                </option>
-              )}
-              {!isLoadingDistributors && !authError && authorizedDistributors.length === 0 && (
-                <option disabled value="" className="bg-slate-900 text-amber-400">
-                  No Authorized Distributors Assigned
-                </option>
-              )}
               {currentDistributors.map(d => (
                 <option key={d.id} value={d.name} className="bg-slate-900 text-slate-200">
                   {d.name}

@@ -283,7 +283,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-300 mb-1">Password (use "demo" for preview bypass)</label>
+                  <label className="block text-xs font-medium text-slate-300 mb-1">Password</label>
                   <div className="relative">
                     <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
                     <input 

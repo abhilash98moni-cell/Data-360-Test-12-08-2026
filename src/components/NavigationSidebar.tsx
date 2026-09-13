@@ -184,9 +184,9 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
               </button>
             )}
 
-            {/* 2. Engagement Workspace / Executive Dashboard */}
+            {/* 2. Engagement Workspace */}
             <button
-              title={isCollapsed ? (isDistributor ? "Executive Dashboard" : "Engagement Workspace") : undefined}
+              title={isCollapsed ? "Engagement Workspace" : undefined}
               onClick={() => onTabChange('engagement_workspace')}
               className={`w-full flex items-center ${isCollapsed ? "justify-center px-0" : "justify-between px-3"} py-2.5 rounded-lg text-xs font-medium transition-all ${
                 activeTab === 'engagement_workspace'
@@ -195,12 +195,8 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
               }`}
             >
               <div className={`flex items-center gap-3 min-w-0 ${isCollapsed ? "justify-center" : ""}`}>
-                {isDistributor ? (
-                  <LayoutDashboard className={`h-4 w-4 shrink-0 ${activeTab === 'engagement_workspace' ? 'text-white' : 'text-slate-400'}`} />
-                ) : (
-                  <Layers className={`h-4 w-4 shrink-0 ${activeTab === 'engagement_workspace' ? 'text-white' : 'text-slate-400'}`} />
-                )}
-                {!isCollapsed && <span className="truncate">{isDistributor ? "Executive Dashboard" : "Engagement Workspace"}</span>}
+                <Layers className={`h-4 w-4 shrink-0 ${activeTab === 'engagement_workspace' ? 'text-white' : 'text-slate-400'}`} />
+                {!isCollapsed && <span className="truncate">Engagement Workspace</span>}
               </div>
             </button>
 
