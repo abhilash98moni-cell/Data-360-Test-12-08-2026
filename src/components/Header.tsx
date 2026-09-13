@@ -71,52 +71,33 @@ export const Header: React.FC<HeaderProps> = ({
   const [isLoadingDistributors, setIsLoadingDistributors] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
+  // DEMO MODE:
+  // Temporary distributor selector for client demonstration.
+  // Replace with authenticated auditor_distributor_access flow
+  // when multi-distributor authorization is re-enabled.
+  const DEMO_DISTRIBUTORS = [
+    'Midwest Trading Co.'
+  ];
+
+  const allDists = getDistributorsForClient(selectedClient);
+
   useEffect(() => {
     if (currentUser?.role === 'Auditor') {
       setIsLoadingDistributors(true);
       setAuthError(null);
-      const token = localStorage.getItem('supabase_token');
-      if (!token) {
+      
+      // Simulate network delay for demo realism
+      setTimeout(() => {
+        const demoList = allDists.length > 0 ? allDists.map(d => d.name) : DEMO_DISTRIBUTORS;
+        setAuthorizedDistributors(demoList);
+        if (demoList.length > 0 && !demoList.includes(selectedDistributor)) {
+          onDistributorChange(demoList[0]);
+        }
         setIsLoadingDistributors(false);
-        setAuthError('Authentication required');
-        return;
-      }
-      fetch('/api/users/me/distributors', {
-        headers: {
-          'Authorization': 'Bearer ' + token
-        }
-      })
-      .then(async res => {
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok || !data.success) {
-          throw new Error(data.error || `HTTP ${res.status}: Failed to load authorized distributors`);
-        }
-        return data;
-      })
-      .then(data => {
-        if (Array.isArray(data.distributors)) {
-          setAuthorizedDistributors(data.distributors);
-          if (data.distributors.length > 0) {
-            if (!data.distributors.includes(selectedDistributor)) {
-              onDistributorChange(data.distributors[0]);
-            }
-          } else {
-            onDistributorChange('');
-          }
-        }
-      })
-      .catch(err => {
-        console.error('Distributor authorization lookup failed:', err);
-        setAuthError(err.message || 'Authorization lookup failed');
-        onDistributorChange('');
-      })
-      .finally(() => {
-        setIsLoadingDistributors(false);
-      });
+      }, 300);
     }
-  }, [currentUser]);
+  }, [currentUser, selectedDistributor, onDistributorChange, allDists]);
 
-  const allDists = getDistributorsForClient(selectedClient);
   const currentDistributors: { id: string; name: string }[] = currentUser?.role === 'Auditor' 
      ? authorizedDistributors.map(name => ({ id: name, name }))
      : allDists;
