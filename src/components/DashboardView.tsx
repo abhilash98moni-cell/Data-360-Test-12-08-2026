@@ -162,14 +162,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 <UserCheck className="h-3.5 w-3.5" />
                 Distributor Channel Partner Portal
               </span>
-              <span className="text-xs text-slate-400">• Multi-Tenant Isolated View</span>
             </div>
             <h1 className="text-2xl md:text-3xl font-extrabold text-white">
               Welcome, {distOrg}
             </h1>
-            <p className="text-xs text-slate-300 max-w-2xl leading-relaxed">
-              Active Audit: <span className="text-emerald-300 font-semibold">FY26 Distributor Channel Rebates & Inventory Verification (Ref: AUD-2026-DIST-001)</span>. Track required document submissions, uploaded evidence verification, and action item (CAPA) responses.
-            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
@@ -178,7 +174,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs px-4 py-2.5 rounded-xl shadow-lg shadow-emerald-600/20 transition-all cursor-pointer"
             >
               <FileSpreadsheet className="h-4 w-4" />
-              <span>Document Requests (IIR)</span>
+              <span>Engagement Workspace</span>
             </button>
 
             <button
@@ -247,160 +243,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <p className="text-xl font-bold text-white">0 Files Uploaded</p>
             <p className="text-[11px] text-emerald-400">✓ SHA-256 Encrypted & Validated</p>
-          </div>
-
-        </div>
-
-        {/* Distributor Content Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          
-          {/* Main Column: Information Requests & CAPA List */}
-          <div className="lg:col-span-2 space-y-6">
-            
-            {/* Card 1: Document Request Progress (IIR Summary) */}
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                <div>
-                  <h3 className="font-bold text-white text-base flex items-center gap-2">
-                    <FileSpreadsheet className="h-5 w-5 text-indigo-400" />
-                    <span>Required Information Requests (IRL Status)</span>
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">Submit required financial schedules, invoices, and warehouse logs for audit verification.</p>
-                </div>
-                <button
-                  onClick={() => onTabChange('engagement_workspace')}
-                  className="px-3 py-1.5 bg-indigo-600/20 hover:bg-indigo-600 text-indigo-300 hover:text-white border border-indigo-500/30 text-xs font-bold rounded-lg transition-all"
-                >
-                  Open Full IRL Portal →
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between gap-3 text-xs">
-                  <div>
-                    <p className="font-bold text-white">1. Trade Licenses & Organizational Master File</p>
-                    <p className="text-[11px] text-slate-400">Uploaded by Robert Vance on Jul 10 • 4 Files Verified</p>
-                  </div>
-                  <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg text-[10px] font-bold">Verified ✅</span>
-                </div>
-
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between gap-3 text-xs">
-                  <div>
-                    <p className="font-bold text-white">2. Q1-Q4 ERP Sales & Invoicing Ledgers</p>
-                    <p className="text-[11px] text-slate-400">Uploaded by David Vance on Jul 14 • 8 Files Verified</p>
-                  </div>
-                  <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg text-[10px] font-bold">Verified ✅</span>
-                </div>
-
-                <div className="bg-slate-950 p-3 rounded-xl border border-amber-500/30 flex items-center justify-between gap-3 text-xs">
-                  <div>
-                    <p className="font-bold text-amber-200">3. Q2 Volume Rebate Calculation Worksheets</p>
-                    <p className="text-[11px] text-amber-300/80">Audit Team Note: Clarification requested on gross vs net price basis.</p>
-                  </div>
-                  <button 
-                    onClick={() => onTabChange('engagement_workspace')}
-                    className="px-2.5 py-1 bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500/30 rounded-lg text-[10px] font-bold cursor-pointer"
-                  >
-                    Respond / Upload ⚠️
-                  </button>
-                </div>
-
-                <div className="bg-slate-950 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between gap-3 text-xs">
-                  <div>
-                    <p className="font-bold text-white">4. Physical Warehouse Stock Count Audit Certificate</p>
-                    <p className="text-[11px] text-slate-400">Uploaded by Logistics Team on Jul 20 • 2 Files Verified</p>
-                  </div>
-                  <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-lg text-[10px] font-bold">Verified ✅</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Card 2: Assigned Observation & CAPA Action Items */}
-            {distFinding && (
-              <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-                <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                  <div>
-                    <h3 className="font-bold text-white text-base flex items-center gap-2">
-                      <ShieldAlert className="h-5 w-5 text-amber-400" />
-                      <span>Assigned Audit Observation & CAPA Action Item</span>
-                    </h3>
-                    <p className="text-xs text-slate-400 mt-0.5">Audit findings requiring action plan submission from {distOrg}.</p>
-                  </div>
-                  <span className="px-2.5 py-1 bg-red-500/20 text-red-300 border border-red-500/30 rounded-lg text-xs font-bold">
-                    {distFinding.severity} Severity
-                  </span>
-                </div>
-
-                <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs text-indigo-400 font-bold">{distFinding.findingCode}</span>
-                    <span className="text-xs text-emerald-400 font-bold font-mono">Impact: {formatCurrency(distFinding.financialImpact, currencyMode)}</span>
-                  </div>
-
-                  <h4 className="font-bold text-white text-sm">{distFinding.title}</h4>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
-                    <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
-                      <span className="text-amber-400 font-bold block">Audit Finding Root Cause</span>
-                      <p className="text-slate-300 leading-relaxed">{distFinding.rootCause}</p>
-                    </div>
-
-                    <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 space-y-1">
-                      <span className="text-indigo-400 font-bold block">Recommended CAPA Action</span>
-                      <p className="text-slate-300 leading-relaxed">{distFinding.recommendation}</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-800 text-xs">
-                    <span className="text-slate-400">Assigned To: <span className="text-slate-200 font-semibold">{distFinding.assignedTo}</span></span>
-                    <button
-                      onClick={() => onTabChange('findings')}
-                      className="px-3 py-1.5 bg-amber-600 text-white font-bold text-xs rounded-lg shadow cursor-pointer hover:bg-amber-500 transition-colors"
-                    >
-                      Update CAPA Action Plan →
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-          </div>
-
-          {/* Right Column: Lead Auditor Contacts & Isolation Guarantee */}
-          <div className="space-y-6">
-            
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-4 shadow-xl">
-              <h3 className="font-bold text-white text-sm flex items-center gap-2 border-b border-slate-800 pb-2">
-                <UserCheck className="h-4 w-4 text-indigo-400" />
-                <span>Audit Team Contacts</span>
-              </h3>
-
-              <div className="space-y-3 text-xs">
-                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1">
-                  <p className="text-[10px] text-slate-400 uppercase font-bold">Lead Forensic Auditor</p>
-                  <p className="font-bold text-white text-sm">Sarah Jenkins</p>
-                  <p className="text-slate-400">Apex Audit Practice (AA)</p>
-                  <p className="text-indigo-300 font-mono text-[11px] mt-1">s.jenkins@apex-audit.com</p>
-                </div>
-
-                <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 space-y-1">
-                  <p className="text-[10px] text-slate-400 uppercase font-bold">Client Audit Sponsor</p>
-                  <p className="font-bold text-white text-sm">Marcus Thorne</p>
-                  <p className="text-slate-400">Apex Electronics Corp</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 space-y-3 shadow-xl text-xs">
-              <div className="flex items-center gap-2 text-emerald-400 font-bold">
-                <UserCheck className="h-4 w-4" />
-                <span>Multi-Tenant Security Guarantee</span>
-              </div>
-              <p className="text-slate-300 leading-relaxed">
-                Your portal connection is cryptographically isolated under <span className="text-emerald-300 font-semibold">{distOrg}</span>. Financial data and uploaded evidence are strictly inaccessible to other distributors or unauthorized third parties.
-              </p>
-            </div>
-
           </div>
 
         </div>
