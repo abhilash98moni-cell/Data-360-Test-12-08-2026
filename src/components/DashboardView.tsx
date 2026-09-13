@@ -1,10 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   AuditEngagement, 
   AuditFinding,
   SamplingRun,
-  AuditAssignment
+  AuditAssignment,
+  IIRRequestItem
 } from '../types';
+import { isItemComplete } from '../utils/irlValidation';
+import { INITIAL_IIR_REQUESTS } from '../data/iirData';
 import { UserSession } from './AuthModal';
 import { 
   IndianRupee, 
@@ -27,8 +30,28 @@ import {
   AlertCircle,
   FileText,
   UserCheck,
-  Search
+  Search,
+  ShieldCheck,
+  HelpCircle
 } from 'lucide-react';
+
+const getIIRStorageKey = (client: string, dist: string) => 
+  `data360_iir_reqs_${(client || 'default').replace(/\s+/g, '_')}_${(dist || 'default').replace(/\s+/g, '_')}`;
+
+const loadIIRRequestsFromStorage = (client: string, dist: string, fallback: IIRRequestItem[]): IIRRequestItem[] => {
+  if (typeof window === 'undefined') return fallback;
+  const key = getIIRStorageKey(client, dist);
+  const saved = localStorage.getItem(key);
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    } catch(e) {}
+  }
+  return fallback;
+}
 
 import { 
   PieChart, 
@@ -58,7 +81,6 @@ interface DashboardViewProps {
   currentUser?: UserSession | null;
 }
 
-import { useEffect } from 'react';
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
   engagements,
@@ -146,11 +168,37 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   if (currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor')) {
     const distOrg = currentUser.organization || 'Midwest Trading Co.';
+    
+    // Find the correct client context for the distributor
+    const clientOrg = engagements.find(e => 
+      e.distributorName === distOrg || e.title.includes(distOrg) || e.location.includes(distOrg)
+    )?.clientName || 'Apex Electronics Corp';
+    
+    // Read the actual IIR Request data from local storage, maintaining source of truth with Engagement Workspace
+    const iirRequests = React.useMemo(() => {
+      return loadIIRRequestsFromStorage(clientOrg, distOrg, INITIAL_IIR_REQUESTS);
+    }, [clientOrg, distOrg]);
+
+    const totalItemsCount = iirRequests.length;
+    const completedItemsCount = iirRequests.filter(item => 
+      isItemComplete(item) || item.status === 'Completed' || item.status === 'Submitted' || item.status === 'Accepted'
+    ).length;
+    const missingMandatoryCount = iirRequests.filter(item => 
+      item.isMandatory && !isItemComplete(item)
+    ).length;
+    const acceptedCount = iirRequests.filter(item => 
+      item.reviewerStatus === 'Accepted' || item.status === 'Accepted'
+    ).length;
+    const clarificationRequiredCount = iirRequests.filter(item => 
+      item.reviewerStatus === 'Clarification Required' || item.status === 'Clarification Required'
+    ).length;
+    
+    const overallProgressPercent = totalItemsCount > 0 ? Math.round((completedItemsCount / totalItemsCount) * 100) : 0;
+
     const distributorFindings = findings.filter(f => 
       f.auditedEntity.toLowerCase().includes(distOrg.toLowerCase()) ||
       f.assignedTo.toLowerCase().includes(distOrg.toLowerCase())
     );
-    const distFinding = distributorFindings[0] || findings[0];
 
     return (
       <div className="w-full p-4 sm:p-6 space-y-6 text-slate-100 animate-fade-in">
@@ -195,55 +243,64 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Distributor KPI Cards */}
+        {/* Distributor KPI Cards - Sourced directly from Engagement Workspace Workflow */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2">
+          <button 
+            onClick={() => onTabChange('engagement_workspace')}
+            className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2 text-left hover:border-emerald-500 hover:ring-1 hover:ring-emerald-500/50 transition-all group cursor-pointer"
+          >
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-semibold uppercase tracking-wider">Engagement Status</span>
+              <span className="text-xs font-semibold uppercase tracking-wider group-hover:text-emerald-400 transition-colors">Completed / Ready</span>
               <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                <CheckSquare className="h-4 w-4" />
+                <CheckCircle2 className="h-4 w-4" />
               </div>
             </div>
-            <p className="text-xl font-bold text-emerald-400">Fieldwork Active</p>
-            <p className="text-[11px] text-slate-400">Target Completion: <span className="font-mono text-slate-200">Pending</span></p>
-          </div>
+            <p className="text-2xl font-bold font-mono text-emerald-400">{completedItemsCount}</p>
+            <p className="text-[11px] text-slate-400 font-semibold">{overallProgressPercent}% Complete • <span className="font-mono text-slate-300">{totalItemsCount} Total</span></p>
+          </button>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2">
+          <button 
+            onClick={() => onTabChange('engagement_workspace')}
+            className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2 text-left hover:border-red-500 hover:ring-1 hover:ring-red-500/50 transition-all group cursor-pointer"
+          >
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-semibold uppercase tracking-wider">Document Requests (IIR)</span>
+              <span className="text-xs font-semibold uppercase tracking-wider group-hover:text-red-400 transition-colors">Missing Mandatories</span>
+              <div className="p-2 rounded-lg bg-red-500/10 text-red-400 border border-red-500/20">
+                <AlertCircle className="h-4 w-4" />
+              </div>
+            </div>
+            <p className={`text-2xl font-bold font-mono ${missingMandatoryCount > 0 ? 'text-red-400' : 'text-slate-400'}`}>{missingMandatoryCount}</p>
+            <p className="text-[11px] text-slate-400 font-semibold">Requires Immediate Action</p>
+          </button>
+
+          <button 
+            onClick={() => onTabChange('engagement_workspace')}
+            className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2 text-left hover:border-indigo-500 hover:ring-1 hover:ring-indigo-500/50 transition-all group cursor-pointer"
+          >
+            <div className="flex items-center justify-between text-slate-400">
+              <span className="text-xs font-semibold uppercase tracking-wider group-hover:text-indigo-400 transition-colors">Accepted by Auditor</span>
               <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                <FileSpreadsheet className="h-4 w-4" />
+                <ShieldCheck className="h-4 w-4" />
               </div>
             </div>
-            <p className="text-xl font-bold text-white">Pending Items</p>
-            <div className="w-full bg-slate-950 h-2 rounded-full overflow-hidden mt-1 border border-slate-800">
-              <div className="bg-indigo-500 h-full w-[0%] rounded-full"></div>
-            </div>
-            <p className="text-[10px] text-indigo-300 font-medium">Tracking Pending</p>
-          </div>
+            <p className="text-2xl font-bold font-mono text-indigo-400">{acceptedCount}</p>
+            <p className="text-[11px] text-indigo-300 font-semibold">Auditor Verified</p>
+          </button>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2">
+          <button 
+            onClick={() => onTabChange('engagement_workspace')}
+            className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2 text-left hover:border-amber-500 hover:ring-1 hover:ring-amber-500/50 transition-all group cursor-pointer"
+          >
             <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-semibold uppercase tracking-wider">Open Action Items (CAPA)</span>
+              <span className="text-xs font-semibold uppercase tracking-wider group-hover:text-amber-400 transition-colors">Clarifications Needed</span>
               <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                <ShieldAlert className="h-4 w-4" />
+                <HelpCircle className="h-4 w-4" />
               </div>
             </div>
-            <p className="text-xl font-bold text-amber-400">{distributorFindings.length} Observation</p>
-            <p className="text-[11px] text-slate-400">Action Plan Due: <span className="font-mono text-amber-300">Pending</span></p>
-          </div>
-
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-sm space-y-2">
-            <div className="flex items-center justify-between text-slate-400">
-              <span className="text-xs font-semibold uppercase tracking-wider">Verified Evidence Files</span>
-              <div className="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                <FileText className="h-4 w-4" />
-              </div>
-            </div>
-            <p className="text-xl font-bold text-white">0 Files Uploaded</p>
-            <p className="text-[11px] text-emerald-400">✓ SHA-256 Encrypted & Validated</p>
-          </div>
+            <p className={`text-2xl font-bold font-mono ${clarificationRequiredCount > 0 ? 'text-amber-400' : 'text-slate-400'}`}>{clarificationRequiredCount}</p>
+            <p className="text-[11px] text-amber-300 font-semibold">Auditor Questions Open</p>
+          </button>
 
         </div>
 
