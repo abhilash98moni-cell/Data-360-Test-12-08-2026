@@ -100,12 +100,15 @@ export const Header: React.FC<HeaderProps> = ({
             if (!data.distributors.includes(selectedDistributor)) {
               onDistributorChange(data.distributors[0]);
             }
+          } else {
+            onDistributorChange('');
           }
         }
       })
       .catch(err => {
         console.error('Distributor authorization lookup failed:', err);
         setAuthError(err.message || 'Authorization lookup failed');
+        onDistributorChange('');
       })
       .finally(() => {
         setIsLoadingDistributors(false);

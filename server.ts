@@ -107,7 +107,8 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
     const role = req.auth?.role;
     if (role === 'Auditor') {
       const auditorId = req.auth?.id || req.auth?.sub;
-      const { data: access } = await supabase.from('auditor_distributor_access').select('distributor_name').eq('auditor_user_id', auditorId).eq('is_active', true);
+      const { data: access, error: accessError } = await supabase.from('auditor_distributor_access').select('distributor_name').eq('auditor_user_id', auditorId).eq('is_active', true);
+      if (accessError) throw new Error(`Database error in auditor_distributor_access: ${accessError.message}`);
       const allowed = (access || []).map(a => a.distributor_name);
       if (allowed.length === 0) return res.json({ success: true, distributors: [] });
       query = query.in('entity_name', allowed);
@@ -5244,11 +5245,15 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       let query = supabase.from('audits').select('*').order('created_at', { ascending: false });
 
       if (role === 'Auditor') {
-        const { data: access } = await supabase
+        const { data: access, error: accessError } = await supabase
           .from('auditor_distributor_access')
           .select('distributor_name')
           .eq('auditor_user_id', userId)
           .eq('is_active', true);
+        if (accessError) {
+          console.error("Auditor access check failed:", accessError.message);
+          return res.status(500).json({ success: false, error: 'Database configuration error in auditor_distributor_access' });
+        }
         const allowed = (access || []).map(a => a.distributor_name);
         if (allowed.length === 0) return res.json({ success: true, audits: [] });
         query = query.in('distributor_name', allowed);

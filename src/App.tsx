@@ -76,7 +76,7 @@ export default function App() {
   };
 
   const [selectedClient, setSelectedClient] = useState<string>('Apex Electronics Corp');
-  const [selectedDistributor, setSelectedDistributor] = useState<string>('Midwest Trading Co.');
+  const [selectedDistributor, setSelectedDistributor] = useState<string>('');
   const [currencyMode, setCurrencyMode] = useState<CurrencyMode>(() => {
     const saved = localStorage.getItem('data360_currency_mode');
     return (saved === 'USD' || saved === 'INR') ? (saved as CurrencyMode) : 'INR';
