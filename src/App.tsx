@@ -66,7 +66,18 @@ export default function App() {
       setActiveTab('sampling');
     };
     window.addEventListener('NAVIGATE_TO_SAMPLING', handleNavToSampling);
-    return () => window.removeEventListener('NAVIGATE_TO_SAMPLING', handleNavToSampling);
+
+    const handleAuthExpired = () => {
+      localStorage.removeItem('supabase_token');
+      localStorage.removeItem('data360_active_user');
+      setCurrentUser(null);
+    };
+    window.addEventListener('auth-expired', handleAuthExpired);
+
+    return () => {
+      window.removeEventListener('NAVIGATE_TO_SAMPLING', handleNavToSampling);
+      window.removeEventListener('auth-expired', handleAuthExpired);
+    };
   }, []);
 
   const handleToggleNavCollapse = () => {
@@ -144,6 +155,10 @@ export default function App() {
         const res = await fetch('/api/audits', {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
+        if (res.status === 401) {
+          window.dispatchEvent(new Event('auth-expired'));
+          return;
+        }
         const data = await res.json();
         if (res.ok && data.success && data.audits) {
           setEngagements(data.audits);
