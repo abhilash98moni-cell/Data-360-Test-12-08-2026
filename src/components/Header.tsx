@@ -68,32 +68,54 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   // No longer needed: const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [authorizedDistributors, setAuthorizedDistributors] = useState<string[]>([]);
+  const [isLoadingDistributors, setIsLoadingDistributors] = useState<boolean>(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
   useEffect(() => {
     if (currentUser?.role === 'Auditor') {
-       fetch('/api/users/me/distributors', {
-          headers: {
-             'Authorization': 'Bearer ' + localStorage.getItem('supabase_token')
+      setIsLoadingDistributors(true);
+      setAuthError(null);
+      const token = localStorage.getItem('supabase_token');
+      if (!token) {
+        setIsLoadingDistributors(false);
+        setAuthError('Authentication required');
+        return;
+      }
+      fetch('/api/users/me/distributors', {
+        headers: {
+          'Authorization': 'Bearer ' + token
+        }
+      })
+      .then(async res => {
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.success) {
+          throw new Error(data.error || `HTTP ${res.status}: Failed to load authorized distributors`);
+        }
+        return data;
+      })
+      .then(data => {
+        if (Array.isArray(data.distributors)) {
+          setAuthorizedDistributors(data.distributors);
+          if (data.distributors.length > 0) {
+            if (!data.distributors.includes(selectedDistributor)) {
+              onDistributorChange(data.distributors[0]);
+            }
           }
-       }).then(res => res.json()).then(data => {
-          if (data.success && data.distributors) {
-             setAuthorizedDistributors(data.distributors);
-             if (data.distributors.length === 1) {
-                // Auto-select if there is exactly one
-                onDistributorChange(data.distributors[0]);
-             } else if (data.distributors.length > 0 && selectedDistributor === 'All Distributors') {
-                // Default to the first one instead of 'All Distributors' to avoid confusion if needed
-                onDistributorChange(data.distributors[0]);
-             } else if (data.distributors.length === 0) {
-                onDistributorChange('No Distributors Assigned');
-             }
-          }
-       }).catch(console.error);
+        }
+      })
+      .catch(err => {
+        console.error('Distributor authorization lookup failed:', err);
+        setAuthError(err.message || 'Authorization lookup failed');
+      })
+      .finally(() => {
+        setIsLoadingDistributors(false);
+      });
     }
   }, [currentUser]);
 
   const allDists = getDistributorsForClient(selectedClient);
-  const currentDistributors = currentUser?.role === 'Auditor' 
-     ? allDists.filter(d => authorizedDistributors.includes(d.name))
+  const currentDistributors: { id: string; name: string }[] = currentUser?.role === 'Auditor' 
+     ? authorizedDistributors.map(name => ({ id: name, name }))
      : allDists;
 
   return (
@@ -181,8 +203,24 @@ export const Header: React.FC<HeaderProps> = ({
             <select 
               value={selectedDistributor} 
               onChange={(e) => onDistributorChange(e.target.value)}
-              className="bg-transparent text-emerald-300 text-sm font-bold focus:outline-none cursor-pointer flex-1 text-center"
+              disabled={isLoadingDistributors || authorizedDistributors.length === 0}
+              className="bg-transparent text-emerald-300 text-sm font-bold focus:outline-none cursor-pointer flex-1 text-center disabled:cursor-not-allowed disabled:text-slate-400"
             >
+              {isLoadingDistributors && (
+                <option disabled value="" className="bg-slate-900 text-slate-400">
+                  Loading authorized distributors...
+                </option>
+              )}
+              {authError && !isLoadingDistributors && (
+                <option disabled value="" className="bg-slate-900 text-rose-400">
+                  {authError}
+                </option>
+              )}
+              {!isLoadingDistributors && !authError && authorizedDistributors.length === 0 && (
+                <option disabled value="" className="bg-slate-900 text-amber-400">
+                  No Authorized Distributors Assigned
+                </option>
+              )}
               {currentDistributors.map(d => (
                 <option key={d.id} value={d.name} className="bg-slate-900 text-slate-200">
                   {d.name}

@@ -106,7 +106,8 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
     let query = supabase.from('distributors').select('*');
     const role = req.auth?.role;
     if (role === 'Auditor') {
-      const { data: access } = await supabase.from('auditor_distributor_access').select('distributor_name').eq('auditor_user_id', req.auth.sub).eq('is_active', true);
+      const auditorId = req.auth?.id || req.auth?.sub;
+      const { data: access } = await supabase.from('auditor_distributor_access').select('distributor_name').eq('auditor_user_id', auditorId).eq('is_active', true);
       const allowed = (access || []).map(a => a.distributor_name);
       if (allowed.length === 0) return res.json({ success: true, distributors: [] });
       query = query.in('entity_name', allowed);
@@ -911,7 +912,8 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   app.use('/api', async (req: any, res: any, next: any) => {
     // Skip public/auth routes
     const openRoutes = ['/api/auth/', '/api/health', '/api/supabase/health', '/api/gdrive/status'];
-    if (openRoutes.some(route => req.path.startsWith(route))) {
+    const fullPath = req.originalUrl || (req.baseUrl ? req.baseUrl + req.path : req.path);
+    if (openRoutes.some(route => fullPath.startsWith(route) || req.path.startsWith(route))) {
       return next();
     }
 
@@ -937,6 +939,13 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
     // ENFORCE DISTRIBUTOR ACCESS FOR AUDITORS
     const role = req.headers['x-user-role'] || userAuth.role || '';
     if (role === 'Auditor') {
+       // Narrow exemption specifically for distributor discovery endpoint:
+       // /api/users/me/distributors allows authenticated auditors to discover their authorized distributors.
+       // It cannot provide a selected distributor parameter prior to discovery, but still strictly requires authentication (enforced above).
+       if (fullPath.startsWith('/api/users/me/distributors') || req.path === '/users/me/distributors') {
+          return next();
+       }
+
        const distributor = req.query.distributor || req.body.distributor || req.body.distributor_name || req.body.distributorName || req.query.distributor_name;
        
        if (!distributor || distributor === 'All Distributors' || distributor === 'all') {
@@ -945,13 +954,19 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
        }
        
        const supabase = getSupabaseServerClient();
-       const { data } = await supabase.from('auditor_distributor_access')
+       const { data, error } = await supabase.from('auditor_distributor_access')
           .select('id')
-          .eq('auditor_user_id', userAuth.sub)
+          .eq('auditor_user_id', userAuth.id || userAuth.sub)
           .eq('distributor_name', distributor)
           .eq('is_active', true)
           .maybeSingle();
-       if (!data) {
+       if (error || !data) {
+          if (error && (error.code === 'PGRST205' || error.message?.includes('schema cache'))) {
+             return res.status(500).json({ 
+                success: false, 
+                error: "Database configuration error: 'public.auditor_distributor_access' table is missing. Run migration in src/db/supabase_schema.sql." 
+             });
+          }
           return res.status(403).json({ success: false, error: 'Access Denied: You are not authorized for this distributor.' });
        }
     }
@@ -5224,7 +5239,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     try {
       const supabase = getSupabaseServerClient();
       const role = req.auth?.role;
-      const userId = req.auth?.sub;
+      const userId = req.auth?.id || req.auth?.sub;
 
       let query = supabase.from('audits').select('*').order('created_at', { ascending: false });
 
@@ -5287,7 +5302,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     try {
       const supabase = getSupabaseServerClient();
       const role = req.auth?.role;
-      const userId = req.auth?.sub;
+      const userId = req.auth?.id || req.auth?.sub;
       const distributorName = auditData.distributorName || 'Midwest Trading Co.';
       
       // Authorization Check
@@ -6491,17 +6506,6 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     next(err);
   });
 
-  // Vite middleware for development or static file serving for production
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    
   // ====================================================================
   // Auditor Distributor Access API
   // ====================================================================
@@ -6511,10 +6515,12 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       const supabase = getSupabaseServerClient();
       const role = req.headers['x-user-role'] || req.auth?.role || '';
       if (!['Platform Super Admin', 'AA Super Admin', 'Admin'].includes(role)) {
-        return res.status(403).json({ error: 'Only administrators can view auditor access mappings' });
+        return res.status(403).json({ success: false, error: 'Only administrators can view auditor access mappings' });
       }
       const { data, error } = await supabase.from('auditor_distributor_access').select('*');
-      if (error) throw error;
+      if (error) {
+        return res.status(500).json({ success: false, error: `Database query failed: ${error.message} (${error.code || 'UNKNOWN'})` });
+      }
       res.json({ success: true, mappings: data || [] });
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message });
@@ -6526,17 +6532,21 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       const supabase = getSupabaseServerClient();
       const role = req.headers['x-user-role'] || req.auth?.role || '';
       if (!['Platform Super Admin', 'AA Super Admin', 'Admin'].includes(role)) {
-        return res.status(403).json({ error: 'Only administrators can manage auditor access' });
+        return res.status(403).json({ success: false, error: 'Only administrators can manage auditor access' });
       }
       const { auditor_user_id, distributor_name, is_active } = req.body;
       if (!auditor_user_id || !distributor_name) {
-         return res.status(400).json({ error: 'Missing required fields' });
+         return res.status(400).json({ success: false, error: 'Missing required fields' });
       }
 
       // Check if exists
-      const { data: existing } = await supabase.from('auditor_distributor_access')
+      const { data: existing, error: findError } = await supabase.from('auditor_distributor_access')
          .select('*').eq('auditor_user_id', auditor_user_id).eq('distributor_name', distributor_name).maybeSingle();
       
+      if (findError) {
+         return res.status(500).json({ success: false, error: `Database check failed: ${findError.message} (${findError.code || 'UNKNOWN'})` });
+      }
+
       if (existing) {
          const { error } = await supabase.from('auditor_distributor_access')
             .update({ is_active, updated_at: new Date().toISOString() })
@@ -6568,22 +6578,45 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   app.get('/api/users/me/distributors', authenticateRequest, async (req: any, res: any) => {
     try {
       const supabase = getSupabaseServerClient();
-      const userId = req.auth?.sub;
-      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+      const userId = req.auth?.id || req.auth?.sub;
+      if (!userId) {
+        return res.status(401).json({ success: false, error: 'Unauthorized: User identity not found' });
+      }
       
       const { data, error } = await supabase.from('auditor_distributor_access')
          .select('distributor_name')
          .eq('auditor_user_id', userId)
          .eq('is_active', true);
          
-      if (error) throw error;
-      res.json({ success: true, distributors: (data || []).map((d: any) => d.distributor_name) });
+      if (error) {
+        const isTableMissing = error.code === 'PGRST205' || error.message?.includes('schema cache');
+        const detail = isTableMissing 
+          ? "Database configuration error: 'public.auditor_distributor_access' table is missing. Run migration in src/db/supabase_schema.sql." 
+          : `Database authorization query failed: ${error.message} (${error.code || 'UNKNOWN'})`;
+        return res.status(500).json({ 
+          success: false, 
+          error: detail 
+        });
+      }
+
+      const authorizedDistributors = (data || []).map((d: any) => d.distributor_name).filter(Boolean);
+      res.json({ success: true, distributors: authorizedDistributors });
     } catch (err: any) {
-      res.status(500).json({ success: false, error: err.message });
+      res.status(500).json({ success: false, error: err.message || 'Failed to query authorized distributors' });
     }
   });
 
-  app.get('*', (req, res) => {
+  // Vite middleware for development or static file serving for production
+  if (process.env.NODE_ENV !== 'production') {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
