@@ -166,23 +166,21 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
         </div>
           <nav className="space-y-1">
             
-            {/* 1. Executive Dashboard (Auditor / Admin only) */}
-            {!isDistributor && (
-              <button
-                title={isCollapsed ? "Executive Dashboard" : undefined}
-                onClick={() => onTabChange('dashboard')}
-                className={`w-full flex items-center ${isCollapsed ? "justify-center px-0" : "justify-between px-3"} py-2.5 rounded-lg text-xs font-medium transition-all ${
-                  activeTab === 'dashboard'
-                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
-                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
-                }`}
-              >
-                <div className={`flex items-center gap-3 min-w-0 ${isCollapsed ? "justify-center" : ""}`}>
-                  <LayoutDashboard className={`h-4 w-4 shrink-0 ${activeTab === 'dashboard' ? 'text-white' : 'text-slate-400'}`} />
-                  {!isCollapsed && <span className="truncate">Executive Dashboard</span>}
-                </div>
-              </button>
-            )}
+            {/* 1. Executive Dashboard */}
+            <button
+              title={isCollapsed ? "Executive Dashboard" : undefined}
+              onClick={() => onTabChange('dashboard')}
+              className={`w-full flex items-center ${isCollapsed ? "justify-center px-0" : "justify-between px-3"} py-2.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'dashboard'
+                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                  : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
+              }`}
+            >
+              <div className={`flex items-center gap-3 min-w-0 ${isCollapsed ? "justify-center" : ""}`}>
+                <LayoutDashboard className={`h-4 w-4 shrink-0 ${activeTab === 'dashboard' ? 'text-white' : 'text-slate-400'}`} />
+                {!isCollapsed && <span className="truncate">Executive Dashboard</span>}
+              </div>
+            </button>
 
             {/* 2. Engagement Workspace */}
             <button

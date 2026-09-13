@@ -244,7 +244,7 @@ export default function App() {
     if (user.role === 'Admin') {
       setActiveTab('admin_approval');
     } else if (user.role === 'Distributor') {
-      setActiveTab('engagement_workspace');
+      setActiveTab('dashboard');
       if (user.organization) {
         setSelectedDistributor(user.organization);
         const matchedClient = CLIENT_TENANTS.find(c => 
