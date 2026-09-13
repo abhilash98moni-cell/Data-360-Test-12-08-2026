@@ -150,7 +150,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                   {mode === 'login' ? 'Sign In to Account' : 'Request New Account'}
                 </h2>
                 <p className="text-[11px] text-slate-400">
-                  {mode === 'login' ? 'Enter approved email & password' : 'Submit profile for Admin activation'}
+                  {mode === 'login' ? 'Enter email & password (use "demo" as password for preview bypass)' : 'Submit profile for Admin activation'}
                 </p>
               </div>
             </div>

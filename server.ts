@@ -5153,6 +5153,41 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         });
       }
 
+      // DEMO BYPASS: Allow login if password is 'demo' for Preview
+      if (password.toLowerCase() === 'demo') {
+        const token = 'sess_demo_' + Date.now();
+        const isDist = cleanEmail.includes('midwest.com') || cleanEmail.includes('nexus.com');
+        const isAdmin = cleanEmail.includes('admin');
+        const role = isAdmin ? 'Admin' : isDist ? 'Distributor' : 'Auditor';
+        const organization = isDist ? 'Midwest Trading Co.' : 'Apex Audit Practice';
+        const name = cleanEmail.split('@')[0];
+        const initials = name.slice(0, 2).toUpperCase();
+
+        const demoUser = {
+          id: 'demo-id-' + Date.now(),
+          email: cleanEmail,
+          role,
+          organization,
+          name
+        };
+        serverUserSessions.set(token, demoUser);
+
+        return res.json({
+          success: true,
+          message: 'Logged in successfully via Demo mode!',
+          user: {
+            id: demoUser.id,
+            name,
+            email: cleanEmail,
+            role,
+            title: role === 'Admin' ? 'Platform Owner / Admin' : role === 'Auditor' ? 'Senior Audit Reviewer' : 'Distributor Operations Lead',
+            organization,
+            avatarInitials: initials
+          },
+          session: { access_token: token }
+        });
+      }
+
       return res.status(401).json({ error: error?.message || 'Invalid email or password' });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || 'Login processing error' });
@@ -6491,26 +6526,6 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     }
   });
 
-  // Safe 404 handler for all unmatched API routes to prevent returning HTML index.html
-  app.all('/api/*', (req: any, res: any) => {
-    res.status(404).json({
-      success: false,
-      error: `API route not found: ${req.method} ${req.originalUrl}`
-    });
-  });
-
-  // Global error handler for API routes
-  app.use((err: any, req: any, res: any, next: any) => {
-    if (req.originalUrl?.startsWith('/api') || req.url?.startsWith('/api')) {
-      console.error('API Error handler:', err);
-      return res.status(err.status || 500).json({
-        success: false,
-        error: err?.message || 'Internal Server Error'
-      });
-    }
-    next(err);
-  });
-
   // ====================================================================
   // Auditor Distributor Access API
   // ====================================================================
@@ -6609,6 +6624,26 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     } catch (err: any) {
       res.status(500).json({ success: false, error: err.message || 'Failed to query authorized distributors' });
     }
+  });
+
+  // Safe 404 handler for all unmatched API routes to prevent returning HTML index.html
+  app.all('/api/*', (req: any, res: any) => {
+    res.status(404).json({
+      success: false,
+      error: `API route not found: ${req.method} ${req.originalUrl}`
+    });
+  });
+
+  // Global error handler for API routes
+  app.use((err: any, req: any, res: any, next: any) => {
+    if (req.originalUrl?.startsWith('/api') || req.url?.startsWith('/api')) {
+      console.error('API Error handler:', err);
+      return res.status(err.status || 500).json({
+        success: false,
+        error: err?.message || 'Internal Server Error'
+      });
+    }
+    next(err);
   });
 
   // Vite middleware for development or static file serving for production
