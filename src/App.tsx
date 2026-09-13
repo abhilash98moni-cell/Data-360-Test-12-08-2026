@@ -332,6 +332,7 @@ export default function App() {
         selectedClient={selectedClient}
         onClientChange={handleClientChange}
         selectedDistributor={selectedDistributor}
+              onDistributorChangeGlobal={setSelectedDistributor}
         onDistributorChange={setSelectedDistributor}
         currencyMode={currencyMode}
         onCurrencyModeChange={handleCurrencyModeChange}
