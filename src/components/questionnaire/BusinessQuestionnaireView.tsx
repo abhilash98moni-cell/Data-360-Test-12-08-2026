@@ -39,7 +39,8 @@ import {
   saveQuestionnaireAuditorNotes,
   requestEditAccessQuestionnaire,
   reviewEditAccessQuestionnaire,
-  customizeQuestionnaire
+  customizeQuestionnaire,
+  getAuthHeaders
 } from '../../services/questionnaireApiClient';
 import {
   AuthoritativeQuestionnaireState,
@@ -102,10 +103,27 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
   const [isPushing, setIsPushing] = useState<boolean>(false);
   const [pushToast, setPushToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
 
+  // Evidence Attachment Preview Modal State
+  interface AttachmentPreviewState {
+    isOpen: boolean;
+    fileId: string;
+    fileName: string;
+    fileSizeMB?: number;
+    mimeType?: string;
+    blobUrl?: string;
+    textContent?: string;
+    isLoading: boolean;
+    error?: string;
+    isUnsupported?: boolean;
+    attachment?: any;
+  }
+  const [previewModal, setPreviewModal] = useState<AttachmentPreviewState | null>(null);
+
   const showPushToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
     setPushToast({ message, type });
     setTimeout(() => setPushToast(null), 5000);
   };
+  const showToast = showPushToast;
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   // Moved below
@@ -516,7 +534,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
     }
   };
 
-  // File upload simulation via Google Drive API
+  // Business Questionnaire Evidence File Upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, questionId: string) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -525,16 +543,38 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
     try {
       const formData = new FormData();
       formData.append('file', file);
-      formData.append('client', selectedClient);
-      formData.append('distributor', selectedDistributor);
-      formData.append('requestRef', `BQ-${questionId}`);
+      formData.append('clientName', selectedClient || 'Apex Group');
+      formData.append('client', selectedClient || 'Apex Group');
+      formData.append('distributorName', selectedDistributor || 'Apex Distribution LLC');
+      formData.append('distributor', selectedDistributor || 'Apex Distribution LLC');
+      formData.append('auditName', 'FY26 Distributor Channel Audit');
+      formData.append('requirementId', `BQ-${questionId}`);
+      formData.append('uploadedBy', currentUser?.name || 'Distributor User');
+      formData.append('isReferenceMaterial', 'false');
+      formData.append('documentType', 'EVIDENCE');
+      formData.append('documentUsage', 'EVIDENCE');
 
       const uploadRes = await fetch('/api/storage/upload', {
         method: 'POST',
+        headers: getAuthHeaders(),
         body: formData
       });
 
+      if (!uploadRes.ok) {
+        let errMessage = 'File upload failed.';
+        try {
+          const errData = await uploadRes.json();
+          if (errData.error) errMessage = errData.error;
+        } catch (_) {}
+        throw new Error(errMessage);
+      }
+
       const data = await uploadRes.json();
+      const realStorageId = data.file?.googleDriveFileId || data.file?.id || data.fileId;
+      if (!realStorageId) {
+        throw new Error(data.error || 'The storage engine did not return a valid file reference.');
+      }
+
       const existing = localAnswers[questionId] || {
         questionId,
         responseValue: '',
@@ -545,11 +585,12 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
       const newAttachment = {
         id: `att-${Date.now()}`,
         fileName: file.name,
-        fileSizeMB: Number((file.size / (1024 * 1024)).toFixed(2)),
+        fileSizeMB: data.file?.fileSizeMB || Number((file.size / (1024 * 1024)).toFixed(2)),
         fileType: file.name.split('.').pop()?.toUpperCase() || 'FILE',
-        googleDriveFileId: data.fileId || `gdrive-${Date.now()}`,
+        googleDriveFileId: realStorageId,
         uploadedBy: currentUser?.name || 'Distributor User',
-        uploadedDate: new Date().toISOString()
+        uploadedDate: new Date().toISOString(),
+        webViewLink: data.file?.webViewLink || ''
       };
 
       const updatedAttachments = [...(existing.attachments || []), newAttachment];
@@ -578,13 +619,146 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
         currentUser?.role,
         currentUser?.organization
       );
+
+      showPushToast(`Uploaded "${file.name}" successfully.`, 'success');
     } catch (err: any) {
       setErrorMessage(`File upload error: ${err.message}`);
+      showPushToast(`Upload failed: ${err.message}`, 'error');
     } finally {
       setUploadingQuestionId(null);
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+    }
+  };
+
+  const handlePreviewAttachment = async (att: any) => {
+    const targetId = att.googleDriveFileId || att.id;
+    if (!targetId) {
+      showPushToast('Invalid or missing file reference.', 'error');
+      return;
+    }
+
+    setPreviewModal({
+      isOpen: true,
+      fileId: targetId,
+      fileName: att.fileName || 'document.pdf',
+      fileSizeMB: att.fileSizeMB,
+      isLoading: true,
+      attachment: att
+    });
+
+    try {
+      const res = await fetch(`/api/storage/preview/${encodeURIComponent(targetId)}?fileName=${encodeURIComponent(att.fileName || 'document.pdf')}`, {
+        headers: getAuthHeaders()
+      });
+
+      if (!res.ok) {
+        let errText = 'Failed to load document preview.';
+        try {
+          const errJson = await res.json();
+          if (errJson.error) errText = errJson.error;
+        } catch (_) {}
+        setPreviewModal(prev => prev ? { ...prev, isLoading: false, error: errText } : null);
+        return;
+      }
+
+      const blob = await res.blob();
+      const contentType = blob.type || '';
+      const fileNameLower = (att.fileName || '').toLowerCase();
+      const ext = fileNameLower.split('.').pop() || '';
+
+      const isPdf = contentType === 'application/pdf' || ext === 'pdf';
+      const isImage = contentType.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
+      const isText = contentType.startsWith('text/') || ['txt', 'csv', 'json', 'log', 'md'].includes(ext);
+
+      let textContent = '';
+      if (isText && !isPdf && !isImage) {
+        try {
+          textContent = await blob.text();
+        } catch (_) {}
+      }
+
+      const isUnsupported = !isPdf && !isImage && !isText;
+      const blobUrl = URL.createObjectURL(blob);
+
+      setPreviewModal(prev => prev ? {
+        ...prev,
+        isLoading: false,
+        mimeType: contentType,
+        blobUrl,
+        textContent,
+        isUnsupported
+      } : null);
+    } catch (err: any) {
+      setPreviewModal(prev => prev ? {
+        ...prev,
+        isLoading: false,
+        error: err.message || 'An unexpected error occurred while retrieving preview.'
+      } : null);
+    }
+  };
+
+  const handleClosePreview = () => {
+    if (previewModal?.blobUrl) {
+      URL.revokeObjectURL(previewModal.blobUrl);
+    }
+    setPreviewModal(null);
+  };
+
+  const handleDownloadAttachment = async (att: any) => {
+    const targetId = att.googleDriveFileId || att.id;
+    if (!targetId) {
+      showPushToast('Invalid or missing file reference.', 'error');
+      return;
+    }
+
+    showPushToast(`Retrieving "${att.fileName || 'document'}" from storage...`, 'info');
+
+    try {
+      const res = await fetch(`/api/storage/download/${encodeURIComponent(targetId)}?fileName=${encodeURIComponent(att.fileName || 'document.pdf')}`, {
+        headers: getAuthHeaders()
+      });
+
+      if (!res.ok) {
+        let errText = 'Failed to retrieve file binary from storage.';
+        try {
+          const errJson = await res.json();
+          if (errJson.error) errText = errJson.error;
+        } catch (_) {}
+        showPushToast(`Download failed: ${errText}`, 'error');
+        return;
+      }
+
+      const contentType = res.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        const errJson = await res.json();
+        showPushToast(`Download failed: ${errJson.error || 'Server returned an error response.'}`, 'error');
+        return;
+      }
+
+      let downloadFileName = att.fileName || 'document.pdf';
+      const disposition = res.headers.get('content-disposition');
+      if (disposition && disposition.includes('filename=')) {
+        const match = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(disposition);
+        if (match && match[1]) {
+          downloadFileName = decodeURIComponent(match[1]);
+        }
+      }
+
+      const blob = await res.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = blobUrl;
+      link.download = downloadFileName;
+      document.body.appendChild(link);
+      link.click();
+      window.URL.revokeObjectURL(blobUrl);
+      document.body.removeChild(link);
+
+      showPushToast(`Downloaded "${downloadFileName}" successfully.`, 'success');
+    } catch (err: any) {
+      showPushToast(`Download error: ${err.message}`, 'error');
     }
   };
 
@@ -1305,20 +1479,28 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                                     </div>
                                   </div>
 
-                                  <div className="flex items-center gap-1">
-                                    <a
-                                      href={`/api/storage/download/${att.googleDriveFileId || att.id}?fileName=${encodeURIComponent(att.name || 'document.pdf')}`}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="p-1 text-slate-400 hover:text-indigo-300 rounded hover:bg-slate-800"
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      onClick={() => handlePreviewAttachment(att)}
+                                      className="p-1 text-slate-400 hover:text-indigo-300 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                                      title="Preview document"
+                                    >
+                                      <Eye className="h-3.5 w-3.5" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDownloadAttachment(att)}
+                                      className="p-1 text-slate-400 hover:text-indigo-300 rounded hover:bg-slate-800 transition-colors cursor-pointer"
                                       title="Download attachment"
                                     >
                                       <Download className="h-3.5 w-3.5" />
-                                    </a>
+                                    </button>
                                     {!isLocked && (
                                       <button
+                                        type="button"
                                         onClick={() => handleRemoveAttachment(q.id, att.id)}
-                                        className="p-1 text-slate-500 hover:text-rose-400 rounded hover:bg-slate-800"
+                                        className="p-1 text-slate-500 hover:text-rose-400 rounded hover:bg-slate-800 transition-colors cursor-pointer"
                                         title="Remove file"
                                       >
                                         <Trash2 className="h-3.5 w-3.5" />
@@ -1683,6 +1865,158 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
               >
                 <Lock className="h-3.5 w-3.5" />
                 Approve & Unlock
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Evidence Document Preview Modal */}
+      {previewModal && previewModal.isOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 backdrop-blur-sm p-3 sm:p-6"
+          onClick={handleClosePreview}
+        >
+          <div
+            className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-5 py-3.5 border-b border-slate-800 bg-slate-950/60 shrink-0">
+              <div className="flex items-center gap-2.5 truncate">
+                <FileText className="h-4 w-4 text-indigo-400 shrink-0" />
+                <div className="truncate">
+                  <h3 className="text-sm font-bold text-slate-100 truncate">{previewModal.fileName}</h3>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    {previewModal.fileSizeMB ? `${previewModal.fileSizeMB} MB • ` : ''}
+                    {previewModal.attachment?.uploadedBy || 'Evidence Attachment'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {previewModal.blobUrl && !previewModal.isUnsupported && (
+                  <a
+                    href={previewModal.blobUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-xs text-indigo-400 hover:text-indigo-300 font-mono flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
+                    title="Open in new tab"
+                  >
+                    <span>Open in New Tab</span>
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
+                <button
+                  type="button"
+                  onClick={handleClosePreview}
+                  className="p-1.5 text-slate-400 hover:text-slate-100 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+                  title="Close"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Content */}
+            <div className="flex-1 overflow-auto p-4 flex flex-col items-center justify-center min-h-[320px] bg-slate-950/40">
+              {previewModal.isLoading && (
+                <div className="flex flex-col items-center gap-3 py-12">
+                  <RefreshCw className="h-7 w-7 text-indigo-400 animate-spin" />
+                  <p className="text-xs text-slate-400 font-mono">Loading preview from storage...</p>
+                </div>
+              )}
+
+              {!previewModal.isLoading && previewModal.error && (
+                <div className="max-w-md p-5 bg-rose-950/30 border border-rose-800/60 rounded-xl text-center space-y-3">
+                  <AlertTriangle className="h-8 w-8 text-rose-400 mx-auto" />
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-semibold text-rose-200">Unable to Preview Document</h4>
+                    <p className="text-xs text-rose-300/90 leading-relaxed">{previewModal.error}</p>
+                  </div>
+                  {previewModal.attachment && (
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadAttachment(previewModal.attachment)}
+                      className="mt-2 inline-flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      <span>Try Direct Download</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {!previewModal.isLoading && !previewModal.error && previewModal.isUnsupported && (
+                <div className="max-w-md p-6 bg-slate-900 border border-slate-800 rounded-xl text-center space-y-4">
+                  <FileText className="h-10 w-10 text-amber-400 mx-auto" />
+                  <div className="space-y-1.5">
+                    <h4 className="text-sm font-semibold text-slate-100">Preview Not Available</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      Preview is not available for this file type. Please use Download.
+                    </p>
+                  </div>
+                  {previewModal.attachment && (
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadAttachment(previewModal.attachment)}
+                      className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-indigo-950/50 cursor-pointer"
+                    >
+                      <Download className="h-4 w-4" />
+                      <span>Download File</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {!previewModal.isLoading && !previewModal.error && !previewModal.isUnsupported && (
+                <>
+                  {(previewModal.mimeType === 'application/pdf' || previewModal.fileName.toLowerCase().endsWith('.pdf')) ? (
+                    <iframe
+                      src={previewModal.blobUrl}
+                      className="w-full h-[65vh] rounded-xl border border-slate-800 bg-slate-950"
+                      title={previewModal.fileName}
+                    />
+                  ) : (previewModal.mimeType?.startsWith('image/') || /\.(png|jpe?g|webp|gif|svg)$/i.test(previewModal.fileName)) ? (
+                    <div className="flex items-center justify-center w-full h-[65vh]">
+                      <img
+                        src={previewModal.blobUrl}
+                        alt={previewModal.fileName}
+                        className="max-h-[60vh] max-w-full rounded-xl object-contain border border-slate-800 shadow-lg"
+                      />
+                    </div>
+                  ) : previewModal.textContent ? (
+                    <pre className="w-full h-[65vh] p-4 bg-slate-950 rounded-xl border border-slate-800 overflow-auto text-xs text-slate-300 font-mono whitespace-pre-wrap">
+                      {previewModal.textContent}
+                    </pre>
+                  ) : (
+                    <iframe
+                      src={previewModal.blobUrl}
+                      className="w-full h-[65vh] rounded-xl border border-slate-800 bg-slate-950"
+                      title={previewModal.fileName}
+                    />
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between px-5 py-3 border-t border-slate-800 bg-slate-950/60 shrink-0">
+              <button
+                type="button"
+                onClick={() => previewModal.attachment && handleDownloadAttachment(previewModal.attachment)}
+                className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-950/40 cursor-pointer"
+              >
+                <Download className="h-3.5 w-3.5" />
+                <span>Download File</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClosePreview}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold cursor-pointer border border-slate-700 transition-colors"
+              >
+                Close Preview
               </button>
             </div>
           </div>

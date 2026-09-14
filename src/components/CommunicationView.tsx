@@ -745,7 +745,7 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            const targetId = att.file?.googleDriveFileId || att.googleDriveFileId || att.url || 'attachment-file';
+                            const targetId = (att as any).file?.googleDriveFileId || att.googleDriveFileId || att.url || 'attachment-file';
                             previewFileFromApi(targetId, att.fileName, showToast);
                           }}
                           className="ml-auto p-1 hover:bg-emerald-600/30 text-emerald-400 hover:text-emerald-200 rounded-lg transition-colors cursor-pointer"
@@ -756,7 +756,7 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            const targetId = att.file?.googleDriveFileId || att.googleDriveFileId || att.url || 'attachment-file';
+                            const targetId = (att as any).file?.googleDriveFileId || att.googleDriveFileId || att.url || 'attachment-file';
                             downloadFileFromApi(targetId, att.fileName, showToast);
                           }}
                           className="ml-1 p-1 hover:bg-indigo-600/30 text-indigo-400 hover:text-indigo-200 rounded-lg transition-colors cursor-pointer"

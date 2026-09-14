@@ -1,6 +1,6 @@
 import { AuthoritativeQuestionnaireState, QuestionnaireAnswerItem, QuestionnaireAuditorNoteItem } from './questionnaireService';
 
-const getAuthHeaders = () => {
+export const getAuthHeaders = () => {
   if (typeof window === 'undefined') return {};
   const token = localStorage.getItem('supabase_token') || sessionStorage.getItem('supabase_token');
   return token ? { Authorization: `Bearer ${token}` } : {};
