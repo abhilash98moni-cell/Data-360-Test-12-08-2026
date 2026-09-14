@@ -26,6 +26,7 @@ import {
 import { CurrencyMode } from '../utils/currencyFormatter';
 import { CLIENT_TENANTS, getDistributorsForClient } from '../data/clientsAndDistributors';
 import { UserSession } from './AuthModal';
+import { AuditEngagement } from '../types';
 
 interface HeaderProps {
   selectedClient: string;
@@ -45,6 +46,10 @@ interface HeaderProps {
   onOpenNotifications?: () => void;
   onLogout?: () => void;
   onNavigateToProfile?: (tab: 'profile' | 'security') => void;
+  liveAudits?: AuditEngagement[];
+  isLoadingAudits?: boolean;
+  selectedAuditId?: string;
+  onAuditSelect?: (auditId: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -64,7 +69,11 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenAuth,
   onOpenNotifications,
   onLogout,
-  onNavigateToProfile
+  onNavigateToProfile,
+  liveAudits,
+  isLoadingAudits,
+  selectedAuditId,
+  onAuditSelect
 }) => {
   // No longer needed: const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
   const [authorizedDistributors, setAuthorizedDistributors] = useState<string[]>([]);
@@ -177,18 +186,26 @@ export const Header: React.FC<HeaderProps> = ({
         {/* Global Auditor Context Dropdown */}
         {currentUser?.role === 'Auditor' && (
           <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-1 flex-1 max-w-sm justify-center mx-4">
-            <span className="text-slate-400 text-xs hidden sm:inline">Distributor:</span>
-            <select 
-              value={selectedDistributor} 
-              onChange={(e) => onDistributorChange(e.target.value)}
-              className="bg-transparent text-emerald-300 text-sm font-bold focus:outline-none cursor-pointer flex-1 text-center"
-            >
-              {currentDistributors.map(d => (
-                <option key={d.id} value={d.name} className="bg-slate-900 text-slate-200">
-                  {d.name}
-                </option>
-              ))}
-            </select>
+            <span className="text-slate-400 text-xs hidden sm:inline">Distributor Audit:</span>
+            {isLoadingAudits ? (
+              <span className="text-slate-400 text-sm italic animate-pulse">Loading live audits...</span>
+            ) : !liveAudits || liveAudits.length === 0 ? (
+              <span className="text-slate-400 text-sm italic">No live distributor audits available</span>
+            ) : (
+              <select 
+                value={selectedAuditId || ''} 
+                onChange={(e) => {
+                  if (onAuditSelect) onAuditSelect(e.target.value);
+                }}
+                className="bg-transparent text-emerald-300 text-sm font-bold focus:outline-none cursor-pointer flex-1 text-center truncate max-w-[280px]"
+              >
+                {liveAudits.map(audit => (
+                  <option key={audit.id} value={audit.id} className="bg-slate-900 text-slate-200">
+                    {audit.distributorName || audit.title.split(' - ')[0] || audit.clientName} — Live Audit
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
         )}
 

@@ -322,6 +322,8 @@ export default function App() {
     return <LoginPage onLogin={handleLogin} />;
   }
 
+  const liveAudits = engagements.filter(e => e.status !== 'Completed');
+
   return (
     <div className={`min-h-screen flex flex-col font-sans max-w-full overflow-x-hidden selection:bg-indigo-500 selection:text-white transition-colors duration-200 ${
       themeMode === 'light' ? 'light-theme bg-slate-50 text-slate-900' : 'bg-slate-950 text-slate-100'
@@ -353,6 +355,28 @@ export default function App() {
             setTimeout(() => {
               document.getElementById('security-section')?.scrollIntoView({ behavior: 'smooth' });
             }, 100);
+          }
+        }}
+        liveAudits={liveAudits}
+        isLoadingAudits={isLoadingEngagements}
+        selectedAuditId={selectedEngId}
+        onAuditSelect={(id) => {
+          setSelectedEngId(id);
+          const eng = engagements.find(e => e.id === id);
+          if (eng) {
+            if (eng.clientName) setSelectedClient(eng.clientName);
+            if (eng.distributorName) {
+              setSelectedDistributor(eng.distributorName);
+            } else {
+              const dists = getDistributorsForClient(eng.clientName);
+              const matched = dists.find(d => eng.title.includes(d.name) || eng.location.includes(d.name) || (d.code && eng.location.includes(d.code)));
+              if (matched) {
+                setSelectedDistributor(matched.name);
+              }
+            }
+          }
+          if (activeTab === 'dashboard') {
+            setActiveTab('engagement_workspace');
           }
         }}
       />
