@@ -367,6 +367,46 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
                 )}
               </button>
             </div>
+
+            {mode === 'login' && (
+              <div className="pt-4 pb-2 border-t border-slate-800/60 mt-4 space-y-3">
+                <p className="text-[10px] text-slate-400 text-center font-medium uppercase tracking-wider">Or continue with demo access</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => onLogin({
+                      id: 'demo-auditor-1',
+                      name: 'Demo Auditor',
+                      email: 'auditor@demo.com',
+                      role: 'Auditor',
+                      title: 'Senior Audit Reviewer',
+                      organization: 'Apex Audit Practice',
+                      avatarInitials: 'DA'
+                    })}
+                    className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 hover:border-indigo-500/50 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2"
+                  >
+                    <ShieldCheck className="h-4 w-4" />
+                    <span>Demo Auditor</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onLogin({
+                      id: 'demo-distributor-1',
+                      name: 'Demo Distributor',
+                      email: 'distributor@demo.com',
+                      role: 'Distributor',
+                      title: 'Distributor Operations Lead',
+                      organization: 'Midwest Trading Co.',
+                      avatarInitials: 'DD'
+                    })}
+                    className="w-full py-2.5 bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 hover:border-emerald-500/50 font-bold text-xs rounded-xl transition-all flex items-center justify-center gap-2"
+                  >
+                    <UserCheck className="h-4 w-4" />
+                    <span>Demo Distributor</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </form>
 
         </div>

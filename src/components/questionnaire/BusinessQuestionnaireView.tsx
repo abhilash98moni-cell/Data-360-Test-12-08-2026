@@ -93,6 +93,8 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
   const [customSectionsDraft, setCustomSectionsDraft] = useState<any[]>([]);
   const [isEditRequesting, setIsEditRequesting] = useState<boolean>(false);
   const [isEditReviewing, setIsEditReviewing] = useState<boolean>(false);
+  const [isRequestEditModalOpen, setIsRequestEditModalOpen] = useState<boolean>(false);
+  const [isReviewEditModalOpen, setIsReviewEditModalOpen] = useState<boolean>(false);
 
   // Unified Push State
   const activeDistributors = useMemo(() => getDistributorsForClient(selectedClient), [selectedClient]);
@@ -155,6 +157,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
         setQuestionnaireState(res.state);
         setSyncStatus('synced');
         setLastSyncTime('Just now');
+        setIsRequestEditModalOpen(false);
       } else {
         throw new Error(res.error || 'Failed to request edit access');
       }
@@ -176,6 +179,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
         setQuestionnaireState(res.state);
         setSyncStatus('synced');
         setLastSyncTime('Just now');
+        setIsReviewEditModalOpen(false);
       } else {
         throw new Error(res.error || 'Failed to review edit access');
       }
@@ -823,6 +827,21 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                 Submit Questionnaire
               </button>
             )}
+            {isDistributor && questionnaireState?.isLocked && questionnaireState?.editAccessStatus !== 'REQUESTED' && (
+              <button
+                onClick={() => setIsRequestEditModalOpen(true)}
+                disabled={isEditRequesting}
+                className="flex items-center gap-2 bg-amber-600/90 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-amber-600/20 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Lock className="h-3.5 w-3.5" />
+                Request Edit Access
+              </button>
+            )}
+            {isDistributor && questionnaireState?.editAccessStatus === 'REQUESTED' && (
+              <span className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5">
+                <Clock className="h-3.5 w-3.5" /> Edit Request Pending
+              </span>
+            )}
 
             {isAuditor && (
               <EngagementWorkspaceActionBar
@@ -850,6 +869,29 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
             )}
           </div>
         </div>
+
+        {isAuditor && questionnaireState?.editAccessStatus === 'REQUESTED' && (
+          <div className="mt-3 bg-amber-950/40 border border-amber-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-500/20 rounded-lg shrink-0">
+                <Lock className="h-5 w-5 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-amber-400">Pending Edit Access Request</h3>
+                <p className="text-xs text-amber-200/70 mt-0.5">
+                  {selectedDistributor} has requested to unlock this questionnaire to make updates.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsReviewEditModalOpen(true)}
+              className="shrink-0 px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-amber-900/20 flex items-center gap-2 cursor-pointer"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              Review Request
+            </button>
+          </div>
+        )}
 
         {/* Push Notification Toast Banner */}
         {pushToast && (
@@ -1507,6 +1549,107 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
           </div>
         </div>
       )}
+
+      {/* Distributor: Request Edit Access Modal */}
+      {isRequestEditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-amber-500/30 rounded-2xl w-full max-w-md p-6 shadow-2xl shadow-amber-900/20 space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-amber-500/20 rounded-xl shrink-0">
+                <Lock className="h-5 w-5 text-amber-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white leading-tight">Request Edit Access</h3>
+                <p className="text-xs text-amber-200/70 mt-0.5">Unlock questionnaire for updates</p>
+              </div>
+            </div>
+            
+            <p className="text-sm text-slate-300 leading-relaxed">
+              This will send a request to the Audit team to unlock your Business Questionnaire submission. 
+              Once approved, you will be able to make changes to your responses and upload additional evidence.
+            </p>
+
+            <div className="flex justify-end gap-3 pt-3">
+              <button
+                onClick={() => setIsRequestEditModalOpen(false)}
+                disabled={isEditRequesting}
+                className="px-4 py-2 rounded-xl text-slate-300 bg-slate-800 hover:bg-slate-700 text-xs font-semibold transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleRequestEditAccess}
+                disabled={isEditRequesting}
+                className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
+              >
+                {isEditRequesting ? (
+                  <>
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    Submitting...
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-3.5 w-3.5" />
+                    Submit Request
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Auditor: Review Edit Access Modal */}
+      {isReviewEditModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-md p-6 shadow-2xl space-y-5">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-blue-500/20 rounded-xl shrink-0">
+                <ShieldCheck className="h-5 w-5 text-blue-400" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-white leading-tight">Review Edit Request</h3>
+                <p className="text-xs text-slate-400 mt-0.5">From: {selectedDistributor}</p>
+              </div>
+            </div>
+
+            <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl">
+              <p className="text-sm text-slate-300 leading-relaxed">
+                <span className="font-semibold text-white">{selectedDistributor}</span> has requested that you unlock their 
+                Business Questionnaire submission so they can provide updated responses or documentation.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-3 pt-3">
+              <button
+                onClick={() => setIsReviewEditModalOpen(false)}
+                disabled={isEditReviewing}
+                className="px-4 py-2 rounded-xl text-slate-300 bg-slate-800 hover:bg-slate-700 text-xs font-semibold transition-colors disabled:opacity-50 sm:mr-auto"
+              >
+                Cancel
+              </button>
+              
+              <button
+                onClick={() => handleReviewEditAccess('REJECT')}
+                disabled={isEditReviewing}
+                className="px-4 py-2 border border-rose-500/40 hover:bg-rose-600/20 text-rose-300 rounded-xl text-xs font-bold transition-colors disabled:opacity-50"
+              >
+                Reject Request
+              </button>
+
+              <button
+                onClick={() => handleReviewEditAccess('APPROVE')}
+                disabled={isEditReviewing}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-colors shadow-md shadow-emerald-900/20 flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Lock className="h-3.5 w-3.5" />
+                Approve & Unlock
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

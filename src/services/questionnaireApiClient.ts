@@ -1,5 +1,11 @@
 import { AuthoritativeQuestionnaireState, QuestionnaireAnswerItem, QuestionnaireAuditorNoteItem } from './questionnaireService';
 
+const getAuthHeaders = () => {
+  if (typeof window === 'undefined') return {};
+  const token = localStorage.getItem('supabase_token') || sessionStorage.getItem('supabase_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 export async function fetchQuestionnaireState(
   client: string,
   distributor: string,
@@ -19,7 +25,8 @@ export async function fetchQuestionnaireState(
     const res = await fetch(`/api/questionnaire/sync?${params.toString()}`, {
       headers: {
         'x-user-role': userRole || '',
-        'x-user-org': userOrg || ''
+        'x-user-org': userOrg || '',
+        ...getAuthHeaders()
       }
     });
 
@@ -58,7 +65,8 @@ export async function saveQuestionnaireAnswers(
       headers: {
         'Content-Type': 'application/json',
         'x-user-role': userRole || '',
-        'x-user-org': userOrg || ''
+        'x-user-org': userOrg || '',
+        ...getAuthHeaders()
       },
       body: JSON.stringify({
         client,
@@ -104,7 +112,8 @@ export async function submitQuestionnaire(
       headers: {
         'Content-Type': 'application/json',
         'x-user-role': userRole || '',
-        'x-user-org': userOrg || ''
+        'x-user-org': userOrg || '',
+        ...getAuthHeaders()
       },
       body: JSON.stringify({
         client,
@@ -147,7 +156,8 @@ export async function saveQuestionnaireAuditorNotes(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-user-role': userRole || ''
+        'x-user-role': userRole || '',
+        ...getAuthHeaders()
       },
       body: JSON.stringify({
         client,
@@ -186,7 +196,10 @@ export async function requestEditAccessQuestionnaire(
   try {
     const res = await fetch('/api/questionnaire/edit-access-request', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
       body: JSON.stringify({ client, distributor, auditId, userEmail, userName })
     });
     const data = await res.json();
@@ -209,7 +222,10 @@ export async function reviewEditAccessQuestionnaire(
   try {
     const res = await fetch('/api/questionnaire/edit-access-review', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
       body: JSON.stringify({ client, distributor, auditId, action, userEmail, userName })
     });
     const data = await res.json();
@@ -232,7 +248,10 @@ export async function customizeQuestionnaire(
   try {
     const res = await fetch('/api/questionnaire/customize', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        ...getAuthHeaders()
+      },
       body: JSON.stringify({ client, distributor, auditId, customSections, userEmail, userName })
     });
     const data = await res.json();

@@ -1573,6 +1573,21 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       setSelectedEditRequestForReview(pending);
       setIsAuditorReviewModalOpen(true);
     } else {
+      try {
+        await fetch('/api/iir/save-draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            client: selectedClientProp || 'Apex Electronics Corp',
+            distributor: selectedDistributorName || 'Midwest Trading Co.',
+            auditId: 'eng-101',
+            requests,
+            submittedBy: currentUser?.name || currentUser?.email || 'Sarah Jenkins (Auditor)'
+          })
+        });
+      } catch (e) {
+        console.warn('Silent fallback unlock error:', e);
+      }
       setIsLocked(false);
       addAuditLog('Edit Approved', 'Auditor unlocked IIR form for Distributor updates');
       showToast('Form unlocked. Distributor can now make changes.', 'success');
