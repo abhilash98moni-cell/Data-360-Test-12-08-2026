@@ -1206,7 +1206,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(downloaded.fileName)}"`);
       res.send(downloaded.buffer);
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to download file from Google Drive', details: err.message, stack: err.stack });
+      res.status(500).json({ error: 'Failed to download file from storage', details: err.message, stack: err.stack });
     }
   });
 
