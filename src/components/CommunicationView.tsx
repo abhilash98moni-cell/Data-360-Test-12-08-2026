@@ -1,3 +1,4 @@
+const getAuthHeaders = () => { const token = typeof window !== "undefined" ? (localStorage.getItem("supabase_token") || sessionStorage.getItem("supabase_token")) : null; return token ? { Authorization: `Bearer ${token}` } : {}; };
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   MessageSquare, 
@@ -9,6 +10,7 @@ import {
   FileText, 
   Filter,
   Download,
+  Eye,
   AlertCircle,
   RefreshCw,
   X,
@@ -39,7 +41,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { ThreadedMessage, UserSession, ConversationSummary, ConversationParticipant } from '../types';
-import { downloadFileFromApi } from '../lib/downloadHelper';
+import { downloadFileFromApi, previewFileFromApi } from '../lib/downloadHelper';
 import { INITIAL_IIR_REQUESTS } from '../data/iirData';
 import { BUSINESS_QUESTIONNAIRE_SECTIONS } from '../data/questionnaireData';
 
@@ -455,7 +457,8 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
 
       const uploadRes = await fetch('/api/storage/upload', {
         method: 'POST',
-        body: formData
+        body: formData,
+        headers: getAuthHeaders()
       });
 
       if (!uploadRes.ok) {
@@ -464,7 +467,7 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
       }
 
       const uploadData = await uploadRes.json();
-      const driveFileId = uploadData.googleDriveFileId || uploadData.id;
+      const driveFileId = uploadData.file?.googleDriveFileId || uploadData.googleDriveFileId || uploadData.id;
 
       setAttachedFiles(prev => [
         ...prev,
@@ -742,7 +745,18 @@ export const CommunicationView: React.FC<CommunicationViewProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            const targetId = att.googleDriveFileId || 'attachment-file';
+                            const targetId = att.file?.googleDriveFileId || att.googleDriveFileId || att.url || 'attachment-file';
+                            previewFileFromApi(targetId, att.fileName, showToast);
+                          }}
+                          className="ml-auto p-1 hover:bg-emerald-600/30 text-emerald-400 hover:text-emerald-200 rounded-lg transition-colors cursor-pointer"
+                          title="Preview file"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const targetId = att.file?.googleDriveFileId || att.googleDriveFileId || att.url || 'attachment-file';
                             downloadFileFromApi(targetId, att.fileName, showToast);
                           }}
                           className="ml-1 p-1 hover:bg-indigo-600/30 text-indigo-400 hover:text-indigo-200 rounded-lg transition-colors cursor-pointer"

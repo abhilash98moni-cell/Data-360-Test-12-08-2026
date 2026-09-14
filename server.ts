@@ -6194,8 +6194,8 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   // Request Edit Access
   app.post('/api/questionnaire/edit-access-request', async (req, res) => {
     try {
-      const { client, distributor, auditId, userEmail, userName } = req.body;
-      const result = await requestAuthoritativeQuestionnaireEditAccess(client, distributor, auditId || 'eng-101', userEmail, userName);
+      const { client, distributor, auditId, userEmail, userName, reason } = req.body;
+      const result = await requestAuthoritativeQuestionnaireEditAccess(client, distributor, auditId || 'eng-101', userEmail, userName, reason);
       return res.json({ success: true, ...result });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });

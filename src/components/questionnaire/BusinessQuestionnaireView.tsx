@@ -94,6 +94,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
   const [isEditRequesting, setIsEditRequesting] = useState<boolean>(false);
   const [isEditReviewing, setIsEditReviewing] = useState<boolean>(false);
   const [isRequestEditModalOpen, setIsRequestEditModalOpen] = useState<boolean>(false);
+  const [editRequestReason, setEditRequestReason] = useState<string>("");
   const [isReviewEditModalOpen, setIsReviewEditModalOpen] = useState<boolean>(false);
 
   // Unified Push State
@@ -149,21 +150,28 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
 
   const handleRequestEditAccess = async () => {
     if (!questionnaireState || isEditRequesting) return;
+    const trimmed = editRequestReason.trim();
+    if (trimmed.length < 50) {
+      if (showToast) showToast(`Request reason must be at least 50 characters long (${trimmed.length}/50).`, 'error');
+      return;
+    }
     setIsEditRequesting(true);
     setSyncStatus('saving');
     try {
-      const res = await requestEditAccessQuestionnaire(selectedClient, selectedDistributor, undefined, (currentUser?.email || 'user@example.com'), (currentUser?.name || 'User'));
+      const res = await requestEditAccessQuestionnaire(selectedClient, selectedDistributor, undefined, (currentUser?.email || 'user@example.com'), (currentUser?.name || 'User'), trimmed);
       if (res.success && res.state) {
         setQuestionnaireState(res.state);
         setSyncStatus('synced');
         setLastSyncTime('Just now');
         setIsRequestEditModalOpen(false);
+        if (showToast) showToast('Edit access requested successfully.', 'success');
       } else {
         throw new Error(res.error || 'Failed to request edit access');
       }
     } catch (err: any) {
       setSyncStatus('error');
       setErrorMessage(err.message);
+      if (showToast) showToast(err.message, 'error');
     } finally {
       setIsEditRequesting(false);
     }
@@ -830,7 +838,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
             {isDistributor && questionnaireState?.isLocked && questionnaireState?.editAccessStatus !== 'REQUESTED' && (
               <button
                 onClick={() => setIsRequestEditModalOpen(true)}
-                disabled={isEditRequesting}
+                disabled={isEditRequesting || editRequestReason.trim().length < 50}
                 className="flex items-center gap-2 bg-amber-600/90 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-amber-600/20 transition-all cursor-pointer disabled:opacity-50"
               >
                 <Lock className="h-3.5 w-3.5" />
@@ -1569,6 +1577,30 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
               Once approved, you will be able to make changes to your responses and upload additional evidence.
             </p>
 
+            {/* Reason Textarea with 50-char validation */}
+            <div className="space-y-1.5 text-xs">
+              <div className="flex justify-between items-center">
+                <label className="text-slate-300 font-semibold block">Reason for Edit Request (Mandatory, min 50 chars):</label>
+                <span className={`font-mono text-[10px] ${
+                  editRequestReason.trim().length < 50 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'
+                }`}>
+                  {editRequestReason.trim().length} / 50 min chars
+                </span>
+              </div>
+              <textarea
+                value={editRequestReason}
+                onChange={(e) => setEditRequestReason(e.target.value)}
+                placeholder="State why responses or documents need updating..."
+                rows={4}
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-500/50"
+              />
+              {editRequestReason.trim().length > 0 && editRequestReason.trim().length < 50 && (
+                <p className="text-[11px] text-amber-400">
+                  Please provide at least {50 - editRequestReason.trim().length} more characters explaining your request.
+                </p>
+              )}
+            </div>
+
             <div className="flex justify-end gap-3 pt-3">
               <button
                 onClick={() => setIsRequestEditModalOpen(false)}
@@ -1579,7 +1611,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
               </button>
               <button
                 onClick={handleRequestEditAccess}
-                disabled={isEditRequesting}
+                disabled={isEditRequesting || editRequestReason.trim().length < 50}
                 className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 {isEditRequesting ? (
@@ -1613,11 +1645,18 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
               </div>
             </div>
 
-            <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl">
+            <div className="bg-slate-950 border border-slate-800 p-4 rounded-xl space-y-3">
               <p className="text-sm text-slate-300 leading-relaxed">
                 <span className="font-semibold text-white">{selectedDistributor}</span> has requested that you unlock their 
                 Business Questionnaire submission so they can provide updated responses or documentation.
               </p>
+              
+              {questionnaireState?.editAccessRequestReason && (
+                <div className="p-3 bg-slate-900 border border-slate-800 rounded-lg text-xs">
+                  <div className="font-bold text-slate-400 mb-1">Justification Provided:</div>
+                  <p className="text-slate-200 whitespace-pre-wrap">{questionnaireState.editAccessRequestReason}</p>
+                </div>
+              )}
             </div>
 
             <div className="flex flex-col sm:flex-row justify-end gap-3 pt-3">

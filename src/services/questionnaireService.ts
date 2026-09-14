@@ -39,6 +39,7 @@ export interface AuthoritativeQuestionnaireState {
   status: 'Not Started' | 'In Progress' | 'Submitted' | 'Under Review' | 'Accepted';
   isLocked: boolean;
   editAccessStatus?: 'LOCKED' | 'REQUESTED' | 'APPROVED' | 'REJECTED';
+  editAccessRequestReason?: string;
   editAccessRequestedAt?: string;
   editAccessRequestedBy?: string;
   editAccessApprovedAt?: string;
@@ -378,7 +379,8 @@ export async function requestAuthoritativeQuestionnaireEditAccess(
   distName: string,
   auditId: string,
   userEmail: string,
-  userName: string
+  userName: string,
+  reason?: string
 ): Promise<AuthoritativeQuestionnaireRecord> {
   const supabase = getSupabaseServerClient();
   const stateKey = `${clientName}::${distName}::${auditId}`;
@@ -388,6 +390,7 @@ export async function requestAuthoritativeQuestionnaireEditAccess(
   const newState = {
     ...currentState,
     editAccessStatus: 'REQUESTED' as const,
+    editAccessRequestReason: reason,
     editAccessRequestedAt: new Date().toISOString(),
     editAccessRequestedBy: userName || userEmail,
     version: currentState.version + 1,

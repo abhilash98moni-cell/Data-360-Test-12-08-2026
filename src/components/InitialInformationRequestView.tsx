@@ -1,3 +1,4 @@
+const getAuthHeaders = () => { const token = typeof window !== "undefined" ? (localStorage.getItem("supabase_token") || sessionStorage.getItem("supabase_token")) : null; return token ? { Authorization: `Bearer ${token}` } : {}; };
 import React, { useState, useCallback } from 'react';
 import { downloadFileFromApi } from '../lib/downloadHelper';
 import { 
@@ -284,7 +285,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     // Fetch authoritative state from Supabase PostgreSQL API
     const fetchServerState = async () => {
       try {
-        const res = await fetch(`/api/iir/sync?client=${encodeURIComponent(selectedClientProp)}&distributor=${encodeURIComponent(targetDist)}`);
+        const res = await fetch(`/api/iir/sync?client=${encodeURIComponent(selectedClientProp)}&distributor=${encodeURIComponent(targetDist)}`, { headers: getAuthHeaders() });
         const contentType = res.headers.get('content-type') || '';
         if (res.ok && contentType.includes('application/json')) {
           const data = await res.json();
@@ -399,7 +400,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       if (selectedClientProp) query.append('client', selectedClientProp);
       if (selectedDistributorName) query.append('distributor', selectedDistributorName);
 
-      const res = await fetch(`/api/iir/edit-requests?${query.toString()}`);
+      const res = await fetch(`/api/iir/edit-requests?${query.toString()}`, { headers: getAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.requests)) {
@@ -643,7 +644,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
         try {
           await fetch('/api/iir/save-draft', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
             body: JSON.stringify({
               client: selectedClientProp || 'Apex Electronics Corp',
               distributor: selectedDistributorName || 'Midwest Trading Co.',
@@ -738,7 +739,8 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
       const res = await fetch('/api/storage/upload', {
         method: 'POST',
-        body: formData
+        body: formData,
+        headers: getAuthHeaders()
       });
 
       const data = await res.json();
@@ -1299,7 +1301,8 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
       const res = await fetch('/api/storage/upload', {
         method: 'POST',
-        body: formData
+        body: formData,
+        headers: getAuthHeaders()
       });
 
       const data = await res.json();
@@ -1403,7 +1406,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     try {
       await fetch('/api/iir/update-item-status', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           client: selectedClientProp || 'Apex Electronics Corp',
           distributor: selectedDistributorName || 'Midwest Trading Co.',
@@ -1427,7 +1430,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     try {
       const res = await fetch('/api/iir/save-draft', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           client: selectedClientProp || 'Apex Electronics Corp',
           distributor: selectedDistributorName || 'Midwest Trading Co.',
@@ -1467,7 +1470,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     try {
       const res = await fetch('/api/iir/submit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           client: selectedClientProp || 'Apex Electronics Corp',
           distributor: selectedDistributorName || 'Midwest Trading Co.',
@@ -1531,7 +1534,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     try {
       const res = await fetch('/api/iir/request-edit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           client: selectedClientProp || 'Apex Electronics Corp',
           distributor: selectedDistributorName || 'Midwest Trading Co.',
@@ -1576,7 +1579,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       try {
         await fetch('/api/iir/save-draft', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
           body: JSON.stringify({
             client: selectedClientProp || 'Apex Electronics Corp',
             distributor: selectedDistributorName || 'Midwest Trading Co.',
@@ -1600,7 +1603,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     try {
       const res = await fetch('/api/iir/request-edit/approve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           requestId: reqId,
           comment: auditorReviewComment.trim() || 'Edit access approved by APEX Lead Auditor.',
@@ -1644,7 +1647,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     try {
       const res = await fetch('/api/iir/request-edit/reject', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           requestId: reqId,
           comment: auditorReviewComment.trim(),

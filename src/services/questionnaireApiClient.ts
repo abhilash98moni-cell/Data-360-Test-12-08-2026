@@ -191,7 +191,8 @@ export async function requestEditAccessQuestionnaire(
   distributor: string,
   auditId: string = 'eng-101',
   userEmail: string,
-  userName: string
+  userName: string,
+  reason?: string
 ): Promise<{ success: boolean; state?: AuthoritativeQuestionnaireState; error?: string }> {
   try {
     const res = await fetch('/api/questionnaire/edit-access-request', {
@@ -200,7 +201,7 @@ export async function requestEditAccessQuestionnaire(
         'Content-Type': 'application/json',
         ...getAuthHeaders()
       },
-      body: JSON.stringify({ client, distributor, auditId, userEmail, userName })
+      body: JSON.stringify({ client, distributor, auditId, userEmail, userName, reason })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to request edit access');
