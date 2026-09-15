@@ -142,7 +142,7 @@ export const NewAuditModal: React.FC<NewAuditModalProps> = ({
 
       // 2. Call API to persist audit engagement
       const token = localStorage.getItem('supabase_token');
-      const res = await fetch('/api/audits/create', {
+      const res = await fetch('/api/engagements/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

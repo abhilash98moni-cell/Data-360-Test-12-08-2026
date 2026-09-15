@@ -5473,8 +5473,8 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   // STEP 5: AUDIT CREATION & ASSIGNMENT API
   // ====================================================================
   // ====================================================================
-  // GET /api/audits
-  app.get('/api/audits', authenticateRequest, async (req: any, res: any) => {
+  // GET /api/engagements
+  app.get('/api/engagements', authenticateRequest, async (req: any, res: any) => {
     try {
       const supabase = getSupabaseServerClient();
       const role = req.auth?.role;
@@ -5531,8 +5531,8 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     }
   });
 
-  // POST /api/audits/create
-  app.post('/api/audits/create', authenticateRequest, async (req: any, res: any) => {
+  // POST /api/engagements/create
+  app.post('/api/engagements/create', authenticateRequest, async (req: any, res: any) => {
     const auditData = req.body;
     if (!auditData.code || !auditData.title) {
       return res.status(400).json({ error: 'Audit code and title are required' });

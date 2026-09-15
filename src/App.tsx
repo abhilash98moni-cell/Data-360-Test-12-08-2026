@@ -141,7 +141,7 @@ export default function App() {
       setIsLoadingEngagements(true);
       try {
         const token = localStorage.getItem('supabase_token');
-        const res = await fetch('/api/audits', {
+        const res = await fetch('/api/engagements', {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
         const data = await res.json();
