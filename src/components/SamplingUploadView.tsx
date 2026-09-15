@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   UploadCloud,
   FileSpreadsheet,
@@ -728,6 +728,42 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   const totalDebit = records.reduce((sum, r) => sum + (Number(r.debit) || 0), 0);
   const totalCredit = records.reduce((sum, r) => sum + (Number(r.credit) || 0), 0);
 
+  // Sampling Stats for Distributor
+  const samplingStats = useMemo(() => {
+    if (!isDistributor) return null;
+    let mandatory = 0;
+    let missing = 0;
+    let pending = 0;
+    let completed = 0;
+    let clarification = 0;
+
+    records.forEach(r => {
+      const resp = questionnaireResponses[String(r.id || '').toLowerCase()] ||
+                   questionnaireResponses[String(r.voucherNo || '').toLowerCase()] ||
+                   questionnaireResponses[r.id] ||
+                   questionnaireResponses[r.voucherNo];
+      
+      const st = resp?.status;
+      const isPushed = resp?.is_pushed || resp?.isPushed;
+      
+      if (isPushed || st) {
+        mandatory++;
+        if (!st || st === 'Draft') {
+           pending++;
+           missing++;
+        } else if (st === 'Completed' || st === 'Submitted' || st === 'Accepted') {
+           completed++;
+        } else if (st === 'Clarification Required' || st === 'Rejected') {
+           clarification++;
+        } else {
+           pending++;
+        }
+      }
+    });
+
+    return { total: records.length, mandatory, missing, pending, completed, clarification };
+  }, [records, questionnaireResponses, isDistributor]);
+
   return (
     <div className="space-y-5 animate-fade-in text-slate-100">
       {/* Toast Notification */}
@@ -746,6 +782,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       )}
 
       {/* Area 1 Banner: General Ledger Population Management */}
+      {!isDistributor && (
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-xl relative overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-indigo-600/5 rounded-full blur-3xl pointer-events-none" />
         
@@ -806,6 +843,57 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
           </div>
         </div>
       </div>
+      )}
+
+      {/* Sampling Status Summary (Distributor Only) */}
+      {isDistributor && samplingStats && (
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-bold text-white flex items-center gap-2">
+              <Database className="h-4 w-4 text-indigo-400" />
+              Sampling Status Summary
+            </h2>
+            <button
+              onClick={() => {
+                loadPopulationData();
+                fetchQuestionnaireResponses();
+              }}
+              disabled={isLoading}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold transition-all flex items-center gap-2 cursor-pointer shadow-sm"
+              title="Refresh from Database"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 text-slate-400 ${isLoading ? 'animate-spin' : ''}`} />
+              <span>Sync Status</span>
+            </button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Total</p>
+              <p className="text-xl font-bold text-slate-200">{samplingStats.total}</p>
+            </div>
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Mandatory</p>
+              <p className="text-xl font-bold text-slate-200">{samplingStats.mandatory}</p>
+            </div>
+            <div className="bg-rose-950/20 border border-rose-900/30 rounded-xl p-3">
+              <p className="text-[10px] font-bold text-rose-500/70 uppercase tracking-wider mb-1">Missing</p>
+              <p className="text-xl font-bold text-rose-400">{samplingStats.missing}</p>
+            </div>
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Pending</p>
+              <p className="text-xl font-bold text-slate-200">{samplingStats.pending}</p>
+            </div>
+            <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3">
+              <p className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-wider mb-1">Completed</p>
+              <p className="text-xl font-bold text-emerald-400">{samplingStats.completed}</p>
+            </div>
+            <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-3">
+              <p className="text-[10px] font-bold text-amber-500/70 uppercase tracking-wider mb-1">Clarification</p>
+              <p className="text-xl font-bold text-amber-400">{samplingStats.clarification}</p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Step 1: Upload GL Population Dropzone & Status Card Grid (Auditor Only) */}
       {!isDistributor && (

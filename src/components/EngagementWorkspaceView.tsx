@@ -71,7 +71,7 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
   return (
     <div className="space-y-4">
       {/* Top Workspace Header & Sub-Tab Navigation */}
-      {!isIIRFullScreen && (
+      {!isIIRFullScreen && !(isDistributor && activeSubTab === 'sampling') && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-4 shadow-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-indigo-600 to-cyan-500 flex items-center justify-center text-white shadow-inner shrink-0">
