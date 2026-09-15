@@ -104,6 +104,30 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   const [openQuestionnaireFor, setOpenQuestionnaireFor] = useState<GLRecord | null>(null);
   const [questionnaireResponses, setQuestionnaireResponses] = useState<Record<string, any>>({});
 
+  const isValidSampleKey = (k: any): boolean => {
+    if (!k) return false;
+    const s = String(k).trim().toLowerCase();
+    return s !== '' && s !== '—' && s !== '-' && s !== 'undefined' && s !== 'null' && s !== 'n/a';
+  };
+
+  const getRowQuestionnaireResponse = (row: any, responsesMap: Record<string, any>) => {
+    if (!row || !responsesMap) return null;
+    const candidates = [
+      row.id,
+      row.sampleId,
+      row.voucherNo && row.voucherNo !== '—' ? row.voucherNo : null,
+      row.originalRow ? `row-${row.originalRow}` : null
+    ].filter(isValidSampleKey);
+
+    for (const key of candidates) {
+      const strKey = String(key);
+      if (responsesMap[strKey]) return responsesMap[strKey];
+      const lowerKey = strKey.toLowerCase();
+      if (responsesMap[lowerKey]) return responsesMap[lowerKey];
+    }
+    return null;
+  };
+
   const [activePopulation, setActivePopulation] = useState<SamplingPopulation | null>(null);
   const [availablePopulations, setAvailablePopulations] = useState<SamplingPopulation[]>([]);
   const [records, setRecords] = useState<GLRecord[]>([]);
@@ -162,10 +186,11 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   });
 
   const clarificationCount = React.useMemo(() => {
-    return Object.values(questionnaireResponses || {}).filter(
-      (r: any) => r?.status === 'Clarification Required' || r?.status === 'Rejected'
-    ).length;
-  }, [questionnaireResponses]);
+    return records.filter(r => {
+      const resp = getRowQuestionnaireResponse(r, questionnaireResponses);
+      return resp?.status === 'Clarification Required' || resp?.status === 'Rejected';
+    }).length;
+  }, [records, questionnaireResponses]);
 
   const handleToggleRowSelect = (id: string) => {
     setSelectedRowIds(prev => {
@@ -329,10 +354,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
     setIsPushing(true);
     try {
       const clarificationItems = records.filter(r => {
-        const resp = questionnaireResponses[String(r.id || '').toLowerCase()] ||
-                     questionnaireResponses[String(r.voucherNo || '').toLowerCase()] ||
-                     questionnaireResponses[r.id] ||
-                     questionnaireResponses[r.voucherNo];
+        const resp = getRowQuestionnaireResponse(r, questionnaireResponses);
         return resp?.status === 'Clarification Required' || resp?.status === 'Rejected';
       });
 
@@ -406,17 +428,21 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       if (data.success && Array.isArray(data.responses)) {
         const map: Record<string, any> = {};
         data.responses.forEach((r: any) => {
-          if (r.sample_id) {
-            map[r.sample_id] = r;
-            map[String(r.sample_id).toLowerCase()] = r;
+          const sId = r.sample_id;
+          const vNo = r.voucher_no || r.voucherNo;
+          const rowId = r.row_id || r.rowId;
+
+          if (isValidSampleKey(sId)) {
+            map[sId] = r;
+            map[String(sId).toLowerCase()] = r;
           }
-          if (r.voucher_no) {
-            map[r.voucher_no] = r;
-            map[String(r.voucher_no).toLowerCase()] = r;
+          if (isValidSampleKey(vNo)) {
+            map[vNo] = r;
+            map[String(vNo).toLowerCase()] = r;
           }
-          if (r.voucherNo) {
-            map[r.voucherNo] = r;
-            map[String(r.voucherNo).toLowerCase()] = r;
+          if (isValidSampleKey(rowId)) {
+            map[rowId] = r;
+            map[String(rowId).toLowerCase()] = r;
           }
         });
         setQuestionnaireResponses(map);
@@ -460,10 +486,16 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       const recData = await recRes.json();
 
       if (recData.success && Array.isArray(recData.records)) {
-        const mappedRecords: GLRecord[] = recData.records.map((r: any, idx: number) => ({
-          ...r,
-          id: r.id || r.sampleId || r.voucherNo || `TX-${idx + 1}`
-        }));
+        const mappedRecords: GLRecord[] = recData.records.map((r: any, idx: number) => {
+          const fallbackId = `TX-${r.originalRow || idx + 1}`;
+          const finalId = r.id || (r.voucherNo && r.voucherNo !== '—' ? r.voucherNo : '') || r.sampleId || fallbackId;
+          return {
+            ...r,
+            id: finalId,
+            sampleId: r.sampleId || finalId,
+            voucherNo: r.voucherNo || '—'
+          };
+        });
         setRecords(mappedRecords);
       } else {
         setRecords([]);
@@ -525,7 +557,17 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       const recData = await recRes.json();
 
       if (recData.success && Array.isArray(recData.records)) {
-        setRecords(recData.records);
+        const mappedRecords: GLRecord[] = recData.records.map((r: any, idx: number) => {
+          const fallbackId = `TX-${r.originalRow || idx + 1}`;
+          const finalId = r.id || (r.voucherNo && r.voucherNo !== '—' ? r.voucherNo : '') || r.sampleId || fallbackId;
+          return {
+            ...r,
+            id: finalId,
+            sampleId: r.sampleId || finalId,
+            voucherNo: r.voucherNo || '—'
+          };
+        });
+        setRecords(mappedRecords);
         showToast('success', `Active population switched to "${selected.fileName}" and persisted to database.`);
       }
     } catch (err) {
@@ -760,15 +802,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
 
     if (records.length > 0) {
       records.forEach(r => {
-        const cleanKey1 = String(r.id || '').toLowerCase();
-        const cleanKey2 = String(r.voucherNo || '').toLowerCase();
-        const cleanKey3 = String(r.sampleId || '').toLowerCase();
-        const resp = questionnaireResponses[cleanKey1] ||
-                     questionnaireResponses[cleanKey2] ||
-                     questionnaireResponses[cleanKey3] ||
-                     questionnaireResponses[r.id] ||
-                     questionnaireResponses[r.voucherNo] ||
-                     questionnaireResponses[r.sampleId];
+        const resp = getRowQuestionnaireResponse(r, questionnaireResponses);
         
         const st = resp?.status;
         if (st === 'Accepted') {
@@ -1273,11 +1307,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                     </td>
                     <td className="py-2.5 px-3 text-center whitespace-nowrap bg-slate-950/20">
                       {(() => {
-                        const cleanKey1 = String(row.id || '').toLowerCase();
-                        const cleanKey2 = String(row.voucherNo || '').toLowerCase();
-                        const cleanKey3 = String(row.sampleId || '').toLowerCase();
-                        const resp = questionnaireResponses[cleanKey1] || questionnaireResponses[cleanKey2] || questionnaireResponses[cleanKey3] ||
-                                     questionnaireResponses[row.id] || questionnaireResponses[row.voucherNo] || questionnaireResponses[row.sampleId];
+                        const resp = getRowQuestionnaireResponse(row, questionnaireResponses);
                         const st = resp?.status;
                         const isAccepted = st === 'Accepted';
                         const isCompleted = st === 'Completed' || st === 'Submitted';

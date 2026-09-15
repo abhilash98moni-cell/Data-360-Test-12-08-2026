@@ -91,8 +91,10 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
   const isAuditor = !isDistributor;
   const isReadOnly = Boolean(isReviewMode);
 
-  const targetSampleId = String(transaction?.id || transaction?.sampleId || transaction?.voucherNo || 'TX-1');
-  const targetVoucherNo = String(transaction?.voucherNo || transaction?.id || '');
+  const rawId = transaction?.id || transaction?.sampleId || (transaction?.voucherNo && transaction?.voucherNo !== '—' ? transaction?.voucherNo : '');
+  const targetSampleId = String(rawId || `TX-${transaction?.originalRow || 1}`);
+  const targetVoucherNo = String(transaction?.voucherNo && transaction?.voucherNo !== '—' ? transaction.voucherNo : targetSampleId);
+  const targetRowId = String(transaction?.id || targetSampleId);
   const activeDistributor = selectedDistributor || transaction?.distributor || currentUser?.organization || 'Distributor';
 
   // State Management
@@ -179,6 +181,17 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
         setItemResponses(resp.itemResponses || {});
         setActiveClarificationMessage(resp.clarificationMessage || '');
         setClarificationHistory(resp.clarificationHistory || []);
+      } else {
+        setStatus('Draft');
+        setIsPushed(false);
+        setPushedAt(null);
+        setPushedBy(null);
+        setPushedTo(null);
+        setGeneralNotes('');
+        setGeneralFiles([]);
+        setItemResponses({});
+        setActiveClarificationMessage('');
+        setClarificationHistory([]);
       }
     } catch (err: any) {
       console.error('Failed to load questionnaire data:', err);
@@ -513,6 +526,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
 
       const payload = {
         engagement_id: engagementId || 'eng-101',
+        row_id: targetRowId,
         sample_id: targetSampleId,
         voucher_no: targetVoucherNo,
         distributor_id: activeDistributor,
@@ -589,6 +603,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
     try {
       const payload = {
         engagement_id: engagementId || 'eng-101',
+        row_id: targetRowId,
         sample_id: targetSampleId,
         voucher_no: targetVoucherNo,
         distributor_id: activeDistributor,
@@ -656,6 +671,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
     try {
       const payload = {
         engagement_id: engagementId || 'eng-101',
+        row_id: targetRowId,
         sample_id: targetSampleId,
         voucher_no: targetVoucherNo,
         distributor_id: activeDistributor,
@@ -730,6 +746,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
 
       const payload = {
         engagement_id: engagementId || 'eng-101',
+        row_id: targetRowId,
         sample_id: targetSampleId,
         voucher_no: targetVoucherNo,
         distributor_id: activeDistributor,

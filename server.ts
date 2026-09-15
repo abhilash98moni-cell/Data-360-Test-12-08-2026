@@ -1777,6 +1777,10 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const { sampleId, voucherNo, distributorId, auditId } = req.query;
       const supabase = getSupabaseServerClient();
       const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
+      const isValidKey = (s: any) => {
+        const c = cleanStr(s);
+        return c !== '' && c !== '—' && c !== '-' && c !== 'undefined' && c !== 'null' && c !== 'n/a';
+      };
       
       let query = supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
       
@@ -1792,15 +1796,23 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
            return { dbId: d.id, ...parsed };
         })
         .filter(r => {
-           if (auditId && auditId !== 'All Audits' && cleanStr(r.engagement_id) !== cleanStr(auditId)) {
+           const rAudit = cleanStr(r.engagement_id || r.engagementId || '');
+           const rDist = cleanStr(r.distributor_id || r.distributorName || r.distributor || '');
+
+           if (auditId && auditId !== 'All Audits' && rAudit && rAudit !== cleanStr(auditId)) {
              return false;
            }
-           if (distributorId && distributorId !== 'All Distributors' && r.distributor_id && cleanStr(r.distributor_id) !== cleanStr(distributorId)) {
+           if (distributorId && distributorId !== 'All Distributors' && rDist && rDist !== cleanStr(distributorId)) {
              return false;
            }
            if (sampleId || voucherNo) {
-             const s = cleanStr(sampleId || voucherNo);
-             return cleanStr(r.sample_id) === s || cleanStr(r.voucher_no) === s || cleanStr(r.voucherNo) === s;
+             const sTarget = cleanStr(sampleId || voucherNo);
+             if (isValidKey(sTarget)) {
+               const sId = cleanStr(r.sample_id || r.sampleId || '');
+               const vNo = cleanStr(r.voucher_no || r.voucherNo || '');
+               const rId = cleanStr(r.row_id || r.rowId || '');
+               return (sId && sId === sTarget) || (vNo && vNo === sTarget) || (rId && rId === sTarget);
+             }
            }
            return true;
         });
@@ -1818,10 +1830,18 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const payload = req.body;
       const supabase = getSupabaseServerClient();
       const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
-      const targetSampleId = cleanStr(payload.sample_id);
-      const targetVoucherNo = cleanStr(payload.voucher_no || payload.voucherNo);
+      const isValidKey = (s: any) => {
+        const c = cleanStr(s);
+        return c !== '' && c !== '—' && c !== '-' && c !== 'undefined' && c !== 'null' && c !== 'n/a';
+      };
+
+      const targetEngagementId = cleanStr(payload.engagement_id || payload.auditId || '');
+      const targetDistributorId = cleanStr(payload.distributor_id || payload.distributorName || '');
+      const targetRowId = isValidKey(payload.row_id || payload.rowId) ? cleanStr(payload.row_id || payload.rowId) : '';
+      const targetSampleId = isValidKey(payload.sample_id) ? cleanStr(payload.sample_id) : '';
+      const targetVoucherNo = isValidKey(payload.voucher_no || payload.voucherNo) ? cleanStr(payload.voucher_no || payload.voucherNo) : '';
       
-      // Update existing if exists for this sample_id or voucher_no
+      // Strict matching on existing record for this specific transaction
       const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
       
       let existingRecord = existing?.find(d => {
@@ -1829,10 +1849,26 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         if (typeof parsed === 'string') {
            try { parsed = JSON.parse(parsed); } catch(e) {}
         }
-        const sId = cleanStr(parsed?.sample_id);
-        const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo);
-        return (targetSampleId && (sId === targetSampleId || vNo === targetSampleId)) || 
-               (targetVoucherNo && (vNo === targetVoucherNo || sId === targetVoucherNo));
+        // Scope by distributor & audit if available
+        const recEngagement = cleanStr(parsed?.engagement_id || parsed?.engagementId || '');
+        const recDistributor = cleanStr(parsed?.distributor_id || parsed?.distributorName || parsed?.distributor || '');
+        
+        if (targetEngagementId && targetEngagementId !== 'all audits' && recEngagement && recEngagement !== targetEngagementId) {
+          return false;
+        }
+        if (targetDistributorId && targetDistributorId !== 'all distributors' && recDistributor && recDistributor !== targetDistributorId) {
+          return false;
+        }
+
+        const rId = cleanStr(parsed?.row_id || parsed?.rowId || '');
+        const sId = cleanStr(parsed?.sample_id || parsed?.sampleId || '');
+        const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo || '');
+
+        if (targetRowId && isValidKey(targetRowId) && rId && rId === targetRowId) return true;
+        if (targetSampleId && isValidKey(targetSampleId) && sId && sId === targetSampleId) return true;
+        if (targetVoucherNo && isValidKey(targetVoucherNo) && vNo && vNo === targetVoucherNo) return true;
+        
+        return false;
       });
 
       if (existingRecord) {
@@ -1844,6 +1880,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
            ...parsedDetails,
            engagement_id: payload.engagement_id || parsedDetails.engagement_id,
            distributor_id: payload.distributor_id || payload.distributorName || parsedDetails.distributor_id,
+           row_id: payload.row_id || payload.rowId || parsedDetails.row_id || targetRowId || targetSampleId,
            sample_id: payload.sample_id || parsedDetails.sample_id,
            voucher_no: payload.voucher_no || payload.voucherNo || parsedDetails.voucher_no,
            voucherNo: payload.voucher_no || payload.voucherNo || parsedDetails.voucherNo,
@@ -1973,6 +2010,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           details: JSON.stringify({
             engagement_id: payload.engagement_id,
             distributor_id: payload.distributor_id || payload.distributorName || '',
+            row_id: payload.row_id || payload.rowId || payload.sample_id || '',
             sample_id: payload.sample_id,
             voucher_no: payload.voucher_no || payload.voucherNo || '',
             voucherNo: payload.voucher_no || payload.voucherNo || '',
@@ -2090,26 +2128,42 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
 
       const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
 
+      const isValidKey = (s: any) => {
+        const c = cleanStr(s);
+        return c !== '' && c !== '—' && c !== '-' && c !== 'undefined' && c !== 'null' && c !== 'n/a';
+      };
+
       for (const item of itemsToPush) {
+        const itemRowId = item.id || item.row_id || '';
         const itemSampleId = item.sampleId || item.id;
-        const itemVoucherNo = item.voucherNo || item.voucher_no || itemSampleId;
-        const targetSampleId = cleanStr(itemSampleId);
-        const targetVoucherNo = cleanStr(itemVoucherNo);
-        if (!targetSampleId && !targetVoucherNo) continue;
+        const itemVoucherNo = item.voucherNo && item.voucherNo !== '—' ? item.voucherNo : (item.voucher_no && item.voucher_no !== '—' ? item.voucher_no : itemSampleId);
+        const targetSampleId = isValidKey(itemSampleId) ? cleanStr(itemSampleId) : '';
+        const targetVoucherNo = isValidKey(itemVoucherNo) ? cleanStr(itemVoucherNo) : '';
+        const targetRowId = isValidKey(itemRowId) ? cleanStr(itemRowId) : '';
+        if (!targetSampleId && !targetVoucherNo && !targetRowId) continue;
 
         let existingRecord = existing?.find(d => {
           let parsed = d.details;
           if (typeof parsed === 'string') {
              try { parsed = JSON.parse(parsed); } catch(e) {}
           }
-          const sId = cleanStr(parsed?.sample_id);
-          const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo);
-          return (targetSampleId && (sId === targetSampleId || vNo === targetSampleId)) || 
-                 (targetVoucherNo && (vNo === targetVoucherNo || sId === targetVoucherNo));
+          const recDistributor = cleanStr(parsed?.distributor_id || parsed?.distributorName || parsed?.distributor || '');
+          if (targetDistributor && targetDistributor !== 'All Distributors' && recDistributor && recDistributor !== cleanStr(targetDistributor)) {
+            return false;
+          }
+          const rId = cleanStr(parsed?.row_id || parsed?.rowId || '');
+          const sId = cleanStr(parsed?.sample_id || parsed?.sampleId || '');
+          const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo || '');
+          
+          if (targetRowId && isValidKey(targetRowId) && rId && rId === targetRowId) return true;
+          if (targetSampleId && isValidKey(targetSampleId) && sId && sId === targetSampleId) return true;
+          if (targetVoucherNo && isValidKey(targetVoucherNo) && vNo && vNo === targetVoucherNo) return true;
+          return false;
         });
 
         const pushDetails = {
           engagement_id: engagementId || 'eng-101',
+          row_id: itemRowId || itemSampleId,
           sample_id: itemSampleId,
           voucher_no: itemVoucherNo || '',
           voucherNo: itemVoucherNo || '',
