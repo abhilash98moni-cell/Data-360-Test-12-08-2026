@@ -1,5 +1,45 @@
 [
   {
+    "id": "log_1789390027361_5lzspa",
+    "event_type": "EVIDENCE_FILE",
+    "target_user_email": "Apex Electronics Corp::Midwest Trading Co.",
+    "user_name": "System User",
+    "user_email": "user@data360.com",
+    "user_role": "Distributor",
+    "organization": "Apex Electronics Corp",
+    "action": "Log Entry",
+    "ip_address": "127.0.0.1",
+    "details": {
+      "client_name": "Apex Electronics Corp",
+      "audit_id": "FY26 Distributor Channel Audit",
+      "audit_code": "AUD-2026-001",
+      "distributor_name": "Midwest Trading Co.",
+      "requirement_ref": "BQ-q-1.1",
+      "requirement_title": "Requirement BQ-q-1.1",
+      "section": "General Requirements",
+      "file_name": "New_Test_Evidence.docx",
+      "file_size_mb": 0,
+      "file_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "google_drive_file_id": "Apex_Electronics_Corp/FY26_Distributor_Channel_Audit/Midwest_Trading_Co./BQ-q-1.1/1789390026496_New_Test_Evidence.docx",
+      "google_drive_folder_id": "Apex_Electronics_Corp/FY26_Distributor_Channel_Audit/Midwest_Trading_Co./BQ-q-1.1",
+      "storage_path": "Apex_Electronics_Corp/FY26_Distributor_Channel_Audit/Midwest_Trading_Co./BQ-q-1.1",
+      "version": 2,
+      "uploader": "Distributor",
+      "uploader_role": "Distributor",
+      "uploaded_by": "Distributor",
+      "source": "Direct Upload",
+      "uploaded_at": "2026-09-14T12:47:07.207Z",
+      "status": "AVAILABLE",
+      "review_status": "PENDING_REVIEW",
+      "audit_period": "FY 2025-26",
+      "document_type": "EVIDENCE",
+      "document_usage": [
+        "EVIDENCE"
+      ]
+    },
+    "created_at": "2026-09-14T12:47:07.361Z"
+  },
+  {
     "id": "5ee13aef-cfa1-4a94-913c-5aac5582c893",
     "event_type": "REQUIRED_DATA_RESP",
     "performed_by": null,

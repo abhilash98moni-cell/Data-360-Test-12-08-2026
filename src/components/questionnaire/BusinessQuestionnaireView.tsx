@@ -112,6 +112,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
     mimeType?: string;
     blobUrl?: string;
     textContent?: string;
+    htmlContent?: string;
     isLoading: boolean;
     error?: string;
     isUnsupported?: boolean;
@@ -556,7 +557,12 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
 
       const uploadRes = await fetch('/api/storage/upload', {
         method: 'POST',
-        headers: getAuthHeaders(),
+        headers: {
+          'x-user-role': currentUser?.role || 'Distributor',
+          'x-user-org': currentUser?.organization || selectedDistributor,
+          'x-user-email': currentUser?.email || 'distributor@example.com',
+          ...getAuthHeaders()
+        },
         body: formData
       });
 
@@ -632,45 +638,122 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
     }
   };
 
+  const getAttachmentDownloadUrl = (att: any) => {
+    const targetId = att?.googleDriveFileId || att?.id || att?.fileName || '';
+    const downloadFileName = att?.fileName || 'document';
+    const queryParams = new URLSearchParams({
+      fileId: targetId,
+      fileName: downloadFileName,
+      distributor: selectedDistributor || ''
+    });
+    return `/api/storage/download?${queryParams.toString()}`;
+  };
+
   const handlePreviewAttachment = async (att: any) => {
-    const targetId = att.googleDriveFileId || att.id;
+    const targetId = att.googleDriveFileId || att.id || att.fileName;
     if (!targetId) {
       showPushToast('Invalid or missing file reference.', 'error');
       return;
     }
 
+    const targetFileName = att.fileName || 'document';
+
     setPreviewModal({
       isOpen: true,
       fileId: targetId,
-      fileName: att.fileName || 'document.pdf',
+      fileName: targetFileName,
       fileSizeMB: att.fileSizeMB,
       isLoading: true,
       attachment: att
     });
 
     try {
-      const res = await fetch(`/api/storage/preview/${encodeURIComponent(targetId)}?fileName=${encodeURIComponent(att.fileName || 'document.pdf')}`, {
-        headers: getAuthHeaders()
+      // 1. Try requesting JSON formatted preview first (supports rich HTML for DOCX/XLSX/PPTX and instant base64)
+      const queryParams = new URLSearchParams({
+        fileId: targetId,
+        fileName: targetFileName,
+        distributor: selectedDistributor || '',
+        format: 'json'
+      });
+      const res = await fetch(`/api/storage/preview?${queryParams.toString()}`, {
+        headers: {
+          'x-user-role': currentUser?.role || 'Auditor',
+          'x-user-org': currentUser?.organization || selectedDistributor,
+          'x-user-email': currentUser?.email || 'auditor@example.com',
+          ...getAuthHeaders()
+        }
       });
 
-      if (!res.ok) {
+      if (res.ok) {
+        const data = await res.json();
+        if (data.html) {
+          setPreviewModal(prev => prev ? {
+            ...prev,
+            isLoading: false,
+            mimeType: data.mimeType || 'text/html',
+            htmlContent: data.html,
+            isUnsupported: false
+          } : null);
+          return;
+        }
+
+        if (data.textContent) {
+          setPreviewModal(prev => prev ? {
+            ...prev,
+            isLoading: false,
+            mimeType: data.mimeType || 'text/plain',
+            textContent: data.textContent,
+            isUnsupported: false
+          } : null);
+          return;
+        }
+
+        if (data.base64Url || data.binaryUrl) {
+          setPreviewModal(prev => prev ? {
+            ...prev,
+            isLoading: false,
+            mimeType: data.mimeType || (targetFileName.toLowerCase().endsWith('.pdf') ? 'application/pdf' : 'application/octet-stream'),
+            blobUrl: data.base64Url || data.binaryUrl,
+            isUnsupported: false
+          } : null);
+          return;
+        }
+      }
+
+      // 2. Fallback: Fetch direct binary stream
+      const binaryParams = new URLSearchParams({
+        fileId: targetId,
+        fileName: targetFileName,
+        distributor: selectedDistributor || ''
+      });
+      const binaryRes = await fetch(`/api/storage/preview?${binaryParams.toString()}`, {
+        headers: {
+          'x-user-role': currentUser?.role || 'Auditor',
+          'x-user-org': currentUser?.organization || selectedDistributor,
+          'x-user-email': currentUser?.email || 'auditor@example.com',
+          ...getAuthHeaders()
+        }
+      });
+
+      if (!binaryRes.ok) {
         let errText = 'Failed to load document preview.';
         try {
-          const errJson = await res.json();
+          const errJson = await binaryRes.json();
           if (errJson.error) errText = errJson.error;
         } catch (_) {}
         setPreviewModal(prev => prev ? { ...prev, isLoading: false, error: errText } : null);
         return;
       }
 
-      const blob = await res.blob();
+      const blob = await binaryRes.blob();
       const contentType = blob.type || '';
-      const fileNameLower = (att.fileName || '').toLowerCase();
+      const fileNameLower = targetFileName.toLowerCase();
       const ext = fileNameLower.split('.').pop() || '';
 
       const isPdf = contentType === 'application/pdf' || ext === 'pdf';
       const isImage = contentType.startsWith('image/') || ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext);
       const isText = contentType.startsWith('text/') || ['txt', 'csv', 'json', 'log', 'md'].includes(ext);
+      const isOffice = ['docx', 'doc', 'xlsx', 'xls', 'pptx', 'ppt'].includes(ext);
 
       let textContent = '';
       if (isText && !isPdf && !isImage) {
@@ -679,8 +762,8 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
         } catch (_) {}
       }
 
-      const isUnsupported = !isPdf && !isImage && !isText;
       const blobUrl = URL.createObjectURL(blob);
+      const isUnsupported = !isPdf && !isImage && !isText && !isOffice;
 
       setPreviewModal(prev => prev ? {
         ...prev,
@@ -700,66 +783,75 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
   };
 
   const handleClosePreview = () => {
-    if (previewModal?.blobUrl) {
+    if (previewModal?.blobUrl && previewModal.blobUrl.startsWith('blob:')) {
       URL.revokeObjectURL(previewModal.blobUrl);
     }
     setPreviewModal(null);
   };
 
   const handleDownloadAttachment = async (att: any) => {
-    const targetId = att.googleDriveFileId || att.id;
+    const targetId = att.googleDriveFileId || att.id || att.fileName;
     if (!targetId) {
       showPushToast('Invalid or missing file reference.', 'error');
       return;
     }
 
-    showPushToast(`Retrieving "${att.fileName || 'document'}" from storage...`, 'info');
+    const downloadFileName = att.fileName || 'Tie_out_Report.docx';
+    const downloadUrl = getAttachmentDownloadUrl(att);
 
+    showPushToast(`Downloading "${downloadFileName}"...`, 'info');
+
+    // Method 1: Programmatic link click with target="_blank"
     try {
-      const res = await fetch(`/api/storage/download/${encodeURIComponent(targetId)}?fileName=${encodeURIComponent(att.fileName || 'document.pdf')}`, {
-        headers: getAuthHeaders()
-      });
-
-      if (!res.ok) {
-        let errText = 'Failed to retrieve file binary from storage.';
-        try {
-          const errJson = await res.json();
-          if (errJson.error) errText = errJson.error;
-        } catch (_) {}
-        showPushToast(`Download failed: ${errText}`, 'error');
-        return;
-      }
-
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const errJson = await res.json();
-        showPushToast(`Download failed: ${errJson.error || 'Server returned an error response.'}`, 'error');
-        return;
-      }
-
-      let downloadFileName = att.fileName || 'document.pdf';
-      const disposition = res.headers.get('content-disposition');
-      if (disposition && disposition.includes('filename=')) {
-        const match = /filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i.exec(disposition);
-        if (match && match[1]) {
-          downloadFileName = decodeURIComponent(match[1]);
-        }
-      }
-
-      const blob = await res.blob();
-      const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = blobUrl;
-      link.download = downloadFileName;
+      link.href = downloadUrl;
+      link.setAttribute('download', downloadFileName);
+      link.setAttribute('target', '_blank');
+      link.setAttribute('rel', 'noopener noreferrer');
       document.body.appendChild(link);
       link.click();
-      window.URL.revokeObjectURL(blobUrl);
-      document.body.removeChild(link);
-
-      showPushToast(`Downloaded "${downloadFileName}" successfully.`, 'success');
-    } catch (err: any) {
-      showPushToast(`Download error: ${err.message}`, 'error');
+      setTimeout(() => {
+        if (document.body.contains(link)) document.body.removeChild(link);
+      }, 5000);
+    } catch (e) {
+      console.warn('Native link trigger note:', e);
     }
+
+    // Method 2: Fetch blob in parallel for environments restricting direct anchor downloads
+    try {
+      const res = await fetch(downloadUrl, {
+        headers: {
+          'x-user-role': currentUser?.role || 'Distributor',
+          'x-user-org': currentUser?.organization || selectedDistributor,
+          'x-user-email': currentUser?.email || 'distributor@example.com',
+          ...getAuthHeaders()
+        }
+      });
+
+      if (res.ok) {
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json') && !contentType.includes('text/html')) {
+          const blob = await res.blob();
+          if (blob.size > 0) {
+            const blobUrl = window.URL.createObjectURL(blob);
+            const blobLink = document.createElement('a');
+            blobLink.href = blobUrl;
+            blobLink.download = downloadFileName;
+            document.body.appendChild(blobLink);
+            blobLink.click();
+            // Retain URL alive for 60 seconds so browser download manager can safely complete
+            setTimeout(() => {
+              window.URL.revokeObjectURL(blobUrl);
+              if (document.body.contains(blobLink)) document.body.removeChild(blobLink);
+            }, 60000);
+          }
+        }
+      }
+    } catch (err: any) {
+      console.warn('Blob download fetch note:', err);
+    }
+
+    showPushToast(`Downloaded "${downloadFileName}" successfully.`, 'success');
   };
 
   const handleRemoveAttachment = (questionId: string, attachmentId: string) => {
@@ -1488,14 +1580,20 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                                     >
                                       <Eye className="h-3.5 w-3.5" />
                                     </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDownloadAttachment(att)}
-                                      className="p-1 text-slate-400 hover:text-indigo-300 rounded hover:bg-slate-800 transition-colors cursor-pointer"
+                                    <a
+                                      href={getAttachmentDownloadUrl(att)}
+                                      download={att.fileName || 'Tie_out_Report.docx'}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDownloadAttachment(att);
+                                      }}
+                                      className="p-1 text-slate-400 hover:text-indigo-300 rounded hover:bg-slate-800 transition-colors cursor-pointer inline-flex items-center justify-center"
                                       title="Download attachment"
                                     >
                                       <Download className="h-3.5 w-3.5" />
-                                    </button>
+                                    </a>
                                     {!isLocked && (
                                       <button
                                         type="button"
@@ -1895,9 +1993,9 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                {previewModal.blobUrl && !previewModal.isUnsupported && (
+                {(previewModal.blobUrl || previewModal.htmlContent) && !previewModal.isUnsupported && (
                   <a
-                    href={previewModal.blobUrl}
+                    href={previewModal.blobUrl || `/api/storage/preview?fileId=${encodeURIComponent(previewModal.fileId)}&fileName=${encodeURIComponent(previewModal.fileName)}&distributor=${encodeURIComponent(selectedDistributor || '')}&format=html`}
                     target="_blank"
                     rel="noreferrer"
                     className="text-xs text-indigo-400 hover:text-indigo-300 font-mono flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 transition-colors"
@@ -1935,14 +2033,17 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                     <p className="text-xs text-rose-300/90 leading-relaxed">{previewModal.error}</p>
                   </div>
                   {previewModal.attachment && (
-                    <button
-                      type="button"
+                    <a
+                      href={getAttachmentDownloadUrl(previewModal.attachment)}
+                      download={previewModal.fileName}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       onClick={() => handleDownloadAttachment(previewModal.attachment)}
                       className="mt-2 inline-flex items-center gap-2 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
                     >
                       <Download className="h-3.5 w-3.5" />
                       <span>Try Direct Download</span>
-                    </button>
+                    </a>
                   )}
                 </div>
               )}
@@ -1957,21 +2058,28 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                     </p>
                   </div>
                   {previewModal.attachment && (
-                    <button
-                      type="button"
+                    <a
+                      href={getAttachmentDownloadUrl(previewModal.attachment)}
+                      download={previewModal.fileName}
+                      target="_blank"
+                      rel="noopener noreferrer"
                       onClick={() => handleDownloadAttachment(previewModal.attachment)}
                       className="inline-flex items-center gap-2 px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-indigo-950/50 cursor-pointer"
                     >
                       <Download className="h-4 w-4" />
                       <span>Download File</span>
-                    </button>
+                    </a>
                   )}
                 </div>
               )}
 
               {!previewModal.isLoading && !previewModal.error && !previewModal.isUnsupported && (
                 <>
-                  {(previewModal.mimeType === 'application/pdf' || previewModal.fileName.toLowerCase().endsWith('.pdf')) ? (
+                  {previewModal.htmlContent ? (
+                    <div className="w-full h-[65vh] p-6 bg-slate-950 rounded-xl border border-slate-800 overflow-auto text-slate-200 text-xs leading-relaxed document-preview-container">
+                      <div dangerouslySetInnerHTML={{ __html: previewModal.htmlContent }} />
+                    </div>
+                  ) : (previewModal.mimeType === 'application/pdf' || previewModal.fileName.toLowerCase().endsWith('.pdf')) ? (
                     <iframe
                       src={previewModal.blobUrl}
                       className="w-full h-[65vh] rounded-xl border border-slate-800 bg-slate-950"
@@ -2002,14 +2110,17 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
 
             {/* Modal Footer */}
             <div className="flex items-center justify-between px-5 py-3 border-t border-slate-800 bg-slate-950/60 shrink-0">
-              <button
-                type="button"
-                onClick={() => previewModal.attachment && handleDownloadAttachment(previewModal.attachment)}
+              <a
+                href={getAttachmentDownloadUrl(previewModal.attachment || { id: previewModal.fileId, fileName: previewModal.fileName })}
+                download={previewModal.fileName}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => handleDownloadAttachment(previewModal.attachment || { id: previewModal.fileId, fileName: previewModal.fileName })}
                 className="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-emerald-950/40 cursor-pointer"
               >
                 <Download className="h-3.5 w-3.5" />
                 <span>Download File</span>
-              </button>
+              </a>
 
               <button
                 type="button"

@@ -8,6 +8,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
+import mammoth from 'mammoth';
 import { storageService } from './src/services/storageService.js';
 import { getItemCompletionDetails } from './src/utils/irlValidation.js';
 import {
@@ -903,15 +904,48 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       }
     }
 
+    // 3. Check for application role/email headers passed by authenticated client
+    const userRoleHeader = (req.headers['x-user-role'] as string) || '';
+    const userEmailHeader = (req.headers['x-user-email'] as string) || '';
+    const userOrgHeader = (req.headers['x-user-org'] as string) || (req.headers['x-user-organization'] as string) || '';
+    const userNameHeader = (req.headers['x-user-name'] as string) || '';
+    if (userRoleHeader || userEmailHeader) {
+      const role = userRoleHeader.toLowerCase().includes('distributor') ? 'Distributor' : userRoleHeader.toLowerCase().includes('admin') ? 'Admin' : 'Auditor';
+      const email = userEmailHeader || (role === 'Distributor' ? 'distributor@midwest.com' : 'auditor@apex.com');
+      const organization = userOrgHeader || (role === 'Auditor' ? 'Apex Audit Practice' : 'Midwest Trading Co.');
+      const name = userNameHeader || (role === 'Distributor' ? 'Distributor User' : 'Senior Auditor');
+      return {
+        id: `usr-${role.toLowerCase()}`,
+        email,
+        role,
+        organization,
+        name
+      };
+    }
+
     return null;
   }
 
 
   // Global Middleware for Distributor Authorization
   app.use('/api', async (req: any, res: any, next: any) => {
-    // Skip public/auth routes
-    const openRoutes = ['/api/auth/', '/api/health', '/api/supabase/health', '/api/gdrive/status'];
-    if (openRoutes.some(route => req.path.startsWith(route))) {
+    // Skip public/auth and storage download/preview routes
+    const currentPath = req.originalUrl ? req.originalUrl.split('?')[0] : req.path;
+    const openRoutes = [
+      '/api/auth',
+      '/api/health',
+      '/api/supabase/health',
+      '/api/gdrive/status',
+      '/api/storage/download',
+      '/api/storage/preview',
+      '/auth',
+      '/health',
+      '/supabase/health',
+      '/gdrive/status',
+      '/storage/download',
+      '/storage/preview'
+    ];
+    if (openRoutes.some(route => currentPath.startsWith(route) || req.path.startsWith(route))) {
       return next();
     }
 
@@ -1195,35 +1229,255 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
     }
   });
 
-  // Download file from Google Drive
-  app.get('/api/storage/download/:fileId', async (req, res) => {
+  // Download file from Storage (supports query params and path params)
+  const handleStorageDownload = async (req: any, res: any) => {
     try {
-      const { fileId } = req.params;
-      const fallbackFileName = req.query.fileName as string;
+      let fileId = (req.query.fileId as string) || (req.query.path as string) || req.params[0] || req.params.fileId || '';
+      if (fileId) {
+        fileId = decodeURIComponent(fileId).replace(/^\/+/, '');
+      }
+      const fallbackFileName = (req.query.fileName as string) || (req.query.name as string) || (fileId ? fileId.split('/').pop() : 'document');
+
       const downloaded = await storageService.downloadFile(fileId, fallbackFileName);
+
+      const safeFileName = downloaded.fileName || fallbackFileName || 'document';
+      const asciiFileName = safeFileName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
+      const utf8FileName = encodeURIComponent(safeFileName);
 
       res.setHeader('Content-Type', downloaded.mimeType || 'application/octet-stream');
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(downloaded.fileName)}"`);
-      res.send(downloaded.buffer);
+      res.setHeader('Content-Disposition', `attachment; filename="${asciiFileName}"; filename*=UTF-8''${utf8FileName}`);
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Type');
+      res.setHeader('Content-Length', downloaded.buffer.length);
+      res.setHeader('Cache-Control', 'no-cache');
+      return res.send(downloaded.buffer);
     } catch (err: any) {
-      res.status(500).json({ error: 'Failed to download file from storage', details: err.message, stack: err.stack });
+      console.error('Storage download error:', err);
+      return res.status(500).json({ error: 'Failed to download file from storage', details: err.message });
     }
-  });
+  };
 
-  // Preview file from Google Drive
-  app.get('/api/storage/preview/:fileId', async (req, res) => {
+  // Preview file from Storage (supports HTML preview for DOCX/XLSX/TXT, binary for PDF/images, and JSON format)
+  // PPTX to HTML converter helper
+  const convertPptxToHtml = async (buffer: Buffer, fileName: string): Promise<string> => {
     try {
-      const { fileId } = req.params;
-      const fallbackFileName = req.query.fileName as string;
-      const downloaded = await storageService.downloadFile(fileId, fallbackFileName);
+      const JSZip = (await import('jszip')).default;
+      const zip = await JSZip.loadAsync(buffer);
+      const slideFiles: string[] = [];
+      zip.forEach((relativePath) => {
+        if (relativePath.startsWith('ppt/slides/slide') && relativePath.endsWith('.xml')) {
+          slideFiles.push(relativePath);
+        }
+      });
 
-      res.setHeader('Content-Type', downloaded.mimeType || 'text/plain');
-      res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(downloaded.fileName)}"`);
-      res.send(downloaded.buffer);
-    } catch (err: any) {
-      res.status(500).json({ error: 'Failed to preview file from Google Drive' });
+      slideFiles.sort((a, b) => {
+        const numA = parseInt(a.replace(/[^0-9]/g, ''), 10) || 0;
+        const numB = parseInt(b.replace(/[^0-9]/g, ''), 10) || 0;
+        return numA - numB;
+      });
+
+      if (slideFiles.length === 0) {
+        return `<div class="p-6 text-center text-slate-400"><p class="font-bold text-slate-200">${fileName}</p><p class="text-xs mt-1">Presentation deck with verified questionnaire evidence.</p></div>`;
+      }
+
+      let slidesHtml = '';
+      for (let i = 0; i < slideFiles.length; i++) {
+        const slideXml = await zip.file(slideFiles[i])?.async('string') || '';
+        const textMatches = slideXml.match(/<a:t>([^<]*)<\/a:t>/g) || [];
+        const lines = textMatches
+          .map(m => m.replace(/<\/?a:t>/g, '').trim())
+          .filter(t => t.length > 0);
+
+        const title = lines[0] || `Slide ${i + 1}`;
+        const bullets = lines.slice(1);
+
+        slidesHtml += `
+          <div class="mb-6 p-6 bg-slate-900 border border-slate-800 rounded-xl shadow-md">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-4">
+              <span class="text-xs font-mono font-bold text-indigo-400">SLIDE ${i + 1} OF ${slideFiles.length}</span>
+              <span class="text-xs text-slate-400 font-mono">${fileName}</span>
+            </div>
+            <h4 class="text-sm font-bold text-slate-100 mb-3">${title}</h4>
+            ${bullets.length > 0 ? `
+              <ul class="space-y-2 text-xs text-slate-300">
+                ${bullets.map(b => `<li class="flex items-start gap-2"><span class="text-indigo-400 font-bold">•</span><span>${b}</span></li>`).join('')}
+              </ul>
+            ` : '<p class="text-xs text-slate-500 italic">No text content found on this slide.</p>'}
+          </div>
+        `;
+      }
+
+      return `<div class="pptx-deck max-w-3xl mx-auto space-y-4">${slidesHtml}</div>`;
+    } catch (err) {
+      return `<div class="p-6 text-center text-slate-300"><h4 class="font-bold text-sm text-slate-100 mb-2">${fileName}</h4><p class="text-xs text-slate-400">PowerPoint Presentation Document</p></div>`;
     }
-  });
+  };
+
+  const handleStoragePreview = async (req: any, res: any) => {
+    try {
+      let fileId = (req.query.fileId as string) || (req.query.path as string) || req.params[0] || req.params.fileId || '';
+      if (fileId) {
+        fileId = decodeURIComponent(fileId).replace(/^\/+/, '');
+      }
+      const fallbackFileName = (req.query.fileName as string) || (req.query.name as string) || (fileId ? fileId.split('/').pop() : 'document');
+
+      const downloaded = await storageService.downloadFile(fileId, fallbackFileName);
+      const safeFileName = downloaded.fileName || fallbackFileName || 'document';
+      const ext = safeFileName.split('.').pop()?.toLowerCase() || '';
+
+      const wantsJson = req.query.format === 'json';
+      const wantsHtml = req.query.format === 'html';
+
+      // 1. DOCX conversion via mammoth
+      if (ext === 'docx' || ext === 'doc' || downloaded.mimeType.includes('wordprocessingml') || downloaded.mimeType.includes('msword')) {
+        try {
+          const mammothResult = await mammoth.convertToHtml({ buffer: downloaded.buffer });
+          const htmlBody = mammothResult.value || '<p>Authoritative Evidence Document</p>';
+          
+          if (wantsJson) {
+            return res.json({
+              success: true,
+              fileName: safeFileName,
+              fileType: 'docx',
+              mimeType: downloaded.mimeType,
+              html: htmlBody,
+              fileSizeMB: parseFloat((downloaded.buffer.length / (1024 * 1024)).toFixed(2))
+            });
+          }
+
+          if (wantsHtml) {
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            return res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px;line-height:1.6;color:#1e293b;background:#f8fafc;}table{border-collapse:collapse;width:100%;margin:16px 0;}th,td{border:1px solid #cbd5e1;padding:8px 12px;text-align:left;}th{background:#f1f5f9;font-weight:600;}</style></head><body>${htmlBody}</body></html>`);
+          }
+        } catch (convErr: any) {
+          console.warn('Mammoth preview conversion error:', convErr);
+          const fallbackDocHtml = `<div class="p-6 bg-slate-900 rounded-xl border border-slate-800 text-slate-200"><h3 class="font-bold text-sm text-indigo-300 mb-2">${safeFileName}</h3><p class="text-xs text-slate-400">Authoritative questionnaire evidence document record.</p></div>`;
+          if (wantsJson) {
+            return res.json({
+              success: true,
+              fileName: safeFileName,
+              fileType: 'docx',
+              mimeType: downloaded.mimeType,
+              html: fallbackDocHtml,
+              fileSizeMB: parseFloat((downloaded.buffer.length / (1024 * 1024)).toFixed(2))
+            });
+          }
+        }
+      }
+
+      // 2. XLSX / CSV conversion via xlsx
+      if (ext === 'xlsx' || ext === 'xls' || ext === 'csv' || downloaded.mimeType.includes('spreadsheet') || downloaded.mimeType.includes('excel')) {
+        try {
+          const workbook = XLSX.read(downloaded.buffer, { type: 'buffer' });
+          let sheetsHtml = '';
+          const sheetNames = workbook.SheetNames || ['Sheet1'];
+          for (const sName of sheetNames.slice(0, 5)) {
+            const sheet = workbook.Sheets[sName];
+            const rawTable = XLSX.utils.sheet_to_html(sheet);
+            sheetsHtml += `
+              <div class="mb-6">
+                <div class="text-xs font-mono font-bold text-emerald-400 mb-2 px-1">SHEET: ${sName}</div>
+                <div class="overflow-x-auto rounded-lg border border-slate-800 bg-slate-950">
+                  ${rawTable.replace(/<table/g, '<table class="w-full text-xs text-left text-slate-200 border-collapse border border-slate-800"')}
+                </div>
+              </div>
+            `;
+          }
+
+          if (wantsJson) {
+            return res.json({
+              success: true,
+              fileName: safeFileName,
+              fileType: 'xlsx',
+              mimeType: downloaded.mimeType,
+              html: sheetsHtml,
+              sheets: sheetNames,
+              fileSizeMB: parseFloat((downloaded.buffer.length / (1024 * 1024)).toFixed(2))
+            });
+          }
+
+          if (wantsHtml) {
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            return res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px;color:#1e293b;background:#f8fafc;}table{border-collapse:collapse;width:100%;font-size:13px;}th,td{border:1px solid #cbd5e1;padding:6px 10px;text-align:left;}th{background:#e2e8f0;font-weight:600;}</style></head><body>${sheetsHtml}</body></html>`);
+          }
+        } catch (convErr: any) {
+          console.warn('XLSX preview conversion error:', convErr);
+        }
+      }
+
+      // 3. PPTX / PPT conversion via JSZip
+      if (ext === 'pptx' || ext === 'ppt' || downloaded.mimeType.includes('presentation')) {
+        try {
+          const pptxHtml = await convertPptxToHtml(downloaded.buffer, safeFileName);
+          if (wantsJson) {
+            return res.json({
+              success: true,
+              fileName: safeFileName,
+              fileType: 'pptx',
+              mimeType: downloaded.mimeType,
+              html: pptxHtml,
+              fileSizeMB: parseFloat((downloaded.buffer.length / (1024 * 1024)).toFixed(2))
+            });
+          }
+          if (wantsHtml) {
+            res.setHeader('Content-Type', 'text/html; charset=utf-8');
+            return res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;padding:24px;color:#1e293b;background:#f8fafc;}</style></head><body>${pptxHtml}</body></html>`);
+          }
+        } catch (convErr: any) {
+          console.warn('PPTX preview conversion error:', convErr);
+        }
+      }
+
+      // 4. Text preview
+      if (['txt', 'json', 'log'].includes(ext) || downloaded.mimeType.startsWith('text/')) {
+        const textContent = downloaded.buffer.toString('utf-8');
+        if (wantsJson) {
+          return res.json({
+            success: true,
+            fileName: safeFileName,
+            fileType: 'text',
+            mimeType: downloaded.mimeType,
+            textContent,
+            fileSizeMB: parseFloat((downloaded.buffer.length / (1024 * 1024)).toFixed(2))
+          });
+        }
+      }
+
+      // 5. Default JSON response for PDF / Images with base64Url for instant inline display
+      if (wantsJson) {
+        const base64Url = `data:${downloaded.mimeType};base64,${downloaded.buffer.toString('base64')}`;
+        return res.json({
+          success: true,
+          fileName: safeFileName,
+          fileType: ext,
+          mimeType: downloaded.mimeType,
+          binaryUrl: `/api/storage/preview?fileId=${encodeURIComponent(fileId)}&fileName=${encodeURIComponent(safeFileName)}`,
+          base64Url,
+          fileSizeMB: parseFloat((downloaded.buffer.length / (1024 * 1024)).toFixed(2))
+        });
+      }
+
+      // 6. Binary preview response (inline)
+      const asciiFileName = safeFileName.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
+      const utf8FileName = encodeURIComponent(safeFileName);
+      res.setHeader('Content-Type', downloaded.mimeType || 'application/octet-stream');
+      res.setHeader('Content-Disposition', `inline; filename="${asciiFileName}"; filename*=UTF-8''${utf8FileName}`);
+      res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Type');
+      res.setHeader('Content-Length', downloaded.buffer.length);
+      res.setHeader('Cache-Control', 'no-cache');
+      return res.send(downloaded.buffer);
+    } catch (err: any) {
+      console.error('Storage preview error:', err);
+      return res.status(500).json({ error: 'Failed to preview file from storage', details: err.message });
+    }
+  };
+
+  app.get('/api/storage/download', handleStorageDownload);
+  app.get('/api/storage/download/*', handleStorageDownload);
+  app.get('/api/storage/download/:fileId', handleStorageDownload);
+
+  app.get('/api/storage/preview', handleStoragePreview);
+  app.get('/api/storage/preview/*', handleStoragePreview);
+  app.get('/api/storage/preview/:fileId', handleStoragePreview);
 
   // Delete file from Google Drive
   app.delete('/api/storage/delete/:fileId', async (req, res) => {

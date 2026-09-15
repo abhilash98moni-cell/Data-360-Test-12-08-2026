@@ -11,7 +11,7 @@ export async function downloadFileFromApi(
   try {
     if (showToast) showToast(`Preparing download for "${defaultFileName}"...`, 'info');
 
-    const downloadUrl = `/api/storage/download/${encodeURIComponent(targetFileId)}`;
+    const downloadUrl = `/api/storage/download?fileId=${encodeURIComponent(targetFileId)}&fileName=${encodeURIComponent(defaultFileName)}`;
     const token = typeof window !== "undefined" ? (localStorage.getItem("supabase_token") || sessionStorage.getItem("supabase_token")) : null;
     const headers: Record<string, string> = {};
     if (token) {
@@ -51,10 +51,16 @@ export async function downloadFileFromApi(
     const link = document.createElement('a');
     link.href = url;
     link.download = fileName;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
     document.body.appendChild(link);
     link.click();
-    window.URL.revokeObjectURL(url);
-    document.body.removeChild(link);
+    setTimeout(() => {
+      window.URL.revokeObjectURL(url);
+      if (document.body.contains(link)) {
+        document.body.removeChild(link);
+      }
+    }, 60000);
 
     if (showToast) showToast(`Successfully downloaded "${fileName}"`, 'success');
     return true;
@@ -82,7 +88,7 @@ export async function previewFileFromApi(
   try {
     if (showToast) showToast(`Preparing preview for "${defaultFileName}"...`, 'info');
     
-    const previewUrl = `/api/storage/preview/${encodeURIComponent(targetFileId)}?fileName=${encodeURIComponent(defaultFileName)}`;
+    const previewUrl = `/api/storage/preview?fileId=${encodeURIComponent(targetFileId)}&fileName=${encodeURIComponent(defaultFileName)}`;
     
     const token = typeof window !== "undefined" ? (localStorage.getItem("supabase_token") || sessionStorage.getItem("supabase_token")) : null;
     const headers: Record<string, string> = {};

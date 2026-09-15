@@ -95,3 +95,27 @@
   background-color: #ffffff !important;
   color: #0f172a !important;
 }
+
+/* Document preview styling for DOCX and XLSX rendering */
+.document-preview-container table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1rem 0;
+  font-size: 0.85rem;
+}
+.document-preview-container th,
+.document-preview-container td {
+  border: 1px solid rgba(148, 163, 184, 0.25);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.document-preview-container th {
+  background-color: rgba(30, 41, 59, 0.6);
+  font-weight: 600;
+}
+.document-preview-container p {
+  margin-bottom: 0.6rem;
+}
+.document-preview-container strong {
+  color: #f1f5f9;
+}
