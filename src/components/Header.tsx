@@ -24,21 +24,20 @@ import {
 } from 'lucide-react';
 
 import { CurrencyMode } from '../utils/currencyFormatter';
-import { CLIENT_TENANTS, getDistributorsForClient } from '../data/clientsAndDistributors';
 import { UserSession } from './AuthModal';
 import { AuditEngagement } from '../types';
 
 interface HeaderProps {
-  selectedClient: string;
-  onClientChange: (client: string) => void;
-  selectedDistributor: string;
-  onDistributorChange: (distributor: string) => void;
+  selectedClient?: string;
+  onClientChange?: (client: string) => void;
+  selectedDistributor?: string;
+  onDistributorChange?: (distributor: string) => void;
   currencyMode: CurrencyMode;
   onCurrencyModeChange: (mode: CurrencyMode) => void;
   themeMode: 'dark' | 'light';
   onThemeModeChange: (mode: 'dark' | 'light') => void;
   onOpenCopilot: () => void;
-  onOpenNewAudit: () => void;
+  onOpenNewAudit?: () => void;
   unreadAlertsCount: number;
   onNavigateToIIR?: () => void;
   currentUser: UserSession | null;
@@ -53,243 +52,126 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({
-  selectedClient,
-  onClientChange,
-  selectedDistributor,
-  onDistributorChange,
   currencyMode,
   onCurrencyModeChange,
   themeMode,
   onThemeModeChange,
   onOpenCopilot,
-  onOpenNewAudit,
   unreadAlertsCount,
-  onNavigateToIIR,
   currentUser,
   onOpenAuth,
   onOpenNotifications,
-  onLogout,
-  onNavigateToProfile,
-  liveAudits,
-  isLoadingAudits,
-  selectedAuditId,
-  onAuditSelect
+  onNavigateToProfile
 }) => {
-  // No longer needed: const [isProfileDropdownOpen, setIsProfileDropdownOpen] = useState(false);
-  const [authorizedDistributors, setAuthorizedDistributors] = useState<string[]>([]);
-  useEffect(() => {
-    if (currentUser?.role === 'Auditor') {
-       fetch('/api/users/me/distributors', {
-          headers: {
-             'Authorization': 'Bearer ' + localStorage.getItem('supabase_token')
-          }
-       }).then(res => res.json()).then(data => {
-          if (data.success && data.distributors) {
-             setAuthorizedDistributors(data.distributors);
-             if (data.distributors.length === 1) {
-                // Auto-select if there is exactly one
-                onDistributorChange(data.distributors[0]);
-             } else if (data.distributors.length > 0 && selectedDistributor === 'All Distributors') {
-                // Default to the first one instead of 'All Distributors' to avoid confusion if needed
-                onDistributorChange(data.distributors[0]);
-             } else if (data.distributors.length === 0) {
-                onDistributorChange('No Distributors Assigned');
-             }
-          }
-       }).catch(console.error);
-    }
-  }, [currentUser]);
-
-  const allDists = getDistributorsForClient(selectedClient);
-  const currentDistributors = currentUser?.role === 'Auditor' 
-     ? allDists.filter(d => authorizedDistributors.includes(d.name))
-     : allDists;
-
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 px-3 sm:px-4 lg:px-6 py-2.5 shadow-md w-full max-w-full">
       <div className="flex items-center justify-between gap-2 max-w-full">
         
-        {/* Brand & Client Switcher */}
-        <div className="flex items-center gap-3 shrink-0">
-          <div className="flex items-center gap-2.5">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-indigo-600 via-blue-600 to-cyan-400 flex items-center justify-center font-bold text-base shadow-inner ring-1 ring-white/20 shrink-0">
-              <Layers className="h-4 w-4 text-white" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-bold text-base sm:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">
-                  DMP
-                </span>
-                <span className="hidden sm:inline-block text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
-                  SaaS
-                </span>
-              </div>
-            </div>
-          </div>
-
-          {/* Scope Selector - Responsive Visibility */}
-          {(currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor')) && (
-            <div className="hidden xl:flex items-center gap-2 bg-emerald-950/40 border border-emerald-500/30 rounded-xl px-2.5 py-1 text-xs text-emerald-300 font-semibold shadow-inner">
-              <UserCheck className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-              <div className="truncate max-w-[200px]">
-                <span className="font-bold text-emerald-300 truncate">{currentUser.organization || selectedDistributor}</span>
-              </div>
-            </div>
-          )}
-
-          {/* India / Global Currency Switcher */}
-          <div className="flex items-center bg-slate-950/80 rounded-lg border border-slate-800 p-0.5 text-xs font-semibold">
+        <div className="flex flex-1 items-center gap-4 shrink-0">
+          {/* Currency Switcher */}
+          <div className="flex items-center bg-slate-950 rounded-lg border border-slate-800 p-0.5 text-xs font-semibold">
             <button
               onClick={() => onCurrencyModeChange('INR')}
-              className={`px-2 py-0.5 rounded flex items-center gap-1 transition-all cursor-pointer ${
+              className={`px-2 py-1 rounded flex items-center gap-1 transition-all cursor-pointer ${
                 currencyMode === 'INR'
                   ? 'bg-emerald-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="Switch monetary values to Indian Rupees (₹ Cr / ₹ Lakhs)"
             >
               <span>🇮🇳</span>
               <span className="text-[11px]">INR</span>
             </button>
             <button
               onClick={() => onCurrencyModeChange('USD')}
-              className={`px-2 py-0.5 rounded flex items-center gap-1 transition-all cursor-pointer ${
+              className={`px-2 py-1 rounded flex items-center gap-1 transition-all cursor-pointer ${
                 currencyMode === 'USD'
                   ? 'bg-blue-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="Switch monetary values to US Dollars ($)"
             >
               <span>🌐</span>
               <span className="text-[11px]">USD</span>
             </button>
           </div>
 
-          {/* Light / Dark Mode Toggle Button */}
+          {/* Theme Toggle */}
           <button
             onClick={() => onThemeModeChange(themeMode === 'dark' ? 'light' : 'dark')}
-            className={`hidden md:flex p-1.5 rounded-lg border items-center gap-1 text-xs font-semibold transition-all cursor-pointer ${
+            className={`hidden md:flex p-1.5 rounded-lg border items-center justify-center text-xs font-semibold transition-all cursor-pointer ${
               themeMode === 'dark'
-                ? 'bg-slate-950/80 text-amber-300 border-slate-800 hover:bg-slate-800'
+                ? 'bg-slate-950/80 text-amber-300 border-amber-500/30 hover:bg-slate-800'
                 : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
             }`}
-            title={themeMode === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
           >
             {themeMode === 'dark' ? (
-              <Sun className="h-3.5 w-3.5 text-amber-400" />
+              <Sun className="h-4 w-4 text-amber-400" />
             ) : (
-              <Moon className="h-3.5 w-3.5 text-indigo-600" />
+              <Moon className="h-4 w-4 text-indigo-600" />
             )}
           </button>
+
+          {/* Large Search Bar */}
+          <div className="hidden md:flex flex-1 max-w-xl relative ml-4">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+            <input 
+              type="text" 
+              placeholder="Search distributors, engagements, audits..." 
+              className="w-full bg-slate-950 border border-slate-800 text-sm text-white pl-9 pr-4 py-1.5 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors"
+            />
+          </div>
         </div>
 
-        {/* Global Auditor Context Dropdown */}
-        {currentUser?.role === 'Auditor' && (
-          <div className="flex items-center gap-1.5 bg-slate-950/80 border border-slate-800 rounded-xl px-3 py-1 flex-1 max-w-sm justify-center mx-4">
-            <span className="text-slate-400 text-xs hidden sm:inline">Distributor Audit:</span>
-            {isLoadingAudits ? (
-              <span className="text-slate-400 text-sm italic animate-pulse">Loading live audits...</span>
-            ) : !liveAudits || liveAudits.length === 0 ? (
-              <span className="text-slate-400 text-sm italic">No live distributor audits available</span>
-            ) : (
-              <select 
-                value={selectedAuditId || ''} 
-                onChange={(e) => {
-                  if (onAuditSelect) onAuditSelect(e.target.value);
-                }}
-                className="bg-transparent text-emerald-300 text-sm font-bold focus:outline-none cursor-pointer flex-1 text-center truncate max-w-[280px]"
-              >
-                {liveAudits.map(audit => (
-                  <option key={audit.id} value={audit.id} className="bg-slate-900 text-slate-200">
-                    {audit.distributorName || audit.title.split(' - ')[0] || audit.clientName} — Live Audit
-                  </option>
-                ))}
-              </select>
-            )}
-          </div>
-        )}
-
         {/* Right Action Tools */}
-        <div className="flex items-center gap-2 shrink-0">
-
-          {/* AI Copilot Button */}
+        <div className="flex items-center gap-3 shrink-0">
           <button 
             onClick={onOpenCopilot}
-            className="flex items-center gap-1.5 bg-gradient-to-r from-amber-500/20 via-indigo-500/20 to-cyan-500/20 hover:from-amber-500/30 hover:to-cyan-500/30 border border-amber-500/30 text-amber-200 hover:text-amber-100 rounded-lg px-2.5 py-1 text-xs font-semibold transition-all shadow-sm"
+            className="flex items-center gap-1.5 bg-slate-950 hover:bg-slate-800 border border-amber-500/30 text-amber-300 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all shadow-sm"
           >
-            <Sparkles className="h-3.5 w-3.5 text-amber-400 animate-pulse" />
+            <Sparkles className="h-3.5 w-3.5 text-amber-400" />
             <span className="hidden sm:inline">AI Copilot</span>
           </button>
 
-          {/* Supabase DB Connection Checker Badge */}
           <SupabaseHeaderChecker />
 
-          {/* New Audit Launch Button (Auditors only) */}
-          {currentUser?.role !== 'Distributor' && !currentUser?.role?.includes('Distributor') && (
-            <button 
-              onClick={onOpenNewAudit}
-              className="hidden xl:flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-medium px-3 py-1 rounded-lg transition-colors shadow-sm"
-            >
-              <span>+ New Audit</span>
-            </button>
-          )}
-
-          {/* Risk Notification Bell */}
           <div className="relative">
             <button 
-              id="header-notification-bell-btn"
               onClick={onOpenNotifications}
-              className="p-2 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-all relative cursor-pointer flex items-center justify-center"
-              title="View In-App Notifications & Alerts"
+              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800 rounded-xl transition-all relative cursor-pointer flex items-center justify-center"
             >
-              <Bell className="h-4.5 w-4.5" />
-              {unreadAlertsCount > 0 && (
-                <>
-                  <span className="absolute top-1 right-1 h-2.5 w-2.5 rounded-full bg-rose-500 ring-2 ring-slate-900 animate-ping pointer-events-none"></span>
-                  <span className="absolute -top-1 -right-1 flex h-4.5 min-w-[18px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white shadow-lg ring-2 ring-slate-900 leading-none pointer-events-none">
-                    {unreadAlertsCount > 9 ? '9+' : unreadAlertsCount}
-                  </span>
-                </>
-              )}
+              <Bell className="h-5 w-5" />
+              <span className="absolute top-0 right-0 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-slate-900 leading-none">
+                3
+              </span>
             </button>
           </div>
 
-          {/* User Profile / Auth Button */}
-          <div className="pl-1.5 border-l border-slate-800 relative">
+          <div className="pl-3 border-l border-slate-800 relative">
             {currentUser ? (
-              <div className="relative">
-                <button
-                  onClick={() => {
-                    if (onNavigateToProfile) onNavigateToProfile('profile');
-                  }}
-                  className="flex items-center gap-2 p-1 hover:bg-slate-800/80 rounded-xl transition-all border border-transparent hover:border-slate-700/80 cursor-pointer text-left"
-                  title="View Profile"
-                >
-                  <div className={`h-7 w-7 rounded-full font-bold text-xs flex items-center justify-center border ${
-                    currentUser.role === 'Auditor' 
-                      ? 'bg-indigo-500/20 border-indigo-400/40 text-indigo-300' 
-                      : 'bg-emerald-500/20 border-emerald-400/40 text-emerald-300'
-                  }`}>
-                    {currentUser.avatarInitials}
-                  </div>
-                  <div className="hidden lg:flex items-center gap-1.5">
-                    <p className="text-xs font-semibold text-slate-200 leading-none">{currentUser.name}</p>
-                  </div>
-                </button>
-              </div>
+              <button
+                onClick={() => {
+                  if (onNavigateToProfile) onNavigateToProfile('profile');
+                }}
+                className="flex items-center gap-2 hover:bg-slate-800/80 p-1 rounded-xl transition-all border border-transparent cursor-pointer"
+              >
+                <div className="h-8 w-8 rounded-full font-bold text-xs flex items-center justify-center border bg-indigo-500/20 border-indigo-400/40 text-indigo-300">
+                  AS
+                </div>
+                <div className="hidden lg:flex flex-col items-start justify-center">
+                  <p className="text-sm font-semibold text-white leading-tight">Abhilash S</p>
+                  <p className="text-[10px] text-slate-400 leading-tight">Auditor</p>
+                </div>
+              </button>
             ) : (
               <button
                 onClick={onOpenAuth}
-                className="flex items-center gap-1 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold px-2.5 py-1 rounded-lg transition-all shadow-md cursor-pointer shrink-0"
+                className="flex items-center gap-1 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-all shadow-md cursor-pointer shrink-0"
               >
-                <LogIn className="h-3.5 w-3.5" />
+                <LogIn className="h-4 w-4" />
                 <span className="whitespace-nowrap">Sign In / Register</span>
               </button>
             )}
           </div>
-
         </div>
-
       </div>
     </header>
   );
@@ -336,12 +218,10 @@ const SupabaseHeaderChecker: React.FC = () => {
     <>
       <button
         onClick={handleOpen}
-        className="flex items-center gap-1.5 px-2.5 py-1 bg-purple-950/60 hover:bg-purple-900/80 border border-purple-500/30 text-purple-200 hover:text-white rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-sm"
-        title="Check Supabase Connection Status"
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-950/40 hover:bg-purple-900/60 border border-purple-500/30 text-purple-300 hover:text-white rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-sm"
       >
         <Database className="h-3.5 w-3.5 text-purple-400" />
         <span className="hidden md:inline">Supabase DB</span>
-        <span className="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
       </button>
 
       {isOpen && (
@@ -415,3 +295,4 @@ const SupabaseHeaderChecker: React.FC = () => {
     </>
   );
 };
+

@@ -135,35 +135,57 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
   ];
 
   const auditStreams = [
-    { name: 'Distributor Audits', icon: Store, count: 2 },
-    { name: 'Vendor & AP Audits', icon: Building, count: 1 },
-    { name: 'Franchise & Dealer', icon: PieChart, count: 2 },
+    { name: 'Distributor Audits', icon: Store, count: 6 },
+    { name: 'Vendor & AP Audits', icon: Building, count: 2 },
+    { name: 'Franchise & Dealer', icon: PieChart, count: 3 },
     { name: 'Financial & Forensic', icon: DollarSign, count: 1 },
   ];
 
   return (
-    <aside className={`${isCollapsed ? "w-16" : "w-64"} transition-all duration-300 bg-slate-900 border-r border-slate-800 text-slate-300 flex flex-col justify-between shrink-0 hidden md:flex min-h-[calc(100vh-57px)] z-20`}>
+    <aside className={`${isCollapsed ? "w-16" : "w-[270px]"} transition-all duration-300 bg-slate-900 border-r border-slate-800 text-slate-300 flex flex-col justify-between shrink-0 hidden md:flex min-h-screen z-20`}>
       
       <div className="p-3 space-y-5">
         
-        {/* Navigation Sections */}
-        <div>
-                  <div className={`flex items-center ${isCollapsed ? 'justify-center px-0' : 'justify-between px-3'} mb-2`}>
+        {/* Brand */}
+        <div className="flex items-center gap-3 px-3 py-2 mt-2">
+          <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-indigo-600 via-blue-600 to-cyan-400 flex items-center justify-center font-bold text-base shadow-inner ring-1 ring-white/20 shrink-0">
+            <Layers className="h-4 w-4 text-white" />
+          </div>
           {!isCollapsed && (
-            <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-              Main Navigation
-            </p>
-          )}
-          {onToggleCollapse && (
-            <button 
-              onClick={onToggleCollapse} 
-              className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors"
-              title={isCollapsed ? "Expand Navigation" : "Collapse Navigation"}
-            >
-              {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
-            </button>
+            <div className="flex flex-col">
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-base sm:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent leading-none">
+                  DMP
+                </span>
+                <span className="text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 leading-none">
+                  v2.0
+                </span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium leading-none mt-1">
+                Distributor Monitoring Platform
+              </span>
+            </div>
           )}
         </div>
+
+        {/* Navigation Sections */}
+        <div>
+          <div className={`flex items-center ${isCollapsed ? 'justify-center px-0' : 'justify-between px-3'} mb-2`}>
+            {!isCollapsed && (
+              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                Main Navigation
+              </p>
+            )}
+            {onToggleCollapse && (
+              <button 
+                onClick={onToggleCollapse} 
+                className="text-slate-400 hover:text-white p-1 rounded-md hover:bg-slate-800 transition-colors"
+                title={isCollapsed ? "Expand Navigation" : "Collapse Navigation"}
+              >
+                {isCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+              </button>
+            )}
+          </div>
           <nav className="space-y-1">
             
             {/* 1. Executive Dashboard */}
@@ -172,7 +194,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
               onClick={() => onTabChange('dashboard')}
               className={`w-full flex items-center ${isCollapsed ? "justify-center px-0" : "justify-between px-3"} py-2.5 rounded-lg text-xs font-medium transition-all ${
                 activeTab === 'dashboard'
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-indigo-600/20 font-semibold'
                   : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
               }`}
             >

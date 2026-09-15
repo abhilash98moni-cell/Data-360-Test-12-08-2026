@@ -325,79 +325,79 @@ export default function App() {
   const liveAudits = engagements.filter(e => e.status !== 'Completed');
 
   return (
-    <div className={`min-h-screen flex flex-col font-sans max-w-full overflow-x-hidden selection:bg-indigo-500 selection:text-white transition-colors duration-200 ${
+    <div className={`min-h-screen flex font-sans max-w-full overflow-x-hidden selection:bg-indigo-500 selection:text-white transition-colors duration-200 ${
       themeMode === 'light' ? 'light-theme bg-slate-50 text-slate-900' : 'bg-slate-950 text-slate-100'
     }`}>
       
-      {/* Top Header */}
-      <Header 
-        selectedClient={selectedClient}
-        onClientChange={handleClientChange}
-        selectedDistributor={selectedDistributor}
-        onDistributorChange={setSelectedDistributor}
-        currencyMode={currencyMode}
-        onCurrencyModeChange={handleCurrencyModeChange}
-        themeMode={themeMode}
-        onThemeModeChange={handleThemeModeChange}
-        onOpenCopilot={() => setIsCopilotOpen(true)}
-        onOpenNewAudit={() => setIsNewAuditOpen(true)}
-        unreadAlertsCount={unreadNotificationsCount}
-        onNavigateToIIR={() => {
-          setActiveTab('engagement_workspace');
-        }}
-        currentUser={currentUser}
-        onOpenAuth={() => setIsAuthOpen(true)}
-        onOpenNotifications={() => setIsNotificationsOpen(prev => !prev)}
-        onLogout={handleLogout}
-        onNavigateToProfile={(tab) => {
-          setActiveTab('profile');
-          if (tab === 'security') {
-            setTimeout(() => {
-              document.getElementById('security-section')?.scrollIntoView({ behavior: 'smooth' });
-            }, 100);
-          }
-        }}
-        liveAudits={liveAudits}
-        isLoadingAudits={isLoadingEngagements}
-        selectedAuditId={selectedEngId}
-        onAuditSelect={(id) => {
-          setSelectedEngId(id);
-          const eng = engagements.find(e => e.id === id);
-          if (eng) {
-            if (eng.clientName) setSelectedClient(eng.clientName);
-            if (eng.distributorName) {
-              setSelectedDistributor(eng.distributorName);
-            } else {
-              const dists = getDistributorsForClient(eng.clientName);
-              const matched = dists.find(d => eng.title.includes(d.name) || eng.location.includes(d.name) || (d.code && eng.location.includes(d.code)));
-              if (matched) {
-                setSelectedDistributor(matched.name);
-              }
-            }
-          }
-          if (activeTab === 'dashboard') {
-            setActiveTab('engagement_workspace');
-          }
-        }}
-      />
+      {/* Left Navigation Drawer */}
+      {(!isIIRFullScreen || (activeTab !== 'iir' && activeTab !== 'engagement_workspace')) && (
+        <NavigationSidebar 
+          activeTab={activeTab}
+          onTabChange={(tab) => {
+            setActiveTab(tab);
+          }}
+          openFindingsCount={filteredFindings.filter(f => f.status !== 'Resolved').length}
+          flaggedAnomaliesCount={forensicAnomalies.length}
+          currentUser={currentUser}
+          isCollapsed={isNavCollapsed}
+          onToggleCollapse={handleToggleNavCollapse}
+        />
+      )}
 
       {/* Main Workspace Body */}
-      <div className="flex flex-1 max-w-full overflow-x-hidden">
+      <div className="flex flex-col flex-1 max-w-full min-w-0 overflow-x-hidden">
         
-        {/* Left Navigation Drawer */}
-        {(!isIIRFullScreen || (activeTab !== 'iir' && activeTab !== 'engagement_workspace')) && (
-          <NavigationSidebar 
-            activeTab={activeTab}
-            onTabChange={(tab) => {
-              setActiveTab(tab);
-            }}
-            openFindingsCount={filteredFindings.filter(f => f.status !== 'Resolved').length}
-            flaggedAnomaliesCount={forensicAnomalies.length}
-            currentUser={currentUser}
-            isCollapsed={isNavCollapsed}
-            onToggleCollapse={handleToggleNavCollapse}
-          />
-        )}
+        {/* Top Header */}
+        <Header 
+          selectedClient={selectedClient}
+          onClientChange={handleClientChange}
+          selectedDistributor={selectedDistributor}
+          onDistributorChange={setSelectedDistributor}
+          currencyMode={currencyMode}
+          onCurrencyModeChange={handleCurrencyModeChange}
+          themeMode={themeMode}
+          onThemeModeChange={handleThemeModeChange}
+          onOpenCopilot={() => setIsCopilotOpen(true)}
+          onOpenNewAudit={() => setIsNewAuditOpen(true)}
+          unreadAlertsCount={unreadNotificationsCount}
+          onNavigateToIIR={() => {
+            setActiveTab('engagement_workspace');
+          }}
+          currentUser={currentUser}
+          onOpenAuth={() => setIsAuthOpen(true)}
+          onOpenNotifications={() => setIsNotificationsOpen(prev => !prev)}
+          onLogout={handleLogout}
+          onNavigateToProfile={(tab) => {
+            setActiveTab('profile');
+            if (tab === 'security') {
+              setTimeout(() => {
+                document.getElementById('security-section')?.scrollIntoView({ behavior: 'smooth' });
+              }, 100);
+            }
+          }}
+          liveAudits={liveAudits}
+          isLoadingAudits={isLoadingEngagements}
+          selectedAuditId={selectedEngId}
+          onAuditSelect={(id) => {
+            setSelectedEngId(id);
+            const eng = engagements.find(e => e.id === id);
+            if (eng) {
+              if (eng.clientName) setSelectedClient(eng.clientName);
+              if (eng.distributorName) {
+                setSelectedDistributor(eng.distributorName);
+              } else {
+                const dists = getDistributorsForClient(eng.clientName);
+                const matched = dists.find(d => eng.title.includes(d.name) || eng.location.includes(d.name) || (d.code && eng.location.includes(d.code)));
+                if (matched) {
+                  setSelectedDistributor(matched.name);
+                }
+              }
+            }
+            if (activeTab === 'dashboard') {
+              setActiveTab('engagement_workspace');
+            }
+          }}
+        />
 
         {/* Content Body View */}
         <main className="flex-1 min-w-0 max-w-full overflow-x-hidden bg-slate-950/90 pb-12">
