@@ -165,7 +165,7 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
 
       // 2. Fetch existing responses
       const rRes = await fetch(
-        `/api/sampling/required-data/responses?sampleId=${encodeURIComponent(targetSampleId)}&voucherNo=${encodeURIComponent(targetVoucherNo)}&distributorId=${encodeURIComponent(activeDistributor)}&auditId=${encodeURIComponent(engagementId || 'eng-101')}`,
+        `/api/sampling/required-data/responses?sampleId=${encodeURIComponent(targetSampleId)}&voucherNo=${encodeURIComponent(targetVoucherNo)}&rowId=${encodeURIComponent(targetRowId)}&distributorId=${encodeURIComponent(activeDistributor)}&auditId=${encodeURIComponent(engagementId || 'eng-101')}`,
         { headers }
       );
       const rData = await rRes.json();

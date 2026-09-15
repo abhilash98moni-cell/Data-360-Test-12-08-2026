@@ -27,19 +27,19 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
           <div className="text-[10px] font-bold tracking-wider text-indigo-400 bg-indigo-900/30 border border-indigo-500/20 px-2 py-1 rounded-full uppercase inline-block mb-3">
             Distributor Monitoring Platform (DMP) Executive Control Hub
           </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">Enterprise Executive Audit Dashboard</h1>
-          <p className="text-slate-400 text-sm mt-1">Complete visibility across all distributor audits</p>
+          <h1 className="text-2xl font-bold text-white tracking-tight">Enterprise Executive Audit Dashboard</h1>
+          <p className="text-slate-400 text-xs mt-1">Complete visibility across all distributor audits</p>
         </div>
         <div className="flex items-center gap-3">
           <button 
             onClick={() => onTabChange && onTabChange('engagement_workspace')}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-sm font-semibold transition-all shadow-lg"
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-semibold transition-all shadow-lg"
           >
             <Briefcase className="h-4 w-4" /> Engagement Workspace
           </button>
           <button 
             onClick={onOpenNewAudit}
-            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-lg text-sm font-semibold transition-all shadow-lg"
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white rounded-lg text-xs font-semibold transition-all shadow-lg"
           >
             <Plus className="h-4 w-4" /> Initiate New Audit
           </button>
@@ -53,8 +53,8 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
             <Users className="h-6 w-6 text-blue-400" />
           </div>
           <div>
-            <p className="text-xs text-slate-400 font-medium mb-1">Total Assignments</p>
-            <h3 className="text-2xl font-bold text-white leading-none mb-1">12</h3>
+            <p className="text-[11px] text-slate-400 font-medium mb-1">Total Assignments</p>
+            <h3 className="text-xl font-bold text-white leading-none mb-1">12</h3>
             <p className="text-[10px] text-slate-500">All distributor audits</p>
           </div>
         </div>
@@ -64,8 +64,8 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
             <PlayCircle className="h-6 w-6 text-indigo-400" />
           </div>
           <div>
-            <p className="text-xs text-slate-400 font-medium mb-1">In Progress</p>
-            <h3 className="text-2xl font-bold text-white leading-none mb-1">8</h3>
+            <p className="text-[11px] text-slate-400 font-medium mb-1">In Progress</p>
+            <h3 className="text-xl font-bold text-white leading-none mb-1">8</h3>
             <p className="text-[10px] text-slate-500">67% of total</p>
           </div>
         </div>
@@ -75,8 +75,8 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
             <Hourglass className="h-6 w-6 text-amber-500" />
           </div>
           <div>
-            <p className="text-xs text-slate-400 font-medium mb-1">Pending to Start</p>
-            <h3 className="text-2xl font-bold text-white leading-none mb-1">2</h3>
+            <p className="text-[11px] text-slate-400 font-medium mb-1">Pending to Start</p>
+            <h3 className="text-xl font-bold text-white leading-none mb-1">2</h3>
             <p className="text-[10px] text-slate-500">17% of total</p>
           </div>
         </div>
@@ -86,8 +86,8 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
             <CheckCircle2 className="h-6 w-6 text-emerald-500" />
           </div>
           <div>
-            <p className="text-xs text-slate-400 font-medium mb-1">Completed</p>
-            <h3 className="text-2xl font-bold text-white leading-none mb-1">2</h3>
+            <p className="text-[11px] text-slate-400 font-medium mb-1">Completed</p>
+            <h3 className="text-xl font-bold text-white leading-none mb-1">2</h3>
             <p className="text-[10px] text-slate-500">17% of total</p>
           </div>
         </div>
@@ -98,8 +98,8 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
             <AlertTriangle className="h-6 w-6 text-rose-500" />
           </div>
           <div>
-            <p className="text-xs text-slate-400 font-medium mb-1">Overdue</p>
-            <h3 className="text-2xl font-bold text-white leading-none mb-1">3</h3>
+            <p className="text-[11px] text-slate-400 font-medium mb-1">Overdue</p>
+            <h3 className="text-xl font-bold text-white leading-none mb-1">3</h3>
             <p className="text-[10px] text-rose-400">Requires attention</p>
           </div>
         </div>
@@ -109,8 +109,8 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
       <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden mb-6">
         <div className="p-5 border-b border-slate-800 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
-            <h2 className="text-lg font-bold text-white">Distributor Audits Overview</h2>
-            <p className="text-sm text-slate-400">Select a distributor to view detailed audit status and timeline</p>
+            <h2 className="text-base font-bold text-white">Distributor Audits Overview</h2>
+            <p className="text-xs text-slate-400">Select a distributor to view detailed audit status and timeline</p>
           </div>
           <div className="flex flex-col sm:flex-row items-center gap-3">
             <div className="relative">
@@ -118,15 +118,15 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
               <input 
                 type="text" 
                 placeholder="Search distributors..." 
-                className="bg-slate-950 border border-slate-800 text-sm text-white pl-9 pr-4 py-1.5 rounded-lg focus:outline-none focus:border-indigo-500 w-64 transition-colors"
+                className="bg-slate-950 border border-slate-800 text-xs text-white pl-9 pr-4 py-1.5 rounded-lg focus:outline-none focus:border-indigo-500 w-64 transition-colors"
               />
             </div>
             <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-1">
-              <button className="px-3 py-1.5 text-xs font-medium rounded-md transition-colors bg-indigo-600 text-white">All (12)</button>
-              <button className="px-3 py-1.5 text-xs font-medium rounded-md transition-colors text-slate-400 hover:text-white hover:bg-slate-800">In Progress (8)</button>
-              <button className="px-3 py-1.5 text-xs font-medium rounded-md transition-colors text-slate-400 hover:text-white hover:bg-slate-800">Pending (2)</button>
-              <button className="px-3 py-1.5 text-xs font-medium rounded-md transition-colors text-slate-400 hover:text-white hover:bg-slate-800">Completed (2)</button>
-              <button className="px-3 py-1.5 text-xs font-medium rounded-md transition-colors text-slate-400 hover:text-white hover:bg-slate-800">Overdue (3)</button>
+              <button className="px-3 py-1.5 text-[11px] font-medium rounded-md transition-colors bg-indigo-600 text-white">All (12)</button>
+              <button className="px-3 py-1.5 text-[11px] font-medium rounded-md transition-colors text-slate-400 hover:text-white hover:bg-slate-800">In Progress (8)</button>
+              <button className="px-3 py-1.5 text-[11px] font-medium rounded-md transition-colors text-slate-400 hover:text-white hover:bg-slate-800">Pending (2)</button>
+              <button className="px-3 py-1.5 text-[11px] font-medium rounded-md transition-colors text-slate-400 hover:text-white hover:bg-slate-800">Completed (2)</button>
+              <button className="px-3 py-1.5 text-[11px] font-medium rounded-md transition-colors text-slate-400 hover:text-white hover:bg-slate-800">Overdue (3)</button>
             </div>
           </div>
         </div>
@@ -134,7 +134,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse">
             <thead>
-              <tr className="bg-slate-950/50 text-slate-400 text-xs uppercase tracking-wider">
+              <tr className="bg-slate-950/50 text-slate-400 text-[11px] uppercase tracking-wider">
                 <th className="px-6 py-3 font-semibold">Distributor Name</th>
                 <th className="px-6 py-3 font-semibold">Engagement ID</th>
                 <th className="px-6 py-3 font-semibold w-48">Overall Progress</th>
@@ -145,10 +145,10 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
                 <th className="px-6 py-3 font-semibold text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/50 text-sm">
+            <tbody className="divide-y divide-slate-800/50 text-xs">
               <tr className="bg-indigo-900/10 hover:bg-slate-800/50 transition-colors">
                 <td className="px-6 py-4 font-bold text-white">Midwest Trading Co.</td>
-                <td className="px-6 py-4 text-slate-400 font-mono text-xs">AUD-2026-DIST-001</td>
+                <td className="px-6 py-4 text-slate-400 font-mono text-[11px]">AUD-2026-DIST-001</td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <span className="font-bold text-white w-8">72%</span>
@@ -158,18 +158,18 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
                   </div>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border bg-indigo-500/10 text-indigo-400 border-indigo-500/20">In Progress</span>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-medium border bg-indigo-500/10 text-indigo-400 border-indigo-500/20">In Progress</span>
                 </td>
                 <td className="px-6 py-4 text-slate-300">17 Dec 2026</td>
                 <td className="px-6 py-4 text-slate-300">12 Dec 2026</td>
                 <td className="px-6 py-4 text-emerald-400 font-medium">5 days ahead</td>
                 <td className="px-6 py-4 text-right">
-                  <button className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-xs font-semibold transition-colors">View</button>
+                  <button className="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-md text-[11px] font-semibold transition-colors">View</button>
                 </td>
               </tr>
               <tr className="hover:bg-slate-800/50 transition-colors">
                 <td className="px-6 py-4 font-bold text-slate-200">Apex Electronics Corp.</td>
-                <td className="px-6 py-4 text-slate-400 font-mono text-xs">AUD-2026-DIST-002</td>
+                <td className="px-6 py-4 text-slate-400 font-mono text-[11px]">AUD-2026-DIST-002</td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <span className="font-bold text-slate-200 w-8">41%</span>
@@ -179,18 +179,18 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
                   </div>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border bg-rose-500/10 text-rose-400 border-rose-500/20">Overdue</span>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-medium border bg-rose-500/10 text-rose-400 border-rose-500/20">Overdue</span>
                 </td>
                 <td className="px-6 py-4 text-slate-300">20 Dec 2026</td>
                 <td className="px-6 py-4 text-slate-300">26 Dec 2026</td>
                 <td className="px-6 py-4 text-rose-400 font-medium">6 days delayed</td>
                 <td className="px-6 py-4 text-right">
-                  <button className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-xs font-semibold border border-slate-700 transition-colors">View</button>
+                  <button className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-[11px] font-semibold border border-slate-700 transition-colors">View</button>
                 </td>
               </tr>
               <tr className="hover:bg-slate-800/50 transition-colors">
                 <td className="px-6 py-4 font-bold text-slate-200">Global Retail Ltd.</td>
-                <td className="px-6 py-4 text-slate-400 font-mono text-xs">AUD-2026-DIST-003</td>
+                <td className="px-6 py-4 text-slate-400 font-mono text-[11px]">AUD-2026-DIST-003</td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <span className="font-bold text-slate-200 w-8">18%</span>
@@ -200,18 +200,18 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
                   </div>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border bg-indigo-500/10 text-indigo-400 border-indigo-500/20">In Progress</span>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-medium border bg-indigo-500/10 text-indigo-400 border-indigo-500/20">In Progress</span>
                 </td>
                 <td className="px-6 py-4 text-slate-300">22 Dec 2026</td>
                 <td className="px-6 py-4 text-slate-300">24 Dec 2026</td>
                 <td className="px-6 py-4 text-rose-400 font-medium">2 days delayed</td>
                 <td className="px-6 py-4 text-right">
-                  <button className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-xs font-semibold border border-slate-700 transition-colors">View</button>
+                  <button className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-[11px] font-semibold border border-slate-700 transition-colors">View</button>
                 </td>
               </tr>
               <tr className="hover:bg-slate-800/50 transition-colors">
                 <td className="px-6 py-4 font-bold text-slate-200">Sunrise Distributors</td>
-                <td className="px-6 py-4 text-slate-400 font-mono text-xs">AUD-2026-DIST-004</td>
+                <td className="px-6 py-4 text-slate-400 font-mono text-[11px]">AUD-2026-DIST-004</td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <span className="font-bold text-slate-200 w-8">0%</span>
@@ -221,18 +221,18 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
                   </div>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border bg-slate-800 text-slate-400 border-slate-700">Pending</span>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-medium border bg-slate-800 text-slate-400 border-slate-700">Pending</span>
                 </td>
                 <td className="px-6 py-4 text-slate-300">24 Dec 2026</td>
                 <td className="px-6 py-4 text-slate-300">24 Dec 2026</td>
                 <td className="px-6 py-4 text-slate-500 font-medium">-</td>
                 <td className="px-6 py-4 text-right">
-                  <button className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-xs font-semibold border border-slate-700 transition-colors">View</button>
+                  <button className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-[11px] font-semibold border border-slate-700 transition-colors">View</button>
                 </td>
               </tr>
               <tr className="hover:bg-slate-800/50 transition-colors">
                 <td className="px-6 py-4 font-bold text-slate-200">Trident Supplies</td>
-                <td className="px-6 py-4 text-slate-400 font-mono text-xs">AUD-2026-DIST-005</td>
+                <td className="px-6 py-4 text-slate-400 font-mono text-[11px]">AUD-2026-DIST-005</td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-3">
                     <span className="font-bold text-slate-200 w-8">100%</span>
@@ -242,13 +242,13 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
                   </div>
                 </td>
                 <td className="px-6 py-4">
-                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">Completed</span>
+                  <span className="inline-flex items-center px-2.5 py-1 rounded-md text-[11px] font-medium border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">Completed</span>
                 </td>
                 <td className="px-6 py-4 text-slate-300">10 Dec 2026</td>
                 <td className="px-6 py-4 text-slate-300">10 Dec 2026</td>
                 <td className="px-6 py-4 text-emerald-400 font-medium">Completed</td>
                 <td className="px-6 py-4 text-right">
-                  <button className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-xs font-semibold border border-slate-700 transition-colors">View</button>
+                  <button className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-md text-[11px] font-semibold border border-slate-700 transition-colors">View</button>
                 </td>
               </tr>
             </tbody>
@@ -261,10 +261,10 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
           <div>
             <div className="flex items-center gap-3 mb-1">
-              <h2 className="text-2xl font-bold text-white">Midwest Trading Co.</h2>
-              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-xs font-semibold rounded-full border border-emerald-500/30">In Progress</span>
+              <h2 className="text-xl font-bold text-white">Midwest Trading Co.</h2>
+              <span className="px-2 py-0.5 bg-emerald-500/20 text-emerald-400 text-[11px] font-semibold rounded-full border border-emerald-500/30">In Progress</span>
             </div>
-            <div className="text-xs text-slate-400 flex items-center gap-2">
+            <div className="text-[11px] text-slate-400 flex items-center gap-2">
               <span className="font-mono">AUD-2026-DIST-001</span>
               <span>|</span>
               <span>Started: 15 Sep 2026</span>
@@ -272,7 +272,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
           </div>
           <button 
             onClick={() => onSelectEngagement && onSelectEngagement('AUD-2026-DIST-001')}
-            className="flex items-center gap-2 px-4 py-2 bg-indigo-900/50 hover:bg-indigo-800 text-indigo-300 hover:text-indigo-200 border border-indigo-700/50 rounded-lg text-sm font-semibold transition-colors"
+            className="flex items-center gap-2 px-4 py-2 bg-indigo-900/50 hover:bg-indigo-800 text-indigo-300 hover:text-indigo-200 border border-indigo-700/50 rounded-lg text-xs font-semibold transition-colors"
           >
             <ExternalLink className="h-4 w-4" /> Open in Workspace
           </button>
@@ -284,7 +284,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`pb-3 text-sm font-semibold transition-colors border-b-2 ${
+              className={`pb-3 text-xs font-semibold transition-colors border-b-2 ${
                 activeTab === tab 
                   ? 'border-indigo-500 text-indigo-400' 
                   : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -300,11 +300,11 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
           <div className="bg-slate-950 border border-slate-800 rounded-xl p-4">
             <div className="flex items-center gap-4">
               <div className="h-12 w-12 rounded-full border-4 border-slate-800 border-t-emerald-400 flex items-center justify-center shrink-0">
-                <span className="text-sm font-bold text-white">72%</span>
+                <span className="text-xs font-bold text-white">72%</span>
               </div>
               <div>
-                <p className="text-sm font-bold text-white">Overall Progress</p>
-                <p className="text-xs text-emerald-400 mt-1 font-medium flex items-center gap-1">
+                <p className="text-xs font-bold text-white">Overall Progress</p>
+                <p className="text-[11px] text-emerald-400 mt-1 font-medium flex items-center gap-1">
                   <TrendingUp className="h-3 w-3" /> On track
                 </p>
               </div>
@@ -316,9 +316,9 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
               <Calendar className="h-5 w-5 text-indigo-400" />
             </div>
             <div>
-              <p className="text-sm font-bold text-white">12 Dec 2026</p>
+              <p className="text-xs font-bold text-white">12 Dec 2026</p>
               <p className="text-[11px] text-slate-400 mt-0.5">Forecast Completion</p>
-              <p className="text-xs text-emerald-400 font-medium mt-0.5">5 days ahead</p>
+              <p className="text-[11px] text-emerald-400 font-medium mt-0.5">5 days ahead</p>
             </div>
           </div>
 
@@ -327,7 +327,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
               <Calendar className="h-5 w-5 text-slate-300" />
             </div>
             <div>
-              <p className="text-sm font-bold text-white">17 Dec 2026</p>
+              <p className="text-xs font-bold text-white">17 Dec 2026</p>
               <p className="text-[11px] text-slate-400 mt-0.5">Baseline Completion</p>
             </div>
           </div>
@@ -337,7 +337,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
               <Clock className="h-5 w-5 text-slate-300" />
             </div>
             <div>
-              <p className="text-sm font-bold text-white">8 days</p>
+              <p className="text-xs font-bold text-white">8 days</p>
               <p className="text-[11px] text-slate-400 mt-0.5">Remaining</p>
             </div>
           </div>
@@ -348,7 +348,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
                 <FileText className="h-5 w-5 text-rose-400" />
               </div>
               <div>
-                <p className="text-sm font-bold text-white">3</p>
+                <p className="text-xs font-bold text-white">3</p>
                 <p className="text-[11px] text-rose-400 mt-0.5">Overdue Items</p>
               </div>
             </div>
@@ -359,16 +359,16 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
         {/* TIMELINE */}
         <div>
           <div className="flex items-center justify-between mb-6">
-            <h3 className="text-lg font-bold text-white">Audit Timeline (12 Weeks)</h3>
+            <h3 className="text-base font-bold text-white">Audit Timeline (12 Weeks)</h3>
             <div className="flex items-center gap-6">
-              <div className="flex items-center gap-4 text-xs">
+              <div className="flex items-center gap-4 text-[11px]">
                 <div className="flex items-center gap-2"><div className="w-3 h-3 bg-indigo-500/40 rounded-full"></div><span className="text-slate-400">Baseline Plan</span></div>
                 <div className="flex items-center gap-2"><div className="w-3 h-3 bg-emerald-500 rounded-full"></div><span className="text-slate-400">Actual Progress</span></div>
                 <div className="flex items-center gap-2"><div className="w-3 h-3 bg-cyan-400 rounded-full"></div><span className="text-slate-400">Current Forecast</span></div>
               </div>
               <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-1">
-                <button className="px-3 py-1 bg-indigo-600 text-white rounded text-xs font-semibold">Weeks</button>
-                <button className="px-3 py-1 text-slate-400 hover:text-white rounded text-xs font-semibold">Calendar</button>
+                <button className="px-3 py-1 bg-indigo-600 text-white rounded text-[11px] font-semibold">Weeks</button>
+                <button className="px-3 py-1 text-slate-400 hover:text-white rounded text-[11px] font-semibold">Calendar</button>
               </div>
             </div>
           </div>
@@ -398,7 +398,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
                 
                 {/* IRL & Kick-off */}
                 <div className="flex items-center h-8">
-                  <div className="w-48 shrink-0 flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <div className="w-48 shrink-0 flex items-center gap-2 text-xs font-medium text-slate-200">
                     <CheckCircle2 className="h-4 w-4 text-emerald-500 shrink-0" /> IRL & Kick-off
                   </div>
                   <div className="flex-1 relative h-full flex items-center">
@@ -410,7 +410,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
 
                 {/* Data Collection & Interview */}
                 <div className="flex items-center h-8">
-                  <div className="w-48 shrink-0 flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <div className="w-48 shrink-0 flex items-center gap-2 text-xs font-medium text-slate-200">
                     <div className="w-4 h-4 rounded bg-indigo-600 flex items-center justify-center shrink-0">
                       <ListTodo className="h-3 w-3 text-white" />
                     </div>
@@ -425,7 +425,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
 
                 {/* Data Analytics */}
                 <div className="flex items-center h-8">
-                  <div className="w-48 shrink-0 flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <div className="w-48 shrink-0 flex items-center gap-2 text-xs font-medium text-slate-200">
                     <div className="w-4 h-4 rounded bg-amber-500 flex items-center justify-center shrink-0">
                       <BarChart3 className="h-3 w-3 text-white" />
                     </div>
@@ -440,7 +440,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
 
                 {/* Supporting Documents */}
                 <div className="flex items-center h-8">
-                  <div className="w-48 shrink-0 flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <div className="w-48 shrink-0 flex items-center gap-2 text-xs font-medium text-slate-200">
                     <div className="w-4 h-4 rounded bg-orange-500 flex items-center justify-center shrink-0">
                       <FileText className="h-3 w-3 text-white" />
                     </div>
@@ -455,7 +455,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
 
                 {/* Transaction Testing */}
                 <div className="flex items-center h-8">
-                  <div className="w-48 shrink-0 flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <div className="w-48 shrink-0 flex items-center gap-2 text-xs font-medium text-slate-200">
                     <div className="w-4 h-4 rounded bg-cyan-500 flex items-center justify-center shrink-0">
                       <Search className="h-3 w-3 text-white" />
                     </div>
@@ -470,7 +470,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
 
                 {/* Interview & Reporting */}
                 <div className="flex items-center h-8">
-                  <div className="w-48 shrink-0 flex items-center gap-2 text-sm font-medium text-slate-200">
+                  <div className="w-48 shrink-0 flex items-center gap-2 text-xs font-medium text-slate-200">
                     <div className="w-4 h-4 rounded bg-rose-500 flex items-center justify-center shrink-0">
                       <FileText className="h-3 w-3 text-white" />
                     </div>

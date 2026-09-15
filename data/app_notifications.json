@@ -1,5 +1,55 @@
 [
   {
+    "id": "notif_1789483327632_uf0av",
+    "target_user_email": null,
+    "target_organization": "Midwest Trading Co.",
+    "target_role": "Distributor",
+    "category": "Evidence Accepted",
+    "title": "Evidence Accepted: Voucher #J2V5012",
+    "message": "Auditor accepted all submitted required data and evidence for Voucher #J2V5012.",
+    "is_read": false,
+    "created_at": "2026-09-15T14:42:07.632Z",
+    "link_tab": "engagement_workspace",
+    "metadata": {
+      "voucherNo": "J2V5012",
+      "sampleId": "J2V5012",
+      "engagementId": "eng-101",
+      "distributorName": "Midwest Trading Co.",
+      "linkTab": "engagement_workspace",
+      "targetRole": "Distributor",
+      "status": "Accepted",
+      "action": "Accepted",
+      "targetOrganization": "Midwest Trading Co."
+    },
+    "target_voucher_no": "J2V5012",
+    "target_sample_id": "J2V5012"
+  },
+  {
+    "id": "notif_1789483322802_fnabx",
+    "target_user_email": null,
+    "target_organization": "Midwest Trading Co.",
+    "target_role": "Distributor",
+    "category": "Evidence Rejected",
+    "title": "Evidence Rejected: Voucher #J2V5012",
+    "message": "Auditor updated review status to Rejected for Voucher #J2V5012.",
+    "is_read": false,
+    "created_at": "2026-09-15T14:42:02.802Z",
+    "link_tab": "engagement_workspace",
+    "metadata": {
+      "voucherNo": "J2V5012",
+      "sampleId": "J2V5012",
+      "engagementId": "eng-101",
+      "distributorName": "Midwest Trading Co.",
+      "linkTab": "engagement_workspace",
+      "targetRole": "Distributor",
+      "status": "Rejected",
+      "action": "Rejected",
+      "targetOrganization": "Midwest Trading Co."
+    },
+    "target_voucher_no": "J2V5012",
+    "target_sample_id": "J2V5012"
+  },
+  {
     "id": "notif_1789482102286_c4vxw",
     "target_user_email": null,
     "target_organization": "Midwest Trading Co.",

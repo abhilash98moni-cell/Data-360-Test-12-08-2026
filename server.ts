@@ -1774,7 +1774,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   // GET /api/sampling/required-data/responses
   app.get('/api/sampling/required-data/responses', authenticateRequest, async (req: any, res: any) => {
     try {
-      const { sampleId, voucherNo, distributorId, auditId } = req.query;
+      const { sampleId, voucherNo, rowId, row_id, distributorId, auditId } = req.query;
       const supabase = getSupabaseServerClient();
       const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
       const isValidKey = (s: any) => {
@@ -1787,6 +1787,8 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const { data, error } = await query;
       if (error) throw error;
       
+      const targetKeys = [sampleId, voucherNo, rowId, row_id].filter(isValidKey).map(cleanStr);
+
       const responses = (data || [])
         .map(d => {
            let parsed = d.details;
@@ -1805,14 +1807,14 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
            if (distributorId && distributorId !== 'All Distributors' && rDist && rDist !== cleanStr(distributorId)) {
              return false;
            }
-           if (sampleId || voucherNo) {
-             const sTarget = cleanStr(sampleId || voucherNo);
-             if (isValidKey(sTarget)) {
-               const sId = cleanStr(r.sample_id || r.sampleId || '');
-               const vNo = cleanStr(r.voucher_no || r.voucherNo || '');
-               const rId = cleanStr(r.row_id || r.rowId || '');
-               return (sId && sId === sTarget) || (vNo && vNo === sTarget) || (rId && rId === sTarget);
-             }
+           if (targetKeys.length > 0) {
+             const sId = cleanStr(r.sample_id || r.sampleId || '');
+             const vNo = cleanStr(r.voucher_no || r.voucherNo || '');
+             const rId = cleanStr(r.row_id || r.rowId || '');
+             const isMatch = targetKeys.some(k => 
+               (sId && sId === k) || (vNo && vNo === k) || (rId && rId === k)
+             );
+             if (!isMatch) return false;
            }
            return true;
         });
@@ -1841,6 +1843,8 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const targetSampleId = isValidKey(payload.sample_id) ? cleanStr(payload.sample_id) : '';
       const targetVoucherNo = isValidKey(payload.voucher_no || payload.voucherNo) ? cleanStr(payload.voucher_no || payload.voucherNo) : '';
       
+      const targetKeys = [targetRowId, targetSampleId, targetVoucherNo].filter(isValidKey);
+      
       // Strict matching on existing record for this specific transaction
       const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
       
@@ -1864,9 +1868,11 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         const sId = cleanStr(parsed?.sample_id || parsed?.sampleId || '');
         const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo || '');
 
-        if (targetRowId && isValidKey(targetRowId) && rId && rId === targetRowId) return true;
-        if (targetSampleId && isValidKey(targetSampleId) && sId && sId === targetSampleId) return true;
-        if (targetVoucherNo && isValidKey(targetVoucherNo) && vNo && vNo === targetVoucherNo) return true;
+        if (targetKeys.length > 0) {
+          return targetKeys.some(k => 
+            (rId && rId === k) || (sId && sId === k) || (vNo && vNo === k)
+          );
+        }
         
         return false;
       });
