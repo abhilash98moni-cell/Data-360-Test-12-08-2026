@@ -728,9 +728,8 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   const totalDebit = records.reduce((sum, r) => sum + (Number(r.debit) || 0), 0);
   const totalCredit = records.reduce((sum, r) => sum + (Number(r.credit) || 0), 0);
 
-  // Sampling Stats for Distributor
+  // Sampling Stats for All Roles
   const samplingStats = useMemo(() => {
-    if (!isDistributor) return null;
     let mandatory = 0;
     let missing = 0;
     let pending = 0;
@@ -762,7 +761,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
     });
 
     return { total: records.length, mandatory, missing, pending, completed, clarification };
-  }, [records, questionnaireResponses, isDistributor]);
+  }, [records, questionnaireResponses]);
 
   return (
     <div className="space-y-5 animate-fade-in text-slate-100">
@@ -845,8 +844,8 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       </div>
       )}
 
-      {/* Sampling Status Summary (Distributor Only) */}
-      {isDistributor && samplingStats && (
+      {/* Sampling Status Summary */}
+      {samplingStats && (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-bold text-white flex items-center gap-2">
