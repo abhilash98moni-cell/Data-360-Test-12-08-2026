@@ -394,8 +394,13 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   // Fetch Questionnaire Responses for status badges and persistence
   const fetchQuestionnaireResponses = async () => {
     try {
-      const res = await fetch('/api/sampling/required-data/responses', {
-        headers: { 'x-user-email': currentUser?.email || '' }
+      const distParam = encodeURIComponent(selectedDistributor || 'All Distributors');
+      const auditParam = encodeURIComponent(selectedAuditFilter || 'All Audits');
+      const res = await fetch(`/api/sampling/required-data/responses?distributorId=${distParam}&auditId=${auditParam}`, {
+        headers: {
+          'x-user-email': currentUser?.email || '',
+          'x-user-role': currentUser?.role || 'Auditor'
+        }
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.responses)) {
@@ -403,12 +408,15 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
         data.responses.forEach((r: any) => {
           if (r.sample_id) {
             map[r.sample_id] = r;
+            map[String(r.sample_id).toLowerCase()] = r;
           }
           if (r.voucher_no) {
             map[r.voucher_no] = r;
+            map[String(r.voucher_no).toLowerCase()] = r;
           }
           if (r.voucherNo) {
             map[r.voucherNo] = r;
+            map[String(r.voucherNo).toLowerCase()] = r;
           }
         });
         setQuestionnaireResponses(map);
@@ -472,6 +480,19 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
     loadPopulationData();
     fetchQuestionnaireResponses();
   }, [selectedDistributor, selectedClient, selectedAuditFilter]);
+
+  // Listen for actions and updates to keep summary cards reactive
+  useEffect(() => {
+    const handleSync = () => {
+      fetchQuestionnaireResponses();
+    };
+    window.addEventListener('notification-updated', handleSync);
+    window.addEventListener('engagement_workspace_updated', handleSync);
+    return () => {
+      window.removeEventListener('notification-updated', handleSync);
+      window.removeEventListener('engagement_workspace_updated', handleSync);
+    };
+  }, [selectedDistributor, selectedAuditFilter]);
 
   // Handle Switch Active Population
   const handleSwitchPopulation = async (popId: string) => {
@@ -730,38 +751,89 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
 
   // Sampling Stats for All Roles
   const samplingStats = useMemo(() => {
-    let mandatory = 0;
-    let missing = 0;
     let pending = 0;
-    let completed = 0;
-    let clarification = 0;
+    let clarificationsRequired = 0;
+    let rejected = 0;
+    let accepted = 0;
 
-    records.forEach(r => {
-      const resp = questionnaireResponses[String(r.id || '').toLowerCase()] ||
-                   questionnaireResponses[String(r.voucherNo || '').toLowerCase()] ||
-                   questionnaireResponses[r.id] ||
-                   questionnaireResponses[r.voucherNo];
-      
-      const st = resp?.status;
-      const isPushed = resp?.is_pushed || resp?.isPushed;
-      
-      if (isPushed || st) {
-        mandatory++;
-        if (!st || st === 'Draft') {
-           pending++;
-           missing++;
-        } else if (st === 'Completed' || st === 'Submitted' || st === 'Accepted') {
-           completed++;
-        } else if (st === 'Clarification Required' || st === 'Rejected') {
-           clarification++;
+    const cleanStr = (s?: string) => (s || '').trim().toLowerCase();
+
+    if (records.length > 0) {
+      records.forEach(r => {
+        const cleanKey1 = String(r.id || '').toLowerCase();
+        const cleanKey2 = String(r.voucherNo || '').toLowerCase();
+        const cleanKey3 = String(r.sampleId || '').toLowerCase();
+        const resp = questionnaireResponses[cleanKey1] ||
+                     questionnaireResponses[cleanKey2] ||
+                     questionnaireResponses[cleanKey3] ||
+                     questionnaireResponses[r.id] ||
+                     questionnaireResponses[r.voucherNo] ||
+                     questionnaireResponses[r.sampleId];
+        
+        const st = resp?.status;
+        if (st === 'Accepted') {
+          accepted++;
+        } else if (st === 'Rejected') {
+          rejected++;
+        } else if (st === 'Clarification Required') {
+          clarificationsRequired++;
+        } else if (st === 'Submitted' || st === 'Completed') {
+          // Submitted by distributor and awaiting auditor review
+          // Do NOT include items that have already been submitted and are awaiting auditor review
         } else {
-           pending++;
+          // Awaiting action/submission from distributor (unsubmitted, Draft, Pending)
+          pending++;
         }
+      });
+
+      return {
+        total: records.length,
+        pending,
+        clarificationsRequired,
+        rejected,
+        accepted
+      };
+    }
+
+    // Fallback if no GL population records are loaded yet, but questionnaire responses exist for this audit/distributor
+    const uniqueItems = new Map<string, any>();
+    Object.values(questionnaireResponses).forEach((resp: any) => {
+      if (!resp) return;
+      if (selectedAuditFilter && selectedAuditFilter !== 'All Audits' && resp.engagement_id && cleanStr(resp.engagement_id) !== cleanStr(selectedAuditFilter)) {
+        return;
+      }
+      if (selectedDistributor && selectedDistributor !== 'All Distributors' && resp.distributor_id && cleanStr(resp.distributor_id) !== cleanStr(selectedDistributor)) {
+        return;
+      }
+      const key = String(resp.voucher_no || resp.voucherNo || resp.sample_id || resp.dbId || '').trim().toLowerCase();
+      if (key && !uniqueItems.has(key)) {
+        uniqueItems.set(key, resp);
       }
     });
 
-    return { total: records.length, mandatory, missing, pending, completed, clarification };
-  }, [records, questionnaireResponses]);
+    uniqueItems.forEach(resp => {
+      const st = resp?.status;
+      if (st === 'Accepted') {
+        accepted++;
+      } else if (st === 'Rejected') {
+        rejected++;
+      } else if (st === 'Clarification Required') {
+        clarificationsRequired++;
+      } else if (st === 'Submitted' || st === 'Completed') {
+        // Submitted
+      } else {
+        pending++;
+      }
+    });
+
+    return {
+      total: uniqueItems.size,
+      pending,
+      clarificationsRequired,
+      rejected,
+      accepted
+    };
+  }, [records, questionnaireResponses, selectedAuditFilter, selectedDistributor]);
 
   return (
     <div className="space-y-5 animate-fade-in text-slate-100">
@@ -865,30 +937,40 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
               <span>Sync Status</span>
             </button>
           </div>
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
-            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Total</p>
-              <p className="text-xl font-bold text-slate-200">{samplingStats.total}</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+              <div>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">TOTAL</p>
+                <p className="text-xl font-bold text-slate-200">{samplingStats.total}</p>
+              </div>
             </div>
-            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Mandatory</p>
-              <p className="text-xl font-bold text-slate-200">{samplingStats.mandatory}</p>
+            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 flex flex-col justify-between">
+              <div>
+                <p className="text-[10px] font-bold text-amber-400 uppercase tracking-wider mb-1">PENDING</p>
+                <p className="text-xl font-bold text-amber-300">{samplingStats.pending}</p>
+              </div>
+              <p className="text-[10px] text-amber-500/70 font-medium mt-1">From Distributor</p>
             </div>
-            <div className="bg-rose-950/20 border border-rose-900/30 rounded-xl p-3">
-              <p className="text-[10px] font-bold text-rose-500/70 uppercase tracking-wider mb-1">Missing</p>
-              <p className="text-xl font-bold text-rose-400">{samplingStats.missing}</p>
+            <div className="bg-purple-950/20 border border-purple-900/30 rounded-xl p-3 flex flex-col justify-between">
+              <div>
+                <p className="text-[10px] font-bold text-purple-400 uppercase tracking-wider mb-1">CLARIFICATIONS REQUIRED</p>
+                <p className="text-xl font-bold text-purple-300">{samplingStats.clarificationsRequired}</p>
+              </div>
+              <p className="text-[10px] text-purple-400/70 font-medium mt-1">From Distributor</p>
             </div>
-            <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3">
-              <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1">Pending</p>
-              <p className="text-xl font-bold text-slate-200">{samplingStats.pending}</p>
+            <div className="bg-rose-950/20 border border-rose-900/30 rounded-xl p-3 flex flex-col justify-between">
+              <div>
+                <p className="text-[10px] font-bold text-rose-500 uppercase tracking-wider mb-1">REJECTED</p>
+                <p className="text-xl font-bold text-rose-400">{samplingStats.rejected}</p>
+              </div>
+              <p className="text-[10px] text-rose-400/70 font-medium mt-1">By Auditor</p>
             </div>
-            <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3">
-              <p className="text-[10px] font-bold text-emerald-500/70 uppercase tracking-wider mb-1">Completed</p>
-              <p className="text-xl font-bold text-emerald-400">{samplingStats.completed}</p>
-            </div>
-            <div className="bg-amber-950/20 border border-amber-900/30 rounded-xl p-3">
-              <p className="text-[10px] font-bold text-amber-500/70 uppercase tracking-wider mb-1">Clarification</p>
-              <p className="text-xl font-bold text-amber-400">{samplingStats.clarification}</p>
+            <div className="bg-emerald-950/20 border border-emerald-900/30 rounded-xl p-3 flex flex-col justify-between">
+              <div>
+                <p className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider mb-1">ACCEPTED</p>
+                <p className="text-xl font-bold text-emerald-400">{samplingStats.accepted}</p>
+              </div>
+              <p className="text-[10px] text-emerald-400/70 font-medium mt-1">By Auditor</p>
             </div>
           </div>
         </div>

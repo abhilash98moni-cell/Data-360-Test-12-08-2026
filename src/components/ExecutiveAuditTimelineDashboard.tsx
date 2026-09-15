@@ -276,7 +276,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
       </div>
 
       <div>
-        /* PORTFOLIO OVERVIEW */
+        
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
           
           {/* KPI CARDS */}
@@ -442,7 +442,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
       </div>
 
       {selectedEngId && (
-        /* DETAILED DISTRIBUTOR VIEW */
+        
         <div className="space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
           
           {/* DISTRIBUTOR HEADER */}
