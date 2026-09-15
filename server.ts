@@ -2,7 +2,7 @@ import express from 'express';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { createServer as createViteServer } from 'vite';
+
 import dotenv from 'dotenv';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
@@ -6702,37 +6702,6 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     }
   });
 
-  // Safe 404 handler for all unmatched API routes to prevent returning HTML index.html
-  app.all('/api/*', (req: any, res: any) => {
-    res.status(404).json({
-      success: false,
-      error: `API route not found: ${req.method} ${req.originalUrl}`
-    });
-  });
-
-  // Global error handler for API routes
-  app.use((err: any, req: any, res: any, next: any) => {
-    if (req.originalUrl?.startsWith('/api') || req.url?.startsWith('/api')) {
-      console.error('API Error handler:', err);
-      return res.status(err.status || 500).json({
-        success: false,
-        error: err?.message || 'Internal Server Error'
-      });
-    }
-    next(err);
-  });
-
-  // Vite middleware for development or static file serving for production
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    
   // ====================================================================
   // Auditor Distributor Access API
   // ====================================================================
@@ -6813,6 +6782,38 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       res.status(500).json({ success: false, error: err.message });
     }
   });
+  // Safe 404 handler for all unmatched API routes to prevent returning HTML index.html
+  app.all('/api/*', (req: any, res: any) => {
+    res.status(404).json({
+      success: false,
+      error: `API route not found: ${req.method} ${req.originalUrl}`
+    });
+  });
+
+  // Global error handler for API routes
+  app.use((err: any, req: any, res: any, next: any) => {
+    if (req.originalUrl?.startsWith('/api') || req.url?.startsWith('/api')) {
+      console.error('API Error handler:', err);
+      return res.status(err.status || 500).json({
+        success: false,
+        error: err?.message || 'Internal Server Error'
+      });
+    }
+    next(err);
+  });
+
+  // Vite middleware for development or static file serving for production
+  if (process.env.NODE_ENV !== 'production') {
+    const { createServer: createViteServer } = await import('vite');
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: 'spa',
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), 'dist');
+    app.use(express.static(distPath));
+    
 
   app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
