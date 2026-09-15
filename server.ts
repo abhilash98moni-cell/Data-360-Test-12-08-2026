@@ -3857,6 +3857,18 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
   // STAGE 4A: EVIDENCE REVIEW MODULE API ENDPOINTS (PRODUCTION HARDENED)
   // ====================================================================
 
+  
+  app.get("/api/engagement-timeline", authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { auditId, distributorName, auditStartDate } = req.query;
+      const { calculateAuditTimeline } = await import("./src/services/timelineService.js");
+      const stages = await calculateAuditTimeline(auditId, distributorName, auditStartDate);
+      res.json({ success: true, stages });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   // GET /api/evidence - Fetch evidence records from Supabase DB with multi-tenancy
   // Sampling Population Upload Endpoint
   app.post('/api/sampling/upload', upload.single('file'), authenticateRequest, async (req: any, res: any) => {
@@ -4498,6 +4510,18 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     }
   });
 
+  
+  app.get("/api/engagement-timeline", authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { auditId, distributorName, auditStartDate } = req.query;
+      const { calculateAuditTimeline } = await import("./src/services/timelineService.js");
+      const stages = await calculateAuditTimeline(auditId, distributorName, auditStartDate);
+      res.json({ success: true, stages });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   // GET /api/evidence/:id - Get single evidence details from Supabase DB
   app.get('/api/evidence/:id', authenticateRequest, async (req: any, res: any) => {
     try {
@@ -4550,6 +4574,18 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       return res.json({ success: true, record });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
+    }
+  });
+
+  
+  app.get("/api/engagement-timeline", authenticateRequest, async (req: any, res: any) => {
+    try {
+      const { auditId, distributorName, auditStartDate } = req.query;
+      const { calculateAuditTimeline } = await import("./src/services/timelineService.js");
+      const stages = await calculateAuditTimeline(auditId, distributorName, auditStartDate);
+      res.json({ success: true, stages });
+    } catch (e: any) {
+      res.status(500).json({ success: false, error: e.message });
     }
   });
 
