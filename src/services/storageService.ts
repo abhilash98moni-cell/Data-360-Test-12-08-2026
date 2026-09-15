@@ -115,12 +115,16 @@ export class GoogleDriveStorageService implements StorageService {
       if (!fs.existsSync(this.uploadsDir)) {
         fs.mkdirSync(this.uploadsDir, { recursive: true });
       }
-      if (fileId && !fileId.includes('/') && !fileId.includes('\\')) {
-        fs.writeFileSync(path.join(this.uploadsDir, `${fileId}.bin`), buffer);
-        fs.writeFileSync(path.join(this.uploadsDir, `${fileId}.meta.json`), JSON.stringify({ fileName, mimeType }));
+      if (fileId) {
+        const safeKey = fileId.replace(/[\/\\]/g, '___');
+        fs.writeFileSync(path.join(this.uploadsDir, `${safeKey}.bin`), buffer);
+        fs.writeFileSync(path.join(this.uploadsDir, `${safeKey}.meta.json`), JSON.stringify({ fileName, mimeType }));
       }
-      if (fileName && !fileName.includes('/') && !fileName.includes('\\')) {
-        fs.writeFileSync(path.join(this.uploadsDir, fileName), buffer);
+      if (fileName) {
+        const safeBaseName = path.basename(fileName);
+        if (safeBaseName) {
+          fs.writeFileSync(path.join(this.uploadsDir, safeBaseName), buffer);
+        }
       }
     } catch (e: any) {
       // Non-fatal disk write error
@@ -139,33 +143,37 @@ export class GoogleDriveStorageService implements StorageService {
       return this.binaryBufferStore.get(baseName)!;
     }
 
+    const safeKey = cleanId.replace(/[\/\\]/g, '___');
+    if (this.binaryBufferStore.has(safeKey)) {
+      return this.binaryBufferStore.get(safeKey)!;
+    }
+
     try {
-      const searchNames = Array.from(new Set([cleanId, baseName, cleanId.replace(/^ev-/, '')])).filter(Boolean);
-      for (const sName of searchNames) {
-        if (!sName || sName.includes('/') || sName.includes('\\')) continue;
-        const binPath = path.join(this.uploadsDir, `${sName}.bin`);
-        const metaPath = path.join(this.uploadsDir, `${sName}.meta.json`);
+      const searchKeys = [cleanId, baseName, safeKey, cleanId.replace(/^ev-/, '')].filter(Boolean);
+      for (const key of searchKeys) {
+        const binPath = path.join(this.uploadsDir, `${key}.bin`);
+        const metaPath = path.join(this.uploadsDir, `${key}.meta.json`);
         if (fs.existsSync(binPath)) {
           const buffer = fs.readFileSync(binPath);
-          let fileName = sName;
-          let mimeType = 'application/octet-stream';
+          let resolvedName = baseName || key;
+          let resolvedMime = 'application/octet-stream';
           if (fs.existsSync(metaPath)) {
             try {
               const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-              if (meta.fileName) fileName = meta.fileName;
-              if (meta.mimeType) mimeType = meta.mimeType;
+              if (meta.fileName) resolvedName = meta.fileName;
+              if (meta.mimeType) resolvedMime = meta.mimeType;
             } catch (_) {}
           }
-          const entry = { buffer, fileName, mimeType: this.determineMimeType(fileName, mimeType) };
+          const entry = { buffer, fileName: resolvedName, mimeType: this.determineMimeType(resolvedName, resolvedMime) };
           this.binaryBufferStore.set(cleanId, entry);
           return entry;
         }
 
-        const directPath = path.join(this.uploadsDir, sName);
-        if (fs.existsSync(directPath)) {
+        const directPath = path.join(this.uploadsDir, key);
+        if (fs.existsSync(directPath) && fs.statSync(directPath).isFile()) {
           const buffer = fs.readFileSync(directPath);
-          const mime = this.determineMimeType(sName);
-          const entry = { buffer, fileName: sName, mimeType: mime };
+          const mime = this.determineMimeType(key);
+          const entry = { buffer, fileName: key, mimeType: mime };
           this.binaryBufferStore.set(cleanId, entry);
           return entry;
         }
@@ -192,117 +200,45 @@ export class GoogleDriveStorageService implements StorageService {
     return null;
   }
 
-  private generateValidPdfBuffer(title: string, details: string): Buffer {
-    const cleanTitle = (title || 'Evidence Document').replace(/[()]/g, '');
-    const cleanDetails = (details || 'Authoritative evidence document for FY26 engagement review').replace(/[()]/g, '');
-    const textStream = `BT\n/F1 16 Tf\n50 720 Td\n(${cleanTitle}) Tj\n0 -28 Td\n/F1 10 Tf\n(${cleanDetails}) Tj\n0 -20 Td\n(Verified Questionnaire Evidence Document - FY26) Tj\nET`;
-    const streamLen = Buffer.byteLength(textStream);
-    const pdfContent = `%PDF-1.4
-1 0 obj
-<< /Type /Catalog /Pages 2 0 R >>
-endobj
-2 0 obj
-<< /Type /Pages /Kids [3 0 R] /Count 1 >>
-endobj
-3 0 obj
-<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> /MediaBox [0 0 612 792] /Contents 5 0 R >>
-endobj
-4 0 obj
-<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
-endobj
-5 0 obj
-<< /Length ${streamLen} >>
-stream
-${textStream}
-endstream
-endobj
-xref
-0 6
-0000000000 65535 f 
-0000000009 00000 n 
-0000000058 00000 n 
-0000000115 00000 n 
-0000000244 00000 n 
-0000000318 00000 n 
-trailer
-<< /Size 6 /Root 1 0 R >>
-startxref
-500
-%%EOF`;
-    return Buffer.from(pdfContent, 'utf-8');
+  private bucketFilesCache: { files: Array<{ path: string; name: string; id: string | null; metadata?: any }>; timestamp: number } | null = null;
+
+  public clearBucketCache() {
+    this.bucketFilesCache = null;
   }
 
-  private async generateValidPptxBuffer(fileName: string, title?: string): Promise<Buffer> {
-    const JSZip = (await import('jszip')).default;
-    const zip = new JSZip();
-    const docTitle = (title || fileName || 'Business Questionnaire Presentation').replace(/[<&>]/g, '');
-    
-    zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
-      '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
-      '<Default Extension="xml" ContentType="application/xml"/>' +
-      '<Override PartName="/ppt/presentation.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml"/>' +
-      '<Override PartName="/ppt/slides/slide1.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>' +
-      '<Override PartName="/ppt/slides/slide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/>' +
-      '</Types>');
-
-    zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="ppt/presentation.xml"/>' +
-      '</Relationships>');
-
-    zip.file('ppt/presentation.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<p:presentation xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
-      '<p:sldIdLst><p:sldId id="256" r:id="rId1"/><p:sldId id="257" r:id="rId2"/></p:sldIdLst>' +
-      '</p:presentation>');
-
-    zip.file('ppt/_rels/presentation.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-      '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/>' +
-      '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide2.xml"/>' +
-      '</Relationships>');
-
-    zip.file('ppt/slides/slide1.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">' +
-      '<p:cSld><p:spTree>' +
-      '<p:sp><p:txBody><a:p><a:r><a:t>' + docTitle + '</a:t></a:r></a:p></p:txBody></p:sp>' +
-      '<p:sp><p:txBody><a:p><a:r><a:t>FY26 Business Questionnaire &amp; Controls Evidence</a:t></a:r></a:p></p:txBody></p:sp>' +
-      '</p:spTree></p:cSld></p:sld>');
-
-    zip.file('ppt/slides/slide2.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
-      '<p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">' +
-      '<p:cSld><p:spTree>' +
-      '<p:sp><p:txBody><a:p><a:r><a:t>Executive Summary &amp; Review Checklist</a:t></a:r></a:p></p:txBody></p:sp>' +
-      '<p:sp><p:txBody><a:p><a:r><a:t>• Document submitted as authoritative questionnaire evidence</a:t></a:r></a:p>' +
-      '<a:p><a:r><a:t>• Verified for Distributor Channel Engagement Workspace</a:t></a:r></a:p>' +
-      '<a:p><a:r><a:t>• Controls and reconciliation items recorded</a:t></a:r></a:p></p:txBody></p:sp>' +
-      '</p:spTree></p:cSld></p:sld>');
-
-    return await zip.generateAsync({ type: 'nodebuffer' });
-  }
-
-  private generateValidPngBuffer(fileName?: string): Buffer {
-    // 1x1 transparent PNG buffer
-    return Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkWPjfDwAEfQHzg5c44wAAAABJRU5ErkJggg==', 'base64');
-  }
-
-  private generateValidXlsxBuffer(fileName: string): Buffer {
-    // Generate dummy transactions for testing if the original file is lost from memory
-    const data = [];
-    for(let i=1; i<=15; i++) {
-       data.push({
-          "TransactionID": `TX-${Math.floor(Math.random() * 10000)}`,
-          "Date": "2026-08-15",
-          "Vendor": `Vendor ${i}`,
-          "Description": `Sample invoice ${i} for ${fileName}`,
-          "Amount": (Math.random() * 5000 + 100).toFixed(2)
-       });
+  private async getBucketFiles(client: any): Promise<Array<{ path: string; name: string; id: string | null; metadata?: any }>> {
+    const now = Date.now();
+    if (this.bucketFilesCache && (now - this.bucketFilesCache.timestamp < 15000)) {
+      return this.bucketFilesCache.files;
     }
-    const worksheet = XLSX.utils.json_to_sheet(data);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Transactions");
-    const excelBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    return excelBuffer;
+
+    const allFiles: Array<{ path: string; name: string; id: string | null; metadata?: any }> = [];
+
+    const walk = async (folder: string) => {
+      try {
+        const { data, error } = await client.storage.from('evidence-files').list(folder, { limit: 100 });
+        if (error || !data) return;
+        const subfolders: string[] = [];
+        for (const item of data) {
+          const itemPath = folder ? `${folder}/${item.name}` : item.name;
+          if (item.id === null) {
+            subfolders.push(itemPath);
+          } else {
+            allFiles.push({
+              path: itemPath,
+              name: item.name,
+              id: item.id,
+              metadata: item.metadata
+            });
+          }
+        }
+        await Promise.all(subfolders.map(sf => walk(sf)));
+      } catch (_) {}
+    };
+
+    await walk('');
+    this.bucketFilesCache = { files: allFiles, timestamp: now };
+    return allFiles;
   }
 
 
@@ -560,6 +496,7 @@ startxref
     } catch (e) {}
 
     this.saveBinaryBuffer(fileId, fileName, mimeType, fileBuffer, [safeFileName]);
+    this.clearBucketCache();
 
     return fileMeta;
   }
@@ -802,16 +739,35 @@ startxref
       }
     }
 
-    // F. Search bucket for any file ending with the target filename
+    // F. Search bucket for matching file
     try {
+      const bucketFiles = await this.getBucketFiles(client);
       const searchTarget = (fallbackFileName || cleanId.split('/').pop() || '').toLowerCase();
-      if (searchTarget && searchTarget.includes('.')) {
-        const matchingPath = await this.findFileInBucket(client, searchTarget);
-        if (matchingPath) {
-          const { data, error } = await client.storage.from('evidence-files').download(matchingPath);
-          if (!error && data) {
-            const buffer = Buffer.from(await data.arrayBuffer());
-            const actualName = fallbackFileName || matchingPath.split('/').pop() || fileName;
+      const targetClean = searchTarget.replace(/[^a-zA-Z0-9.]/g, '');
+
+      // Look for best match in bucket
+      const matched = bucketFiles.find(f => {
+        const fPath = f.path.toLowerCase();
+        const fName = f.name.toLowerCase();
+        const fCleanName = f.name.replace(/^\d+_/, '').toLowerCase();
+
+        return (
+          fPath === cleanId.toLowerCase() ||
+          fPath.endsWith(`/${cleanId.toLowerCase()}`) ||
+          fName === searchTarget ||
+          fCleanName === searchTarget ||
+          (cleanId.startsWith('gdrive-') && fPath.includes(cleanId.toLowerCase())) ||
+          (targetClean && f.name.replace(/[^a-zA-Z0-9.]/g, '').toLowerCase().includes(targetClean))
+        );
+      });
+
+      if (matched) {
+        const { data, error } = await client.storage.from('evidence-files').download(matched.path);
+        if (!error && data) {
+          const arrayBuf = await data.arrayBuffer();
+          if (arrayBuf.byteLength > 0) {
+            const buffer = Buffer.from(arrayBuf);
+            const actualName = fallbackFileName || matched.name.replace(/^\d+_/, '') || fileName;
             const mimeType = this.determineMimeType(actualName, data.type);
             this.saveBinaryBuffer(cleanId, actualName, mimeType, buffer);
             return { buffer, fileName: actualName, mimeType };
@@ -828,47 +784,8 @@ startxref
       return diskBuffer;
     }
 
-    // H. Universal fallback: Generate valid, format-compliant document buffer matching the requested file type
-    const ext = (fileName || cleanId || '').split('.').pop()?.toLowerCase() || '';
-    let genBuffer: Buffer;
-    let mimeType: string;
-
-    if (ext === 'docx' || ext === 'doc' || isTieOut) {
-      genBuffer = await this.generateCanonicalDocx(fileName || 'Evidence_Document.docx', 'FY26 Distributor Business Questionnaire Evidence');
-      mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-    } else if (ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
-      genBuffer = this.generateValidXlsxBuffer(fileName || 'Evidence_Reconciliation.xlsx');
-      mimeType = ext === 'csv' ? 'text/csv' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-    } else if (ext === 'pptx' || ext === 'ppt') {
-      genBuffer = await this.generateValidPptxBuffer(fileName || 'Evidence_Presentation.pptx', 'FY26 Business Questionnaire Presentation');
-      mimeType = 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
-    } else if (ext === 'pdf') {
-      genBuffer = this.generateValidPdfBuffer(fileName || 'Evidence_Document.pdf', 'Authoritative Questionnaire Evidence - FY26');
-      mimeType = 'application/pdf';
-    } else if (['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext)) {
-      genBuffer = this.generateValidPngBuffer(fileName);
-      mimeType = this.determineMimeType(fileName, 'image/png');
-    } else {
-      genBuffer = Buffer.from(`Authoritative Business Questionnaire Evidence Record: ${fileName || cleanId}\nEngagement: eng-101\nStatus: Verified\nTimestamp: ${new Date().toISOString()}`, 'utf-8');
-      mimeType = 'text/plain';
-    }
-
-    // Cache generated buffer in memory and sync to Supabase bucket
-    this.saveBinaryBuffer(cleanId, fileName, mimeType, genBuffer);
-    this.saveBinaryBuffer(fileName, fileName, mimeType, genBuffer);
-    try {
-      const storageSyncPath = cleanId.includes('/') ? cleanId : `canonical/${fileName}`;
-      client.storage.from('evidence-files').upload(storageSyncPath, genBuffer, {
-        contentType: mimeType,
-        upsert: true
-      }).catch(() => {});
-    } catch (_) {}
-
-    return {
-      buffer: genBuffer,
-      fileName,
-      mimeType
-    };
+    // If file is not found in memory, bucket, or disk, strictly throw an error
+    throw new Error(`Requested document "${fallbackFileName || cleanId}" was not found in storage. Original uploaded file could not be retrieved.`);
   }
 
   private determineMimeType(fileName: string, suggestedType?: string): string {
@@ -889,105 +806,6 @@ startxref
     if (ext === 'gif') return 'image/gif';
     if (ext === 'svg') return 'image/svg+xml';
     return suggestedType || 'application/octet-stream';
-  }
-
-  private async findFileInBucket(client: any, targetFileNameLower: string, folder = ''): Promise<string | null> {
-    const { data } = await client.storage.from('evidence-files').list(folder, { limit: 100 });
-    if (!data) return null;
-    for (const item of data) {
-      const fullPath = folder ? `${folder}/${item.name}` : item.name;
-      if (item.id === null) {
-        const sub = await this.findFileInBucket(client, targetFileNameLower, fullPath);
-        if (sub) return sub;
-      } else if (item.name.toLowerCase() === targetFileNameLower || item.name.toLowerCase().endsWith(`_${targetFileNameLower}`)) {
-        return fullPath;
-      }
-    }
-    return null;
-  }
-
-  private async generateCanonicalDocx(title: string, subtitle: string): Promise<Buffer> {
-    const docx = await import('docx');
-    const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType } = docx;
-
-    const doc = new Document({
-      sections: [{
-        properties: {},
-        children: [
-          new Paragraph({
-            children: [
-              new TextRun({ text: title, bold: true, size: 36, color: '1E3A8A' })
-            ]
-          }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: subtitle, italics: true, size: 24, color: '475569' })
-            ]
-          }),
-          new Paragraph({ text: '' }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: 'Audit Engagement: eng-101 | Client: Apex Electronics Corp | Distributor: Midwest Trading Co.', size: 20 })
-            ]
-          }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: 'Status: Authoritative Evidence Verification Document', bold: true, size: 20, color: '15803D' })
-            ]
-          }),
-          new Paragraph({ text: '' }),
-          new Paragraph({
-            children: [
-              new TextRun({ text: 'This document provides complete tie-out reconciliation between distributor-reported channel sales and audited revenue ledgers for FY 2025-26. All variances have been traced and verified against primary transactional documentation.', size: 22 })
-            ]
-          }),
-          new Paragraph({ text: '' }),
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows: [
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Audit Item / Ref', bold: true })] })] }),
-                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'General Ledger ($)', bold: true })] })] }),
-                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Distributor Sales ($)', bold: true })] })] }),
-                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Variance ($)', bold: true })] })] }),
-                  new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Audit Verification', bold: true })] })] })
-                ]
-              }),
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph({ text: 'Hardware & Devices' })] }),
-                  new TableCell({ children: [new Paragraph({ text: '$12,450,800' })] }),
-                  new TableCell({ children: [new Paragraph({ text: '$12,450,800' })] }),
-                  new TableCell({ children: [new Paragraph({ text: '$0.00' })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Confirmed 100% Tie-out' })] })
-                ]
-              }),
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph({ text: 'Enterprise Subscriptions' })] }),
-                  new TableCell({ children: [new Paragraph({ text: '$3,890,250' })] }),
-                  new TableCell({ children: [new Paragraph({ text: '$3,890,250' })] }),
-                  new TableCell({ children: [new Paragraph({ text: '$0.00' })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Confirmed 100% Tie-out' })] })
-                ]
-              }),
-              new TableRow({
-                children: [
-                  new TableCell({ children: [new Paragraph({ text: 'Maintenance & Service' })] }),
-                  new TableCell({ children: [new Paragraph({ text: '$1,120,400' })] }),
-                  new TableCell({ children: [new Paragraph({ text: '$1,120,400' })] }),
-                  new TableCell({ children: [new Paragraph({ text: '$0.00' })] }),
-                  new TableCell({ children: [new Paragraph({ text: 'Confirmed 100% Tie-out' })] })
-                ]
-              })
-            ]
-          })
-        ]
-      }]
-    });
-
-    return await Packer.toBuffer(doc);
   }
 
   public async getFileMetadata(googleDriveFileId: string): Promise<FileMetadata | null> {
