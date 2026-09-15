@@ -525,7 +525,7 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={() => setIsCopilotOpen(false)}>
           <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-2xl h-[600px] shadow-2xl flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-800 flex justify-between items-center">
-               <h3 className="text-sm font-bold text-slate-200">Data360 AI Copilot</h3>
+               <h3 className="text-sm font-bold text-slate-200">DMP AI Copilot</h3>
                <button onClick={() => setIsCopilotOpen(false)} className="text-slate-400 hover:text-white">Close</button>
             </div>
             <div className="flex-1 p-6 flex items-center justify-center text-slate-500">

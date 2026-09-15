@@ -13,7 +13,7 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
   const [messages, setMessages] = useState([
     {
       sender: 'ai',
-      text: 'Hello! I am Data360 AI Copilot. I can analyze General Ledger populations, run Benford anomaly tests, draft observation memos, or explain BRD business rules.'
+      text: 'Hello! I am Distributor Monitoring Platform (DMP) AI Copilot. I can analyze General Ledger populations, run Benford anomaly tests, draft observation memos, or explain BRD business rules.'
     }
   ]);
   const [inputValue, setInputValue] = useState('');
@@ -75,7 +75,7 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
               <Sparkles className="h-4 w-4 animate-pulse text-amber-400" />
             </div>
             <div>
-              <h2 className="text-sm font-bold text-white">Data360 AI Audit Copilot</h2>
+              <h2 className="text-sm font-bold text-white">DMP AI Audit Copilot</h2>
               <p className="text-[10px] text-slate-400">Powered by Gemini 2.5 Flash & Audit Intelligence</p>
             </div>
           </div>

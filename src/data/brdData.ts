@@ -5,9 +5,9 @@ export const BRD_DOCUMENT_DATA: BRDSection[] = [
     id: 'sec-1',
     number: 1,
     title: 'Project Vision',
-    summary: 'Data360 aims to be the definitive multi-tenant SaaS platform empowering tier-1 audit firms to streamline distributor, vendor, dealer, compliance, financial, and forensic audits at scale.',
+    summary: 'Distributor Monitoring Platform (DMP) aims to be the definitive multi-tenant SaaS platform empowering tier-1 audit firms to streamline distributor, vendor, dealer, compliance, financial, and forensic audits at scale.',
     content: {
-      overview: 'Data360 is conceived as an enterprise-grade, multi-client SaaS Audit & Risk Management Platform engineered specifically for professional audit and accounting firms. The platform unifies fragmented fieldwork spreadsheets, disparate ERP integrations, sampling engines, and manual reporting into an end-to-end cloud workspace. By embedding AI-driven forensic anomaly detection and real-time client collaboration portals, Data360 drastically reduces audit cycle times while expanding sample coverage and leak discovery.',
+      overview: 'Distributor Monitoring Platform (DMP) is conceived as an enterprise-grade, multi-client SaaS Audit & Risk Management Platform engineered specifically for professional audit and accounting firms. The platform unifies fragmented fieldwork spreadsheets, disparate ERP integrations, sampling engines, and manual reporting into an end-to-end cloud workspace. By embedding AI-driven forensic anomaly detection and real-time client collaboration portals, DMP drastically reduces audit cycle times while expanding sample coverage and leak discovery.',
       subsections: [
         {
           subtitle: 'Core Value Proposition',
@@ -28,7 +28,7 @@ export const BRD_DOCUMENT_DATA: BRDSection[] = [
     title: 'Business Objectives',
     summary: 'Measurable strategic goals to elevate audit firm productivity, revenue capture, accuracy, and client retention.',
     content: {
-      overview: 'The primary business objectives for deploying Data360 across audit firm practices encompass cost reduction, cycle time acceleration, audit quality enhancement, and new recurring software-led audit services.',
+      overview: 'The primary business objectives for deploying DMP across audit firm practices encompass cost reduction, cycle time acceleration, audit quality enhancement, and new recurring software-led audit services.',
       subsections: [
         {
           subtitle: 'Key Strategic Metrics',
@@ -49,7 +49,7 @@ export const BRD_DOCUMENT_DATA: BRDSection[] = [
     title: 'Stakeholders',
     summary: 'Internal and external key players, leadership sponsors, and governance bodies.',
     content: {
-      overview: 'The deployment and continuous operation of Data360 involves stakeholders across the Audit Firm, Enterprise Clients, Audited Entities (Distributors/Vendors), and Technical Oversight committees.',
+      overview: 'The deployment and continuous operation of DMP involves stakeholders across the Audit Firm, Enterprise Clients, Audited Entities (Distributors/Vendors), and Technical Oversight committees.',
       table: {
         headers: ['Stakeholder Group', 'Role', 'Key Responsibilities', 'Impact Level'],
         rows: [
@@ -76,7 +76,7 @@ export const BRD_DOCUMENT_DATA: BRDSection[] = [
           details: [
             'Goals: High-level portfolio visibility across 15+ multi-million dollar client engagements.',
             'Pain Points: Lack of consolidated real-time reporting, surprise delays near report deadlines.',
-            'Data360 Needs: Executive risk heatmaps, overall audit progress indicators, one-click sign-off workflow.'
+            'DMP Needs: Executive risk heatmaps, overall audit progress indicators, one-click sign-off workflow.'
           ]
         },
         {
@@ -84,7 +84,7 @@ export const BRD_DOCUMENT_DATA: BRDSection[] = [
           details: [
             'Goals: Detecting revenue leakage, phantom stock, duplicate billing, and kickback schemes in vendor/distributor ledgers.',
             'Pain Points: Manual Excel formulas failing on millions of ERP ledger rows; inability to run statistical sampling easily.',
-            'Data360 Needs: Automated Benford\'s Law visualization, duplicate detection algorithm, MUS sampling builder, evidence chain-of-custody log.'
+            'DMP Needs: Automated Benford\'s Law visualization, duplicate detection algorithm, MUS sampling builder, evidence chain-of-custody log.'
           ]
         },
         {
@@ -92,7 +92,7 @@ export const BRD_DOCUMENT_DATA: BRDSection[] = [
           details: [
             'Goals: Swiftly resolving audit queries, submitting requested invoices/inventory proofs, and clearing CAPAs.',
             'Pain Points: Unorganized email threads, lost attachments, unclear observation deadlines.',
-            'Data360 Needs: Secure auditee portal, drag-and-drop evidence vault, direct response threads with status trackers.'
+            'DMP Needs: Secure auditee portal, drag-and-drop evidence vault, direct response threads with status trackers.'
           ]
         }
       ]
@@ -102,7 +102,7 @@ export const BRD_DOCUMENT_DATA: BRDSection[] = [
     id: 'sec-5',
     number: 5,
     title: 'Scope (In-Scope Modules)',
-    summary: 'Comprehensive functional boundaries included in the Data360 MVP and Enterprise Release.',
+    summary: 'Comprehensive functional boundaries included in the DMP MVP and Enterprise Release.',
     content: {
       overview: 'The platform encompasses 6 core functional pillars delivering end-to-end audit lifecycle automation:',
       items: [
@@ -123,10 +123,10 @@ export const BRD_DOCUMENT_DATA: BRDSection[] = [
     content: {
       overview: 'To ensure focused delivery and high stability, the following capabilities are explicitly deferred to future phases:',
       items: [
-        'Automated Tax Return Filing: Data360 will identify tax compliance anomalies but will not interface directly with government tax portals.',
+        'Automated Tax Return Filing: DMP will identify tax compliance anomalies but will not interface directly with government tax portals.',
         'Live Real-time Payroll Processing: Direct execution of employee paychecks is excluded; payroll audit testing remains advisory.',
         'Custom Native Mobile Hardware Scanners: Field auditors will use responsive web interface on tablets/laptops rather than standalone barcode hardware devices.',
-        'Direct Third-Party ERP Database Mutation: Data360 reads and ingests SAP/Oracle/NetSuite data via APIs/exports but will NEVER write back directly into client core accounting ledgers.'
+        'Direct Third-Party ERP Database Mutation: DMP reads and ingests SAP/Oracle/NetSuite data via APIs/exports but will NEVER write back directly into client core accounting ledgers.'
       ]
     }
   },

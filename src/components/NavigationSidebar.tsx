@@ -414,7 +414,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
       <div className="p-3 border-t border-slate-800 bg-slate-950/40 text-[11px] text-slate-500 flex items-center justify-between">
         <div className="flex items-center gap-1.5">
           <Scale className="h-3.5 w-3.5 text-indigo-400" />
-          {!isCollapsed && <span>Data360 Core v2.4</span>}
+          {!isCollapsed && <span>DMP Core v2.4</span>}
         </div>
         {!isCollapsed && <span className="text-[10px] text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">SOC 2 Ready</span>}
       </div>

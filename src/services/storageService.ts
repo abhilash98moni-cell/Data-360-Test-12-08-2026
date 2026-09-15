@@ -458,10 +458,24 @@ export class GoogleDriveStorageService implements StorageService {
     const objectPath = `${folderPath}/${Date.now()}_${safeFileName}`;
     
     const client = getSupabaseServerClient();
-    const { data, error } = await client.storage.from('evidence-files').upload(objectPath, fileBuffer, {
+    let { data, error } = await client.storage.from('evidence-files').upload(objectPath, fileBuffer, {
       contentType: mimeType,
       upsert: true
     });
+    
+    // Fallback: if the bucket doesn't exist, create it and retry.
+    // This is necessary if the production database hasn't had the schema applied.
+    if (error && error.message.includes('Bucket not found')) {
+      console.warn('Bucket "evidence-files" not found. Creating bucket automatically...');
+      await client.storage.createBucket('evidence-files', { public: false });
+      
+      const retry = await client.storage.from('evidence-files').upload(objectPath, fileBuffer, {
+        contentType: mimeType,
+        upsert: true
+      });
+      data = retry.data;
+      error = retry.error;
+    }
     
     if (error) {
       console.error('Supabase upload error:', error);

@@ -1154,7 +1154,7 @@ export const INITIAL_IIR_AUDIT_TRAIL: IIRAuditTrail[] = [
     role: 'Distributor',
     timestamp: '2026-08-01 07:30:12',
     ipAddress: '192.168.1.104 (Authenticated SSO)',
-    details: 'Logged into Data360 Initial Information Request Portal'
+    details: 'Logged into Distributor Monitoring Platform (DMP) Initial Information Request Portal'
   },
   {
     id: 'trl-102',

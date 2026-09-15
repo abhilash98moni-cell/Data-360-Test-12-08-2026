@@ -48,14 +48,14 @@ export interface SystemUser {
 const INITIAL_SYSTEM_USERS: SystemUser[] = [
   {
     id: 'usr-0',
-    name: 'Data360 Admin',
+    name: 'DMP Admin',
     email: 'admin@data360.io',
     role: 'Platform Super Admin',
-    organization: 'Data360 Platform Core',
+    organization: 'Distributor Monitoring Platform Core',
     tenantType: 'Platform',
     status: 'Active',
     lastActive: '2 mins ago',
-    avatarInitials: 'D3',
+    avatarInitials: 'DM',
     assignedAuditsCount: 124
   },
   {
@@ -501,7 +501,7 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
               <span>Multi-Tenant Architecture & 7-Level User Hierarchy</span>
             </h3>
             <p className="text-xs text-slate-400 mt-1">
-              Data360 isolates data securely across the hierarchy while allowing audit teams to seamlessly manage clients and distributors.
+              Distributor Monitoring Platform (DMP) isolates data securely across the hierarchy while allowing audit teams to seamlessly manage clients and distributors.
             </p>
           </div>
 
@@ -513,7 +513,7 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
               </div>
               <p className="text-[10px] font-bold uppercase text-purple-400">Level 1: Platform</p>
               <h4 className="font-bold text-white text-sm">Platform Super Admin</h4>
-              <p className="text-xs text-slate-400 mt-1">Owns Data360 core system. Manages licenses, audit firm tenants, system monitoring & security logs.</p>
+              <p className="text-xs text-slate-400 mt-1">Owns DMP core system. Manages licenses, audit firm tenants, system monitoring & security logs.</p>
             </div>
 
             {/* Level 2 */}
@@ -557,7 +557,7 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
               <Shield className="h-5 w-5 text-indigo-400" />
               <span>Role-Based Access Control (RBAC) Master Matrix</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-1">Configurable granular capability permissions mapped across Data360 platform roles.</p>
+            <p className="text-xs text-slate-400 mt-1">Configurable granular capability permissions mapped across DMP platform roles.</p>
           </div>
 
           <div className="overflow-x-auto">
@@ -709,7 +709,7 @@ export const MasterControlView: React.FC<MasterControlViewProps> = ({ currentUse
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <h3 className="font-bold text-white text-base flex items-center gap-2">
                 <UserPlus className="h-5 w-5 text-indigo-400" />
-                <span>Invite New User to Data360</span>
+                <span>Invite New User to DMP</span>
               </h3>
               <button onClick={() => setIsInviteModalOpen(false)} className="text-slate-400 hover:text-white">✕</button>
             </div>

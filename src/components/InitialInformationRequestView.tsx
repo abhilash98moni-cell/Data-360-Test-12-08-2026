@@ -3144,7 +3144,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-white">Confirm Final IRL Submission</h3>
-                    <p className="text-xs text-slate-400">Data360 Initial Information Request List</p>
+                    <p className="text-xs text-slate-400">Distributor Monitoring Platform (DMP) Initial Information Request List</p>
                   </div>
                 </div>
 

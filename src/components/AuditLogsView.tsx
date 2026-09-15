@@ -141,7 +141,7 @@ export const AuditLogsView: React.FC<AuditLogsViewProps> = ({ currentUser }) => 
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Data360_Audit_Trail_${new Date().toISOString().split('T')[0]}.csv`;
+    a.download = `DMP_Audit_Trail_${new Date().toISOString().split('T')[0]}.csv`;
     a.click();
   };
 

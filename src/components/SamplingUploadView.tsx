@@ -706,7 +706,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
     const ws = XLSX.utils.aoa_to_sheet([...sampleHeaders, ...sampleData]);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'General_Ledger_Template');
-    XLSX.writeFile(wb, 'Data360_GL_Population_Template.xlsx');
+    XLSX.writeFile(wb, 'DMP_GL_Population_Template.xlsx');
   };
 
   // Filtered Records

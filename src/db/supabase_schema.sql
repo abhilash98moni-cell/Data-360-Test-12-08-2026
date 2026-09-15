@@ -415,3 +415,32 @@ CREATE POLICY "Auditors read own access" ON public.auditor_distributor_access
   FOR SELECT USING (
     auditor_user_id = auth.uid()
   );
+
+-- ====================================================================
+-- STORAGE SCHEMA
+-- ====================================================================
+
+-- 1. Create the canonical 'evidence-files' bucket if it doesn't exist
+INSERT INTO storage.buckets (id, name, public)
+VALUES ('evidence-files', 'evidence-files', false)
+ON CONFLICT (id) DO NOTHING;
+
+-- 2. Storage Policies for evidence-files
+-- Allow authenticated users to upload files
+CREATE POLICY "Allow authenticated users to upload evidence"
+ON storage.objects FOR INSERT
+TO authenticated
+WITH CHECK (bucket_id = 'evidence-files');
+
+-- Allow authenticated users to view/download files
+CREATE POLICY "Allow authenticated users to view evidence"
+ON storage.objects FOR SELECT
+TO authenticated
+USING (bucket_id = 'evidence-files');
+
+-- Allow authenticated users to update their own files (or any file, as needed)
+CREATE POLICY "Allow authenticated users to update evidence"
+ON storage.objects FOR UPDATE
+TO authenticated
+USING (bucket_id = 'evidence-files');
+

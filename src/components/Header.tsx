@@ -118,7 +118,7 @@ export const Header: React.FC<HeaderProps> = ({
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-bold text-base sm:text-lg tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">
-                  Data360
+                  DMP
                 </span>
                 <span className="hidden sm:inline-block text-[9px] uppercase tracking-wider px-1.5 py-0.5 rounded font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
                   SaaS
@@ -309,7 +309,7 @@ const SupabaseHeaderChecker: React.FC = () => {
       if (!contentType.includes('application/json')) {
         setStatus({
           connected: false,
-          error: `Unable to connect to the Data360 database. Server returned non-JSON response (${res.status}).`
+          error: `Unable to connect to the DMP database. Server returned non-JSON response (${res.status}).`
         });
         return;
       }
@@ -319,7 +319,7 @@ const SupabaseHeaderChecker: React.FC = () => {
       }
       setStatus(data);
     } catch (err: any) {
-      setStatus({ connected: false, error: err.message || 'Unable to connect to the Data360 database.' });
+      setStatus({ connected: false, error: err.message || 'Unable to connect to the DMP database.' });
     } finally {
       setTesting(false);
     }

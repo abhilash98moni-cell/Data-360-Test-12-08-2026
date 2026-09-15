@@ -112,7 +112,7 @@ export const AdminApprovalView: React.FC<AdminApprovalViewProps> = ({ currentUse
               name: p.full_name,
               email: p.email,
               role: p.role === 'admin' ? 'Admin' : p.role === 'distributor' ? 'Distributor' : 'Auditor',
-              organization: p.organization || 'Data360 Platform',
+              organization: p.organization || 'Distributor Monitoring Platform',
               avatarInitials: p.avatar_initials || p.full_name?.slice(0, 2).toUpperCase() || 'US'
             }));
             approvedCount = Math.max(approvedCount, dbProfiles.length);

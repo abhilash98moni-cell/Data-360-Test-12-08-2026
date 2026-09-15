@@ -319,7 +319,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs uppercase tracking-wider font-bold text-indigo-300 bg-indigo-500/20 px-2.5 py-1 rounded-full border border-indigo-500/30">
-                Data360 Executive Control Hub
+                Distributor Monitoring Platform (DMP) Executive Control Hub
               </span>
               <span className="text-xs bg-emerald-500/20 text-emerald-300 font-semibold px-2.5 py-1 rounded-full border border-emerald-500/30 flex items-center gap-1">
                 <UserCheck className="h-3 w-3" />

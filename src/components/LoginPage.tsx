@@ -129,10 +129,10 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
             <Layers className="h-8 w-8 text-white" />
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-100 to-slate-300 bg-clip-text text-transparent">
-            Data360 Platform
+            Distributor Monitoring Platform
           </h1>
           <p className="text-xs text-slate-400 max-w-xs mx-auto">
-            Enterprise Audit, Risk & Distributor Channel Governance
+            A smarter way to monitor, manage and review distributor audits.
           </p>
         </div>
 
@@ -415,7 +415,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin }) => {
         <div className="text-center text-[11px] text-slate-500 space-y-1">
           <p className="flex items-center justify-center gap-1.5">
             <ShieldCheck className="h-3.5 w-3.5 text-indigo-400" />
-            <span>256-Bit Encrypted • Supabase RBAC • Data360 Governance</span>
+            <span>256-Bit Encrypted • Supabase RBAC • Distributor Monitoring Platform (DMP)</span>
           </p>
         </div>
 
