@@ -1787,7 +1787,11 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const { data, error } = await query;
       if (error) throw error;
       
-      const targetKeys = [sampleId, voucherNo, rowId, row_id].filter(isValidKey).map(cleanStr);
+      const targetEngagementId = cleanStr(auditId);
+      const targetDistributorId = cleanStr(distributorId);
+      const targetRowId = isValidKey(rowId || row_id) ? cleanStr(rowId || row_id) : '';
+      const targetSampleId = isValidKey(sampleId) ? cleanStr(sampleId) : '';
+      const targetVoucherNo = isValidKey(voucherNo) ? cleanStr(voucherNo) : '';
 
       const responses = (data || [])
         .map(d => {
@@ -1800,21 +1804,18 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         .filter(r => {
            const rAudit = cleanStr(r.engagement_id || r.engagementId || '');
            const rDist = cleanStr(r.distributor_id || r.distributorName || r.distributor || '');
-
-           if (auditId && auditId !== 'All Audits' && rAudit && rAudit !== cleanStr(auditId)) {
-             return false;
-           }
-           if (distributorId && distributorId !== 'All Distributors' && rDist && rDist !== cleanStr(distributorId)) {
-             return false;
-           }
-           if (targetKeys.length > 0) {
+           if (auditId && auditId !== 'All Audits' && rAudit && rAudit !== targetEngagementId) return false;
+           if (distributorId && distributorId !== 'All Distributors' && rDist && rDist !== targetDistributorId) return false;
+           
+           if (targetRowId || targetSampleId || targetVoucherNo) {
              const sId = cleanStr(r.sample_id || r.sampleId || '');
              const vNo = cleanStr(r.voucher_no || r.voucherNo || '');
              const rId = cleanStr(r.row_id || r.rowId || '');
-             const isMatch = targetKeys.some(k => 
-               (sId && sId === k) || (vNo && vNo === k) || (rId && rId === k)
-             );
-             if (!isMatch) return false;
+             
+             if (targetRowId && rId === targetRowId) return true;
+             if (!targetRowId && targetSampleId && sId === targetSampleId) return true;
+             if (!targetRowId && !targetSampleId && targetVoucherNo && vNo === targetVoucherNo) return true;
+             return false;
            }
            return true;
         });
@@ -1843,8 +1844,6 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const targetSampleId = isValidKey(payload.sample_id) ? cleanStr(payload.sample_id) : '';
       const targetVoucherNo = isValidKey(payload.voucher_no || payload.voucherNo) ? cleanStr(payload.voucher_no || payload.voucherNo) : '';
       
-      const targetKeys = [targetRowId, targetSampleId, targetVoucherNo].filter(isValidKey);
-      
       // Strict matching on existing record for this specific transaction
       const { data: existing } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'REQUIRED_DATA_RESP');
       
@@ -1853,7 +1852,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         if (typeof parsed === 'string') {
            try { parsed = JSON.parse(parsed); } catch(e) {}
         }
-        // Scope by distributor & audit if available
+        
         const recEngagement = cleanStr(parsed?.engagement_id || parsed?.engagementId || '');
         const recDistributor = cleanStr(parsed?.distributor_id || parsed?.distributorName || parsed?.distributor || '');
         
@@ -1867,11 +1866,12 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
         const rId = cleanStr(parsed?.row_id || parsed?.rowId || '');
         const sId = cleanStr(parsed?.sample_id || parsed?.sampleId || '');
         const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo || '');
-
-        if (targetKeys.length > 0) {
-          return targetKeys.some(k => 
-            (rId && rId === k) || (sId && sId === k) || (vNo && vNo === k)
-          );
+        
+        if (targetRowId || targetSampleId || targetVoucherNo) {
+          if (targetRowId && rId === targetRowId) return true;
+          if (!targetRowId && targetSampleId && sId === targetSampleId) return true;
+          if (!targetRowId && !targetSampleId && targetVoucherNo && vNo === targetVoucherNo) return true;
+          return false;
         }
         
         return false;

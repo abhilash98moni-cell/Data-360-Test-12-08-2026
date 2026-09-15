@@ -60,6 +60,8 @@ const newGet = `app.get('/api/sampling/required-data/responses', authenticateReq
 
 code = code.replace(regexGet, newGet);
 
+const postRegex = /app\.post\('\/api\/sampling\/required-data\/responses', express\.json\(\), authenticateRequest, async \(req: any, res: any\) => \{[\s\S]*?const targetKeys = \[targetRowId, targetSampleId, targetVoucherNo\]\.filter\(isValidKey\);[\s\S]*?if \(targetKeys\.length > 0\) \{[\s\S]*?return targetKeys\.some\(k =>[\s\S]*?\(rId && rId === k\) \|\| \(sId && sId === k\) \|\| \(vNo && vNo === k\)[\s\S]*?\);[\s\S]*?\}[\s\S]*?return false;[\s\S]*?\}\);/g;
+
 const newPostPart1 = `const targetKeys = [targetRowId, targetSampleId, targetVoucherNo].filter(isValidKey);`;
 const newPostPart1Replace = `// keys replaced`;
 
@@ -83,4 +85,4 @@ const newPostPart2Replace = `if (targetRowId || targetSampleId || targetVoucherN
 code = code.replace(newPostPart1, newPostPart1Replace).replace(newPostPart2, newPostPart2Replace);
 
 fs.writeFileSync('server.ts', code);
-console.log("Patched server.ts");
+console.log("Replaced GET endpoint");
