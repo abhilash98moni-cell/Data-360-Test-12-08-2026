@@ -2,23 +2,28 @@ import React, { useState, useEffect } from 'react';
 import { 
   Calendar, CheckCircle2, ChevronRight, Clock, Search, ListTodo, AlertCircle, 
   ArrowRight, Activity, GitCommit, FileText, CheckSquare, Presentation, ShieldAlert,
-  Users, UserCheck, Check, SearchIcon, FileSpreadsheet, Hourglass, Plus
+  Users, UserCheck, Check, SearchIcon, FileSpreadsheet, Hourglass, Plus, BarChart3,
+  TrendingUp, CheckCircle, Clock4, Briefcase, Filter, X
 } from 'lucide-react';
 import { AuditEngagement, UserSession } from '../types';
 
 interface ExecutiveAuditTimelineDashboardProps {
   engagements: AuditEngagement[];
   currentUser: UserSession | null;
+  onOpenNewAudit?: () => void;
+  onTabChange?: (tab: string) => void;
+  onSelectEngagement?: (id: string) => void;
 }
 
 export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDashboardProps> = ({ 
-  engagements, currentUser 
+  engagements, currentUser, onOpenNewAudit, onTabChange, onSelectEngagement
 }) => {
   const [selectedEngId, setSelectedEngId] = useState<string | null>(null);
   const [allTimelines, setAllTimelines] = useState<Record<string, any[]>>({});
   const [loading, setLoading] = useState(false);
   const [filter, setFilter] = useState<string>('All');
   const [search, setSearch] = useState<string>('');
+  const [selectedStage, setSelectedStage] = useState<any | null>(null);
 
   useEffect(() => {
     const fetchAll = async () => {
@@ -49,441 +54,648 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
 
   const getEngagementMetrics = (engId: string) => {
     const stages = allTimelines[engId] || [];
-    const completedStages = stages.filter(s => s.progressPercent === 100).length;
-    const progress = stages.length > 0 ? Math.round((completedStages / stages.length) * 100) : 0;
-    const variance = stages.reduce((acc, stg) => acc + (stg.daysVariance || 0), 0);
-    const hasOverdue = stages.some(s => s.status === 'Overdue');
-    const hasStarted = stages.some(s => s.actualStartDate);
-    const isCompleted = completedStages === stages.length && stages.length > 0;
+    if (!stages.length) return { progress: 0, status: 'Pending', baselineCompletion: null, forecastCompletion: null, variance: 0 };
     
-    let status = 'Pending';
-    if (isCompleted) status = 'Completed';
-    else if (hasOverdue) status = 'Overdue';
-    else if (hasStarted) status = 'In Progress';
-
+    const totalWeights = stages.length;
+    let completedWeights = 0;
+    
+    stages.forEach(s => {
+      completedWeights += (s.progressPercent || 0) / 100;
+    });
+    
+    const overallProgress = Math.round((completedWeights / totalWeights) * 100);
+    
+    let status = 'Not Started';
+    if (overallProgress > 0 && overallProgress < 99) status = 'In Progress';
+    if (overallProgress >= 99 && overallProgress < 100) status = 'Ready for Sign-off';
+    if (overallProgress === 100) status = 'Completed';
+    
     const lastStage = stages[stages.length - 1];
-    const forecastCompletion = lastStage ? lastStage.forecastEndDate : null;
-    const baselineCompletion = lastStage ? lastStage.baselineEndDate : null;
+    let isOverdue = stages.some(s => s.status === 'Overdue');
+    if (isOverdue && status !== 'Completed') status = 'Overdue';
 
-    return { progress, variance, status, forecastCompletion, baselineCompletion, stages };
+    return {
+      progress: overallProgress,
+      status,
+      baselineCompletion: lastStage?.baselineEndDate,
+      forecastCompletion: lastStage?.forecastEndDate || lastStage?.actualEndDate,
+      variance: lastStage?.daysVariance || 0
+    };
   };
 
-  const metricsData = engagements.map(eng => ({
-    eng,
-    ...getEngagementMetrics(eng.id)
-  }));
-
+  // KPIs
   const totalAssignments = engagements.length;
-  const inProgress = metricsData.filter(m => m.status === 'In Progress').length;
-  const pendingStart = metricsData.filter(m => m.status === 'Pending').length;
-  const completed = metricsData.filter(m => m.status === 'Completed').length;
-  const overdue = metricsData.filter(m => m.status === 'Overdue').length;
+  const inProgressCount = engagements.filter(e => {
+    const m = getEngagementMetrics(e.id);
+    return m.status === 'In Progress' || m.status === 'Ready for Sign-off';
+  }).length;
+  const pendingCount = engagements.filter(e => getEngagementMetrics(e.id).status === 'Not Started' || getEngagementMetrics(e.id).status === 'Pending').length;
+  const completedCount = engagements.filter(e => getEngagementMetrics(e.id).status === 'Completed').length;
+  const overdueCount = engagements.filter(e => getEngagementMetrics(e.id).status === 'Overdue').length;
 
-  const filteredMetrics = metricsData.filter(m => {
+  const filteredEngagements = engagements.filter(m => {
+    const metrics = getEngagementMetrics(m.id);
     if (filter !== 'All') {
-      if (filter === 'In Progress' && m.status !== 'In Progress') return false;
-      if (filter === 'Pending' && m.status !== 'Pending') return false;
-      if (filter === 'Completed' && m.status !== 'Completed') return false;
-      if (filter === 'Overdue' && m.status !== 'Overdue') return false;
+      if (filter === 'In Progress' && (metrics.status !== 'In Progress' && metrics.status !== 'Ready for Sign-off')) return false;
+      if (filter === 'Pending' && (metrics.status !== 'Pending' && metrics.status !== 'Not Started')) return false;
+      if (filter === 'Completed' && metrics.status !== 'Completed') return false;
+      if (filter === 'Overdue' && metrics.status !== 'Overdue') return false;
     }
-    if (search && !(m.eng.distributorName || m.eng.clientName).toLowerCase().includes(search.toLowerCase()) && !m.eng.code.toLowerCase().includes(search.toLowerCase())) {
+    const distName = m.distributorName || m.clientName;
+    if (search && !distName.toLowerCase().includes(search.toLowerCase()) && !m.code.toLowerCase().includes(search.toLowerCase())) {
       return false;
     }
     return true;
   });
 
-  return (
-    <div className="w-full p-4 sm:p-6 space-y-6">
-      {/* Top Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-slate-900/60 p-5 rounded-2xl border border-slate-800">
-        <div>
-          <h1 className="text-2xl font-bold text-white uppercase tracking-wide">
-            Enterprise Executive Audit Dashboard
-          </h1>
-          <p className="text-sm text-slate-400 mt-1">Complete visibility across all distributor audits</p>
-        </div>
-        <div className="flex gap-3">
-          <button className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition-colors">
-            <UserCheck className="h-4 w-4" />
-            <span>Engagement Workspace</span>
-          </button>
-          <button className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs px-4 py-2.5 rounded-xl transition-colors">
-            <Plus className="h-4 w-4" />
-            <span>Initiate New Audit</span>
-          </button>
-        </div>
-      </div>
+  const renderGanttTimeline = () => {
+    if (!timelineStages.length) return null;
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-2">
-            <div className="p-2 bg-slate-800 rounded-lg text-slate-300">
-              <Users className="h-4 w-4" />
-            </div>
-            <span className="text-xs font-semibold text-slate-400">Total Assignments</span>
+    const projectStart = new Date(timelineStages[0].baselineStartDate).getTime();
+    const totalDays = 84; // 12 weeks
+    const msPerDay = 1000 * 3600 * 24;
+
+    const getPosition = (dateStr: string) => {
+      if (!dateStr) return 0;
+      const date = new Date(dateStr).getTime();
+      const diffDays = (date - projectStart) / msPerDay;
+      return Math.max(0, Math.min(100, (diffDays / totalDays) * 100));
+    };
+
+    const getWidth = (startStr: string, endStr: string) => {
+      if (!startStr || !endStr) return 0;
+      const start = new Date(startStr).getTime();
+      const end = new Date(endStr).getTime();
+      const diffDays = (end - start) / msPerDay;
+      return Math.max(1, Math.min(100, (diffDays / totalDays) * 100));
+    };
+
+    return (
+      <div className="mt-8 bg-slate-900 border border-slate-800 rounded-xl p-6 shadow-2xl">
+        <div className="flex flex-col md:flex-row md:items-end justify-between mb-6">
+          <div>
+            <h2 className="text-xl font-bold text-white tracking-tight">Audit Timeline</h2>
+            <p className="text-slate-400 text-sm mt-1">12-week baseline vs actual progress and current forecast</p>
           </div>
-          <div className="mt-2">
-            <span className="text-3xl font-bold text-white">{totalAssignments}</span>
-            <p className="text-[11px] text-slate-500 mt-1">All distributor audits</p>
-          </div>
-        </div>
-        
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-2">
-            <div className="p-2 bg-blue-500/10 rounded-lg text-blue-400">
-              <Activity className="h-4 w-4" />
-            </div>
-            <span className="text-xs font-semibold text-slate-400">In Progress</span>
-          </div>
-          <div className="mt-2">
-            <span className="text-3xl font-bold text-white">{inProgress}</span>
-            <p className="text-[11px] text-slate-500 mt-1">{totalAssignments > 0 ? Math.round(inProgress/totalAssignments*100) : 0}% of total</p>
+          <div className="flex items-center gap-4 mt-4 md:mt-0 text-xs">
+            <div className="flex items-center gap-2"><div className="w-3 h-3 bg-slate-700 rounded-sm"></div> <span className="text-slate-400">Baseline</span></div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 bg-indigo-500 rounded-sm"></div> <span className="text-slate-400">Actual/Forecast</span></div>
+            <div className="flex items-center gap-2"><div className="w-3 h-3 bg-rose-500 rounded-sm"></div> <span className="text-slate-400">Overdue</span></div>
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-2">
-            <div className="p-2 bg-amber-500/10 rounded-lg text-amber-400">
-              <Hourglass className="h-4 w-4" />
-            </div>
-            <span className="text-xs font-semibold text-slate-400">Pending to Start</span>
-          </div>
-          <div className="mt-2">
-            <span className="text-3xl font-bold text-white">{pendingStart}</span>
-            <p className="text-[11px] text-slate-500 mt-1">{totalAssignments > 0 ? Math.round(pendingStart/totalAssignments*100) : 0}% of total</p>
-          </div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-2">
-            <div className="p-2 bg-emerald-500/10 rounded-lg text-emerald-400">
-              <CheckCircle2 className="h-4 w-4" />
-            </div>
-            <span className="text-xs font-semibold text-slate-400">Completed</span>
-          </div>
-          <div className="mt-2">
-            <span className="text-3xl font-bold text-white">{completed}</span>
-            <p className="text-[11px] text-slate-500 mt-1">{totalAssignments > 0 ? Math.round(completed/totalAssignments*100) : 0}% of total</p>
-          </div>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-          <div className="flex justify-between items-start mb-2">
-            <div className="p-2 bg-rose-500/10 rounded-lg text-rose-400">
-              <AlertCircle className="h-4 w-4" />
-            </div>
-            <span className="text-xs font-semibold text-slate-400">Overdue</span>
-          </div>
-          <div className="mt-2">
-            <span className="text-3xl font-bold text-white">{overdue}</span>
-            <p className="text-[11px] text-slate-500 mt-1">Require attention</p>
-          </div>
-        </div>
-      </div>
-
-      {/* Distributor Audits Overview Table */}
-      {!selectedEngagement && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-xl">
-          <div className="p-5 border-b border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <h2 className="text-lg font-bold text-white">Distributor Audits Overview</h2>
-              <p className="text-xs text-slate-400">Select a distributor to view detailed audit status and timeline</p>
-            </div>
-            <div className="flex flex-col sm:flex-row gap-3 w-full md:w-auto">
-              <div className="relative">
-                <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-                <input 
-                  type="text" 
-                  placeholder="Search distributors..." 
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  className="pl-9 pr-4 py-2 bg-slate-950 border border-slate-800 text-sm text-white rounded-lg focus:outline-none focus:border-indigo-500 w-full sm:w-64"
-                />
-              </div>
-              <div className="flex bg-slate-950 rounded-lg border border-slate-800 overflow-hidden">
-                {['All', 'In Progress', 'Pending', 'Completed', 'Overdue'].map(f => (
-                  <button 
-                    key={f}
-                    onClick={() => setFilter(f)}
-                    className={`px-3 py-2 text-xs font-semibold transition-colors ${filter === f ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800'}`}
-                  >
-                    {f}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-950 border-b border-slate-800">
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-400 uppercase">Distributor Name</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-400 uppercase">Engagement ID</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-400 uppercase">Overall Progress</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-400 uppercase">Status</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-400 uppercase">Baseline Completion</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-400 uppercase">Forecast Completion</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-400 uppercase">Variance</th>
-                  <th className="px-5 py-3 text-xs font-semibold text-slate-400 uppercase text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {filteredMetrics.map(({eng, progress, status, baselineCompletion, forecastCompletion, variance}) => (
-                  <tr key={eng.id} className="hover:bg-slate-800/50 transition-colors">
-                    <td className="px-5 py-4 text-sm font-semibold text-slate-200">{eng.distributorName || eng.clientName}</td>
-                    <td className="px-5 py-4 text-xs font-mono text-slate-400">{eng.code}</td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-3">
-                        <span className="text-xs font-bold text-slate-300 w-8">{progress}%</span>
-                        <div className="w-24 h-2 bg-slate-800 rounded-full overflow-hidden">
-                          <div className="h-full bg-indigo-500 rounded-full" style={{width: `${progress}%`}}></div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-5 py-4">
-                      <span className={`px-2.5 py-1 text-[10px] uppercase font-bold rounded border ${
-                        status === 'Completed' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
-                        status === 'Overdue' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
-                        status === 'In Progress' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-                        'bg-slate-500/10 text-slate-400 border-slate-500/20'
-                      }`}>
-                        {status}
-                      </span>
-                    </td>
-                    <td className="px-5 py-4 text-xs text-slate-400">{baselineCompletion ? new Date(baselineCompletion).toLocaleDateString() : '-'}</td>
-                    <td className="px-5 py-4 text-xs text-slate-400">{forecastCompletion ? new Date(forecastCompletion).toLocaleDateString() : '-'}</td>
-                    <td className="px-5 py-4 text-xs font-medium">
-                      {variance < 0 ? <span className="text-rose-400">{Math.abs(variance)} days delayed</span> :
-                       variance > 0 ? <span className="text-emerald-400">{variance} days ahead</span> :
-                       <span className="text-slate-500">-</span>}
-                    </td>
-                    <td className="px-5 py-4 text-right">
-                      <button 
-                        onClick={() => setSelectedEngId(eng.id)}
-                        className="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded transition-colors"
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-                {filteredMetrics.length === 0 && (
-                  <tr>
-                    <td colSpan={8} className="px-5 py-12 text-center text-slate-500 text-sm">
-                      No distributor audits found matching the current filters.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* Selected Distributor Detail */}
-      {selectedEngagement && (
-        <div className="space-y-6">
-          <div className="flex flex-col md:flex-row justify-between items-start gap-4">
-            <div>
-              <div className="flex items-center gap-3">
-                <h2 className="text-3xl font-extrabold text-white">{selectedEngagement.clientName}</h2>
-                <span className="px-3 py-1 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-full text-xs font-bold uppercase">
-                  {getEngagementMetrics(selectedEngagement.id).status}
-                </span>
-              </div>
-              <p className="text-sm text-slate-400 mt-1 font-mono">
-                {selectedEngagement.code} <span className="text-slate-600">|</span> Started: {new Date(selectedEngagement.startDate).toLocaleDateString()}
-              </p>
-            </div>
-            
-            <div className="flex flex-col sm:flex-row items-center gap-4 w-full md:w-auto">
-              <select 
-                value={selectedEngId || ''} 
-                onChange={(e) => setSelectedEngId(e.target.value === '' ? null : e.target.value)}
-                className="w-full sm:w-auto bg-slate-900 border border-slate-700 text-slate-200 text-sm rounded-lg px-4 py-2 focus:outline-none focus:border-indigo-500 transition-colors"
-              >
-                <option value="">← Back to Portfolio Overview</option>
-                <optgroup label="Distributor Audits">
-                  {engagements.map(eng => (
-                    <option key={eng.id} value={eng.id}>{eng.distributorName || eng.clientName}</option>
-                  ))}
-                </optgroup>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <div className="flex gap-6">
-              <button className="text-sm font-semibold text-indigo-400 border-b-2 border-indigo-400 pb-2 -mb-[9px]">Overview</button>
-              <button className="text-sm font-semibold text-slate-400 hover:text-slate-200 pb-2">Timeline</button>
-              <button className="text-sm font-semibold text-slate-400 hover:text-slate-200 pb-2">Documents</button>
-              <button className="text-sm font-semibold text-slate-400 hover:text-slate-200 pb-2">Activity Log</button>
-            </div>
-            <button className="flex items-center gap-2 text-xs font-semibold text-indigo-300 hover:text-indigo-200 bg-indigo-500/10 px-3 py-1.5 rounded-lg border border-indigo-500/20 transition-colors">
-              Open in Workspace <ArrowRight className="h-3 w-3" />
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-center items-center relative overflow-hidden group">
-              <div className="absolute inset-0 bg-indigo-500/5 group-hover:bg-indigo-500/10 transition-colors"></div>
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Overall Progress</span>
-              <div className="relative">
-                <svg className="w-20 h-20 transform -rotate-90">
-                  <circle cx="40" cy="40" r="36" stroke="currentColor" strokeWidth="8" fill="transparent" className="text-slate-800" />
-                  <circle cx="40" cy="40" r="36" stroke="currentColor" strokeWidth="8" fill="transparent" strokeDasharray="226.19" strokeDashoffset={226.19 - (226.19 * getEngagementMetrics(selectedEngagement.id).progress) / 100} className="text-indigo-500 transition-all duration-1000" />
-                </svg>
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-xl font-bold text-white">{getEngagementMetrics(selectedEngagement.id).progress}%</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Forecast Completion</span>
-                <Calendar className="h-4 w-4 text-blue-400" />
-              </div>
-              <div className="mt-2">
-                <span className="text-2xl font-bold text-white">
-                  {getEngagementMetrics(selectedEngagement.id).forecastCompletion ? new Date(getEngagementMetrics(selectedEngagement.id).forecastCompletion!).toLocaleDateString() : '-'}
-                </span>
-                <p className={`text-xs mt-1 font-semibold ${getEngagementMetrics(selectedEngagement.id).variance < 0 ? 'text-rose-400' : getEngagementMetrics(selectedEngagement.id).variance > 0 ? 'text-emerald-400' : 'text-slate-500'}`}>
-                  {getEngagementMetrics(selectedEngagement.id).variance < 0 ? `${Math.abs(getEngagementMetrics(selectedEngagement.id).variance)} days delayed` : 
-                   getEngagementMetrics(selectedEngagement.id).variance > 0 ? `${getEngagementMetrics(selectedEngagement.id).variance} days ahead` : '-'}
-                </p>
-              </div>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Baseline Completion</span>
-                <Calendar className="h-4 w-4 text-slate-400" />
-              </div>
-              <div className="mt-2">
-                <span className="text-2xl font-bold text-slate-300">
-                  {getEngagementMetrics(selectedEngagement.id).baselineCompletion ? new Date(getEngagementMetrics(selectedEngagement.id).baselineCompletion!).toLocaleDateString() : '-'}
-                </span>
-                <p className="text-xs mt-1 text-slate-500">Original target</p>
-              </div>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between">
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Days Remaining</span>
-                <Clock className="h-4 w-4 text-indigo-400" />
-              </div>
-              <div className="mt-2">
-                <span className="text-2xl font-bold text-white">
-                  {getEngagementMetrics(selectedEngagement.id).forecastCompletion ? Math.max(0, Math.round((new Date(getEngagementMetrics(selectedEngagement.id).forecastCompletion!).getTime() - Date.now()) / (1000 * 3600 * 24))) : '-'}
-                </span>
-                <p className="text-xs mt-1 text-slate-500">Until forecast completion</p>
-              </div>
-            </div>
-
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex flex-col justify-between cursor-pointer hover:border-rose-500/50 transition-colors group">
-              <div className="flex justify-between items-start mb-2">
-                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider group-hover:text-rose-400 transition-colors">Overdue Items</span>
-                <AlertCircle className="h-4 w-4 text-rose-400" />
-              </div>
-              <div className="mt-2 flex items-end justify-between">
-                <div>
-                  <span className="text-2xl font-bold text-rose-400">
-                    {timelineStages.filter(s => s.status === 'Overdue').length}
-                  </span>
-                  <p className="text-xs mt-1 text-rose-500/70">Require attention</p>
-                </div>
-                <ChevronRight className="h-5 w-5 text-slate-600 group-hover:text-rose-400 transition-colors" />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
-            <h2 className="text-lg font-bold text-white mb-6">Audit Timeline (12 Weeks)</h2>
-            
-            {loading ? (
-              <div className="py-12 text-center text-slate-400 flex flex-col items-center animate-pulse">
-                <Activity className="h-8 w-8 mb-4 text-indigo-500" />
-                <p>Loading timeline...</p>
-              </div>
-            ) : (
-              <div className="relative border-l-2 border-slate-800 ml-4 space-y-8 pb-4">
-                {timelineStages.map((stage, idx) => (
-                  <div key={stage.id} className="relative pl-8">
-                    {/* Timeline Node */}
-                    <div className={`absolute -left-[11px] top-1 h-5 w-5 rounded-full border-4 border-slate-900 flex items-center justify-center ${
-                      stage.progressPercent === 100 ? 'bg-emerald-500' :
-                      stage.status === 'In Progress' ? 'bg-indigo-500' :
-                      stage.status === 'Overdue' ? 'bg-rose-500' : 'bg-slate-600'
-                    }`}>
-                      {stage.progressPercent === 100 && <CheckCircle2 className="h-3 w-3 text-white absolute" />}
-                    </div>
-                    
-                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-2">
-                      <div>
-                        <h3 className="text-base font-bold text-white flex items-center gap-2">
-                          {idx + 1}. {stage.name}
-                          {stage.status === 'Overdue' && <span className="px-2 py-0.5 bg-rose-500/10 text-rose-400 text-[10px] uppercase font-bold rounded border border-rose-500/20">Overdue ({Math.abs(stage.daysVariance)} days)</span>}
-                          {stage.status === 'Completed Early' && <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] uppercase font-bold rounded border border-emerald-500/20">Completed {Math.abs(stage.daysVariance)} days early</span>}
-                          {stage.progressPercent === 100 && stage.status !== 'Completed Early' && <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] uppercase font-bold rounded border border-emerald-500/20">Completed</span>}
-                          {stage.progressPercent === 99 && <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[10px] uppercase font-bold rounded border border-blue-500/20 cursor-pointer hover:bg-blue-500/20 transition-colors">Ready for Sign-off</span>}
-                        </h3>
-                        <p className="text-xs text-slate-400 mt-1">Responsible: <strong className="text-slate-300">{stage.responsibleParty}</strong></p>
-                      </div>
-                      
-                      <div className="text-right shrink-0">
-                        <div className="text-xs font-mono text-slate-400">Baseline: {new Date(stage.baselineStartDate).toLocaleDateString()} - {new Date(stage.baselineEndDate).toLocaleDateString()}</div>
-                        <div className={`text-xs font-mono font-bold mt-1 ${
-                          stage.daysVariance < 0 ? 'text-rose-400' : stage.daysVariance > 0 ? 'text-emerald-400' : 'text-indigo-400'
-                        }`}>
-                          Forecast: {new Date(stage.forecastStartDate).toLocaleDateString()} - {new Date(stage.forecastEndDate).toLocaleDateString()}
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* Progress Bar */}
-                    <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800 mt-3 flex">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-1000 ${
-                          stage.progressPercent === 100 ? 'bg-emerald-500' :
-                          stage.status === 'Overdue' ? 'bg-rose-500' : 'bg-indigo-500'
-                        }`}
-                        style={{ width: `${stage.progressPercent}%` }}
-                      />
-                    </div>
-                    
-                    <div className="mt-4 p-3 bg-slate-950/50 rounded-lg border border-slate-800 text-xs text-slate-400 flex items-start gap-2">
-                      <GitCommit className="h-4 w-4 text-slate-500 shrink-0 mt-0.5" />
-                      <div>
-                        {stage.actualStartDate ? (
-                          <p>Work commenced on <span className="text-slate-300">{new Date(stage.actualStartDate).toLocaleDateString()}</span>.</p>
-                        ) : (
-                          <p>Work not yet started.</p>
-                        )}
-                        {stage.actualEndDate && (
-                          <p className="text-emerald-400 mt-1">Completed on {new Date(stage.actualEndDate).toLocaleDateString()}.</p>
-                        )}
-                        {stage.daysVariance !== 0 && (
-                          <p className="mt-1">
-                            Impact: {stage.daysVariance > 0 ? 'Saved' : 'Delayed by'} {Math.abs(stage.daysVariance)} days relative to baseline.
-                          </p>
-                        )}
-                        {stage.progressPercent === 99 && (
-                          <button className="mt-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded font-semibold transition-colors">
-                            Sign-off Stage
-                          </button>
-                        )}
-                      </div>
-                    </div>
+        {/* Gantt Grid */}
+        <div className="relative pt-6 pb-4 overflow-x-auto">
+          <div className="min-w-[800px]">
+            {/* Timeline Header (Weeks) */}
+            <div className="flex w-full mb-4 relative">
+              <div className="w-48 shrink-0"></div> {/* Label spacer */}
+              <div className="flex-1 relative h-6">
+                {[...Array(12)].map((_, i) => (
+                  <div key={i} className="absolute text-[10px] font-bold text-slate-500 uppercase" style={{ left: `${(i / 12) * 100}%` }}>
+                    W{i + 1}
                   </div>
                 ))}
               </div>
-            )}
+            </div>
+
+            {/* Grid Lines */}
+            <div className="absolute top-10 bottom-4 left-48 right-0 flex">
+              {[...Array(12)].map((_, i) => (
+                <div key={i} className="flex-1 border-l border-slate-800/50"></div>
+              ))}
+              <div className="border-l border-slate-800/50"></div>
+            </div>
+
+            {/* Stages */}
+            <div className="space-y-6 relative">
+              {timelineStages.map((stage, idx) => {
+                const baseStart = getPosition(stage.baselineStartDate);
+                const baseWidth = getWidth(stage.baselineStartDate, stage.baselineEndDate);
+                
+                const actStartStr = stage.actualStartDate || stage.forecastStartDate;
+                const actEndStr = stage.actualEndDate || stage.forecastEndDate;
+                
+                const actStart = getPosition(actStartStr);
+                const actWidth = getWidth(actStartStr, actEndStr);
+
+                const isOverdue = stage.status === 'Overdue';
+                const isCompleted = stage.progressPercent === 100 || stage.status === 'Completed Early';
+
+                return (
+                  <div key={stage.id} className="relative flex items-center group cursor-pointer" onClick={() => setSelectedStage(stage)}>
+                    {/* Stage Label */}
+                    <div className="w-48 shrink-0 pr-4 flex items-center justify-between">
+                      <span className="text-sm font-medium text-slate-300 truncate pr-2 group-hover:text-white transition-colors">{idx + 1}. {stage.name}</span>
+                      <span className="text-xs text-slate-500">{stage.progressPercent}%</span>
+                    </div>
+
+                    {/* Bars Container */}
+                    <div className="flex-1 relative h-10 bg-slate-900/50 rounded hover:bg-slate-800/30 transition-colors">
+                      {/* Baseline Bar */}
+                      <div 
+                        className="absolute top-2 h-1.5 bg-slate-700/50 rounded-full"
+                        style={{ left: `${baseStart}%`, width: `${baseWidth}%` }}
+                      ></div>
+                      
+                      {/* Actual/Forecast Bar Container */}
+                      <div 
+                        className={`absolute top-5 h-3 rounded-full overflow-hidden shadow-sm flex border ${
+                          isCompleted ? 'border-emerald-500/30 bg-emerald-900/20' : 
+                          isOverdue ? 'border-rose-500/30 bg-rose-900/20' : 
+                          'border-indigo-500/30 bg-indigo-900/20'
+                        }`}
+                        style={{ left: `${actStart}%`, width: `${actWidth}%` }}
+                      >
+                        {/* Progress Fill */}
+                        <div 
+                          className={`h-full ${
+                            isCompleted ? 'bg-emerald-500' : 
+                            isOverdue ? 'bg-rose-500' : 
+                            'bg-indigo-500'
+                          }`}
+                          style={{ width: `${stage.progressPercent}%` }}
+                        ></div>
+                        {/* Striped Forecast Fill (if not completed) */}
+                        {stage.progressPercent < 100 && (
+                          <div 
+                            className="h-full flex-1 opacity-20"
+                            style={{ backgroundImage: 'repeating-linear-gradient(45deg, transparent, transparent 4px, #ffffff 4px, #ffffff 8px)' }}
+                          ></div>
+                        )}
+                      </div>
+                      
+                      {/* Variance Indicator (if completed early or late) */}
+                      {isCompleted && stage.daysVariance !== 0 && (
+                        <div 
+                          className={`absolute top-4 text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm ${
+                            stage.daysVariance < 0 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                          }`}
+                          style={{ left: `${actStart + actWidth}%`, transform: 'translateX(4px)' }}
+                        >
+                          {stage.daysVariance < 0 ? `-${Math.abs(stage.daysVariance)}d` : `+${stage.daysVariance}d`}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="p-6 md:p-8 max-w-7xl mx-auto min-h-screen">
+      {/* HEADER & DISTRIBUTOR SELECTOR */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-white tracking-tight">Executive Control Centre</h1>
+          <p className="text-slate-400 mt-1">Enterprise Audit Portfolio Management</p>
+        </div>
+        <div className="flex items-center gap-4">
+          {onOpenNewAudit && (
+            <button 
+              onClick={onOpenNewAudit}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold transition-colors shadow-lg shadow-indigo-500/20 flex items-center gap-2"
+            >
+              <Plus className="h-4 w-4" /> Initiate New Audit
+            </button>
+          )}
+          <div className="relative">
+            <select 
+              className="appearance-none bg-slate-900 border border-slate-700 text-white pl-4 pr-10 py-2.5 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-lg min-w-[240px]"
+              value={selectedEngId || ''}
+              onChange={(e) => setSelectedEngId(e.target.value || null)}
+            >
+              <option value="">Portfolio Overview</option>
+              {engagements.map(eng => {
+                const metrics = getEngagementMetrics(eng.id);
+                return (
+                  <option key={eng.id} value={eng.id}>
+                    {eng.distributorName || eng.clientName} ({metrics.progress}%)
+                  </option>
+                );
+              })}
+            </select>
+            <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 rotate-90 pointer-events-none" />
+          </div>
+        </div>
+      </div>
+
+      {!selectedEngId ? (
+        /* PORTFOLIO OVERVIEW */
+        <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+          
+          {/* KPI CARDS */}
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-2xl p-5 shadow-lg relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                <Briefcase className="h-16 w-16" />
+              </div>
+              <p className="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-2">Total Assignments</p>
+              <h3 className="text-4xl font-bold text-white">{totalAssignments}</h3>
+              <p className="text-slate-500 text-xs mt-3 flex items-center gap-1"><Activity className="h-3 w-3" /> Active portfolio</p>
+            </div>
+            
+            <div className="bg-gradient-to-br from-indigo-900/40 to-slate-900 border border-indigo-500/20 rounded-2xl p-5 shadow-lg relative overflow-hidden group">
+              <p className="text-indigo-400 text-sm font-semibold uppercase tracking-wider mb-2">In Progress</p>
+              <h3 className="text-4xl font-bold text-white">{inProgressCount}</h3>
+              <div className="mt-3 w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full bg-indigo-500" style={{ width: `${(inProgressCount/totalAssignments)*100}%` }}></div>
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-2xl p-5 shadow-lg relative overflow-hidden">
+              <p className="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-2">Pending Start</p>
+              <h3 className="text-4xl font-bold text-white">{pendingCount}</h3>
+              <p className="text-slate-500 text-xs mt-3 flex items-center gap-1"><Clock className="h-3 w-3" /> Awaiting kick-off</p>
+            </div>
+
+            <div className="bg-gradient-to-br from-emerald-900/40 to-slate-900 border border-emerald-500/20 rounded-2xl p-5 shadow-lg relative overflow-hidden">
+              <p className="text-emerald-400 text-sm font-semibold uppercase tracking-wider mb-2">Completed</p>
+              <h3 className="text-4xl font-bold text-white">{completedCount}</h3>
+              <div className="mt-3 w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                <div className="h-full bg-emerald-500" style={{ width: `${(completedCount/totalAssignments)*100}%` }}></div>
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-rose-900/40 to-slate-900 border border-rose-500/20 rounded-2xl p-5 shadow-lg relative overflow-hidden">
+              <p className="text-rose-400 text-sm font-semibold uppercase tracking-wider mb-2">Overdue</p>
+              <h3 className="text-4xl font-bold text-white">{overdueCount}</h3>
+              <p className="text-rose-500/70 text-xs mt-3 flex items-center gap-1"><AlertCircle className="h-3 w-3" /> Requires attention</p>
+            </div>
+          </div>
+
+          {/* PORTFOLIO TABLE */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+            <div className="p-5 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/50">
+              <h2 className="text-lg font-bold text-white flex items-center gap-2">
+                <Briefcase className="h-5 w-5 text-indigo-400" /> Distributor Audit Portfolio
+              </h2>
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+                  <input 
+                    type="text" 
+                    placeholder="Search distributors..." 
+                    className="bg-slate-950 border border-slate-800 text-sm text-white pl-9 pr-4 py-2 rounded-lg focus:outline-none focus:border-indigo-500 w-64 transition-colors"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+                <div className="flex bg-slate-950 border border-slate-800 rounded-lg p-1">
+                  {['All', 'In Progress', 'Pending', 'Completed', 'Overdue'].map(f => (
+                    <button 
+                      key={f}
+                      onClick={() => setFilter(f)}
+                      className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${filter === f ? 'bg-indigo-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                    >
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-950/50 text-slate-400 text-xs uppercase tracking-wider">
+                    <th className="p-4 font-semibold">Distributor</th>
+                    <th className="p-4 font-semibold">Progress</th>
+                    <th className="p-4 font-semibold">Lifecycle Status</th>
+                    <th className="p-4 font-semibold">Baseline End</th>
+                    <th className="p-4 font-semibold">Forecast End</th>
+                    <th className="p-4 font-semibold">Variance</th>
+                    <th className="p-4 font-semibold text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/50">
+                  {filteredEngagements.map(eng => {
+                    const metrics = getEngagementMetrics(eng.id);
+                    const isOverdue = metrics.status === 'Overdue';
+                    const isCompleted = metrics.status === 'Completed';
+                    const isInProgress = metrics.status === 'In Progress' || metrics.status === 'Ready for Sign-off';
+                    
+                    return (
+                      <tr key={eng.id} className="hover:bg-slate-800/30 transition-colors group">
+                        <td className="p-4">
+                          <div className="font-bold text-white">{eng.distributorName || eng.clientName}</div>
+                          <div className="text-xs text-slate-500 mt-1 font-mono">{eng.code}</div>
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center gap-3">
+                            <span className="text-sm font-medium text-slate-300 w-8">{metrics.progress}%</span>
+                            <div className="w-24 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full rounded-full ${isCompleted ? 'bg-emerald-500' : isOverdue ? 'bg-rose-500' : 'bg-indigo-500'}`}
+                                style={{ width: `${metrics.progress}%` }}
+                              ></div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="p-4">
+                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium border ${
+                            isCompleted ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                            isOverdue ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
+                            isInProgress ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/20' :
+                            'bg-slate-800 text-slate-400 border-slate-700'
+                          }`}>
+                            {isCompleted ? <CheckCircle2 className="h-3 w-3" /> :
+                             isOverdue ? <AlertCircle className="h-3 w-3" /> :
+                             isInProgress ? <Activity className="h-3 w-3" /> :
+                             <Clock className="h-3 w-3" />}
+                            {metrics.status}
+                          </span>
+                        </td>
+                        <td className="p-4 text-sm text-slate-400">
+                          {metrics.baselineCompletion ? new Date(metrics.baselineCompletion).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                        </td>
+                        <td className="p-4 text-sm text-slate-300 font-medium">
+                          {metrics.forecastCompletion ? new Date(metrics.forecastCompletion).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                        </td>
+                        <td className="p-4">
+                          {metrics.variance !== 0 ? (
+                            <span className={`text-xs font-bold ${metrics.variance < 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                              {metrics.variance < 0 ? `${Math.abs(metrics.variance)} days ahead` : `${metrics.variance} days delayed`}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-slate-500">On track</span>
+                          )}
+                        </td>
+                        <td className="p-4 text-right">
+                          <button 
+                            onClick={() => setSelectedEngId(eng.id)}
+                            className="inline-flex items-center gap-1 text-sm font-semibold text-indigo-400 hover:text-indigo-300 opacity-0 group-hover:opacity-100 transition-all"
+                          >
+                            Manage <ArrowRight className="h-4 w-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredEngagements.length === 0 && (
+                    <tr>
+                      <td colSpan={7} className="p-8 text-center text-slate-500">
+                        No distributors found matching the criteria.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : (
+        /* DETAILED DISTRIBUTOR VIEW */
+        <div className="space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
+          
+          {/* DISTRIBUTOR HEADER */}
+          <div className="bg-gradient-to-r from-slate-900 to-slate-900/50 border border-slate-800 rounded-2xl p-6 shadow-xl relative overflow-hidden">
+            <div className="absolute top-0 right-0 w-64 h-full bg-gradient-to-l from-indigo-500/10 to-transparent pointer-events-none"></div>
+            
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <h2 className="text-2xl font-bold text-white">{selectedEngagement?.distributorName || selectedEngagement?.clientName}</h2>
+                  <span className="px-2.5 py-1 bg-slate-800 text-slate-300 text-xs font-mono rounded border border-slate-700">{selectedEngagement?.code}</span>
+                </div>
+                <div className="flex items-center gap-6 text-sm text-slate-400">
+                  <div className="flex items-center gap-1.5"><Calendar className="h-4 w-4" /> Started: {new Date(selectedEngagement?.startDate || '').toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div>
+                  <div className="flex items-center gap-1.5"><UserCheck className="h-4 w-4" /> Lead: {selectedEngagement?.leadAuditor}</div>
+                </div>
+              </div>
+              
+              <div className="flex gap-3">
+                <button 
+                  onClick={() => setSelectedEngId(null)}
+                  className="px-4 py-2 border border-slate-700 hover:bg-slate-800 text-white rounded-lg text-sm font-semibold transition-colors"
+                >
+                  Back to Portfolio
+                </button>
+                <button 
+                  onClick={() => selectedEngId && onSelectEngagement && onSelectEngagement(selectedEngId)}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm font-semibold transition-colors shadow-lg shadow-indigo-500/20 flex items-center gap-2"
+                >
+                  <Briefcase className="h-4 w-4" /> Engagement Workspace
+                </button>
+              </div>
+            </div>
+            
+            {/* KPI STRIP */}
+            <div className="grid grid-cols-2 md:grid-cols-6 gap-4 mt-8 pt-6 border-t border-slate-800/50">
+              {(() => {
+                const metrics = getEngagementMetrics(selectedEngId);
+                return (
+                  <>
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Overall Progress</p>
+                      <div className="mt-1 flex items-baseline gap-2">
+                        <span className="text-2xl font-bold text-white">{metrics.progress}%</span>
+                        <span className={`text-xs font-semibold ${metrics.status === 'Completed' ? 'text-emerald-400' : metrics.status === 'Overdue' ? 'text-rose-400' : 'text-indigo-400'}`}>
+                          {metrics.status}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Forecast Completion</p>
+                      <p className="text-lg font-bold text-white mt-1">
+                        {metrics.forecastCompletion ? new Date(metrics.forecastCompletion).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Baseline</p>
+                      <p className="text-lg font-medium text-slate-400 mt-1">
+                        {metrics.baselineCompletion ? new Date(metrics.baselineCompletion).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '-'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Variance</p>
+                      <p className={`text-lg font-bold mt-1 ${metrics.variance < 0 ? 'text-emerald-400' : metrics.variance > 0 ? 'text-rose-400' : 'text-slate-300'}`}>
+                        {metrics.variance < 0 ? `${Math.abs(metrics.variance)}d early` : metrics.variance > 0 ? `${metrics.variance}d late` : 'On track'}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Project Health</p>
+                      <div className="mt-2 flex items-center gap-1.5">
+                        <div className={`w-2 h-2 rounded-full ${metrics.variance <= 0 ? 'bg-emerald-500' : 'bg-rose-500'}`}></div>
+                        <span className={`text-sm font-semibold ${metrics.variance <= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                          {metrics.variance < 0 ? 'Ahead' : metrics.variance > 0 ? 'Delayed' : 'On Track'}
+                        </span>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Overdue Items</p>
+                      <p className={`text-lg font-bold mt-1 ${timelineStages.some(s => s.status === 'Overdue') ? 'text-rose-400' : 'text-slate-300'}`}>
+                        {timelineStages.filter(s => s.status === 'Overdue').length}
+                      </p>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* LEFT COLUMN: TIMELINE (Spans 2 columns) */}
+            <div className="lg:col-span-2 space-y-6">
+              {renderGanttTimeline()}
+            </div>
+
+            {/* RIGHT COLUMN: ATTENTION & ACTIVITY */}
+            <div className="space-y-6">
+              {/* ATTENTION REQUIRED */}
+              <div className="bg-slate-900 border border-rose-500/20 rounded-xl p-5 shadow-lg relative overflow-hidden">
+                <div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2 mb-4">
+                  <AlertCircle className="h-5 w-5 text-rose-500" /> Attention Required
+                </h3>
+                
+                <div className="space-y-3">
+                  {timelineStages.filter(s => s.status === 'Overdue' || s.status === 'Due Soon' || s.progressPercent === 99).length === 0 ? (
+                    <p className="text-sm text-slate-400 p-4 text-center bg-slate-950/50 rounded-lg border border-slate-800">
+                      No actionable items requiring attention.
+                    </p>
+                  ) : (
+                    timelineStages
+                      .filter(s => s.status === 'Overdue' || s.status === 'Due Soon' || s.progressPercent === 99)
+                      .map(stage => (
+                        <div key={stage.id} className="p-3 bg-slate-950 border border-slate-800 rounded-lg group hover:border-rose-500/40 transition-colors">
+                          <div className="flex justify-between items-start mb-1">
+                            <h4 className="text-sm font-bold text-slate-200">{stage.name}</h4>
+                            <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                              stage.progressPercent === 99 ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/20' :
+                              stage.status === 'Overdue' ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20' : 
+                              'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                            }`}>
+                              {stage.progressPercent === 99 ? 'Ready for Sign-off' : stage.status}
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-400 mb-3">
+                            {stage.progressPercent === 99 ? 'Review and sign-off required.' : `${stage.responsibleParty} · ${Math.abs(stage.daysVariance)} days ${stage.daysVariance > 0 ? 'delayed' : 'remaining'}`}
+                          </p>
+                          <button className="text-xs font-semibold text-white bg-slate-800 hover:bg-slate-700 px-3 py-1.5 rounded transition-colors">
+                            {stage.progressPercent === 99 ? 'Review' : 'Open'}
+                          </button>
+                        </div>
+                      ))
+                  )}
+                </div>
+              </div>
+
+              {/* TIMELINE ACTIVITY LOG */}
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg">
+                <h3 className="text-base font-bold text-white flex items-center gap-2 mb-4">
+                  <Clock4 className="h-5 w-5 text-indigo-400" /> Timeline Activity
+                </h3>
+                <div className="space-y-4">
+                  {/* Mocking activity log mapping to real stages for demonstration as requested */}
+                  {[...timelineStages].reverse().filter(s => s.actualStartDate).slice(0,5).map(stage => (
+                    <div key={`log-${stage.id}`} className="flex gap-3">
+                      <div className="mt-0.5 relative">
+                        <div className="w-2 h-2 rounded-full bg-indigo-500 ring-4 ring-slate-900"></div>
+                        <div className="absolute top-2 bottom-[-16px] left-[3px] w-px bg-slate-800"></div>
+                      </div>
+                      <div>
+                        <p className="text-sm text-slate-300">
+                          {stage.progressPercent === 100 ? `${stage.name} completed` : `${stage.name} started`}
+                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[10px] text-slate-500 font-mono">
+                            {new Date(stage.actualEndDate || stage.actualStartDate!).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <span className="text-[10px] text-slate-400 px-1.5 py-0.5 bg-slate-800 rounded">
+                            {stage.responsibleParty}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  <button className="w-full text-center text-xs font-medium text-indigo-400 hover:text-indigo-300 py-2 transition-colors">
+                    View Full Audit Trail
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
+
+      {/* STAGE DETAIL POPOVER */}
+      {selectedStage && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setSelectedStage(null)}>
+          <div className="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-slate-800 flex justify-between items-center bg-slate-800/50">
+              <h3 className="text-lg font-bold text-white">{selectedStage.name}</h3>
+              <button onClick={() => setSelectedStage(null)} className="text-slate-400 hover:text-white transition-colors">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-400">Responsible Party</span>
+                <span className="text-sm font-semibold text-white">{selectedStage.responsibleParty}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-400">Status</span>
+                <span className={`text-xs uppercase font-bold px-2 py-1 rounded ${
+                  selectedStage.status === 'Completed' || selectedStage.status === 'Completed Early' ? 'bg-emerald-500/20 text-emerald-400' :
+                  selectedStage.status === 'Overdue' ? 'bg-rose-500/20 text-rose-400' : 'bg-indigo-500/20 text-indigo-400'
+                }`}>
+                  {selectedStage.status}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-400">Progress</span>
+                <span className="text-sm font-bold text-white">{selectedStage.progressPercent}%</span>
+              </div>
+              
+              <div className="h-px w-full bg-slate-800 my-4"></div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <span className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Baseline Plan</span>
+                  <div className="text-xs text-slate-300 space-y-1">
+                    <p>Start: {new Date(selectedStage.baselineStartDate).toLocaleDateString()}</p>
+                    <p>End: {new Date(selectedStage.baselineEndDate).toLocaleDateString()}</p>
+                  </div>
+                </div>
+                <div>
+                  <span className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Current Forecast</span>
+                  <div className="text-xs text-slate-300 space-y-1">
+                    <p>Start: {selectedStage.forecastStartDate ? new Date(selectedStage.forecastStartDate).toLocaleDateString() : '-'}</p>
+                    <p className={selectedStage.daysVariance > 0 ? 'text-rose-400 font-medium' : ''}>
+                      End: {selectedStage.forecastEndDate ? new Date(selectedStage.forecastEndDate).toLocaleDateString() : '-'}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="h-px w-full bg-slate-800 my-4"></div>
+              
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-slate-400">Variance</span>
+                <span className={`text-sm font-bold ${selectedStage.daysVariance < 0 ? 'text-emerald-400' : selectedStage.daysVariance > 0 ? 'text-rose-400' : 'text-slate-300'}`}>
+                  {selectedStage.daysVariance < 0 ? `${Math.abs(selectedStage.daysVariance)} days early` : 
+                   selectedStage.daysVariance > 0 ? `${selectedStage.daysVariance} days delayed` : 'On schedule'}
+                </span>
+              </div>
+            </div>
+            <div className="p-4 bg-slate-950 border-t border-slate-800 flex justify-end gap-3">
+              <button onClick={() => setSelectedStage(null)} className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white transition-colors">
+                Close
+              </button>
+              <button className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold rounded transition-colors shadow-lg shadow-indigo-500/20">
+                Open Module
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };

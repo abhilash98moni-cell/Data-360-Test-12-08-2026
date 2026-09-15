@@ -186,5 +186,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     );
   }
 
-  return <ExecutiveAuditTimelineDashboard engagements={engagements} currentUser={currentUser} />;
+  return (
+    <ExecutiveAuditTimelineDashboard 
+      engagements={engagements} 
+      currentUser={currentUser} 
+      onOpenNewAudit={onOpenNewAudit}
+      onTabChange={onTabChange}
+      onSelectEngagement={onSelectEngagement}
+    />
+  );
 };
