@@ -26,6 +26,13 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
   const [selectedStage, setSelectedStage] = useState<any | null>(null);
 
   useEffect(() => {
+    if (engagements.length > 0 && !selectedEngId) {
+      setSelectedEngId(engagements[0].id);
+    }
+  }, [engagements, selectedEngId]);
+
+
+  useEffect(() => {
     const fetchAll = async () => {
       setLoading(true);
       const results: Record<string, any[]> = {};
@@ -264,28 +271,11 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
               <Plus className="h-4 w-4" /> Initiate New Audit
             </button>
           )}
-          <div className="relative">
-            <select 
-              className="appearance-none bg-slate-900 border border-slate-700 text-white pl-4 pr-10 py-2.5 rounded-xl font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-lg min-w-[240px]"
-              value={selectedEngId || ''}
-              onChange={(e) => setSelectedEngId(e.target.value || null)}
-            >
-              <option value="">Portfolio Overview</option>
-              {engagements.map(eng => {
-                const metrics = getEngagementMetrics(eng.id);
-                return (
-                  <option key={eng.id} value={eng.id}>
-                    {eng.distributorName || eng.clientName} ({metrics.progress}%)
-                  </option>
-                );
-              })}
-            </select>
-            <ChevronRight className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-slate-400 rotate-90 pointer-events-none" />
-          </div>
+          
         </div>
       </div>
 
-      {!selectedEngId ? (
+      <div>
         /* PORTFOLIO OVERVIEW */
         <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
           
@@ -449,7 +439,9 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
             </div>
           </div>
         </div>
-      ) : (
+      </div>
+
+      {selectedEngId && (
         /* DETAILED DISTRIBUTOR VIEW */
         <div className="space-y-6 animate-in fade-in slide-in-from-right-8 duration-500">
           

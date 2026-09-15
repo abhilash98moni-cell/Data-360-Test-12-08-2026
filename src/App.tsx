@@ -429,7 +429,7 @@ export default function App() {
             />
           ) : activeTab === 'dashboard' ? (
             <DashboardView 
-              engagements={filteredEngagements.length > 0 ? filteredEngagements : engagements}
+              engagements={engagements}
               findings={filteredFindings.length > 0 ? filteredFindings : findings}
               samplingRuns={samplingRuns}
               assignments={assignments}
