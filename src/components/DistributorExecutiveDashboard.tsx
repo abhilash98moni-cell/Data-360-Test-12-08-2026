@@ -606,7 +606,7 @@ export const DistributorExecutiveDashboard: React.FC<DistributorExecutiveDashboa
         </div>
 
         {/* Card 5: Attention Needed */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 hover:border-rose-500/40 transition-all flex flex-col justify-between shadow-sm col-span-2 sm:col-span-1">
+        <div className="bg-slate-900/90 border border-dashed border-rose-500/50 rounded-xl p-3 hover:border-rose-500/80 transition-all flex flex-col justify-between shadow-sm col-span-2 sm:col-span-1">
           <div className="flex justify-between items-start">
             <span className="text-[10px] font-bold uppercase tracking-wider text-rose-400">Attention Needed</span>
             <div className="p-1 rounded bg-rose-500/10 text-rose-400">
