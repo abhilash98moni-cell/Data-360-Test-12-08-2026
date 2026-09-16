@@ -258,7 +258,7 @@ export const DistributorSamplingReviewView: React.FC<Props> = ({
   }, [populationRecords, assignedSamples, allResponses, searchQuery]);
 
   return (
-    <div className="h-full flex flex-col bg-[#0B0F19] text-slate-200">
+    <div className="h-full flex flex-col bg-slate-950 text-slate-200">
       <div className="bg-slate-900 border-b border-slate-800 p-6 flex flex-col gap-6 shrink-0 z-10">
         <div className="flex justify-between items-center">
           <div>

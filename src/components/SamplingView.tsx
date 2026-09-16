@@ -2237,7 +2237,7 @@ export const SamplingView: React.FC<SamplingViewProps> = ({
   };
 
   return (
-    <div className="h-full flex flex-col bg-[#0B0F19]">
+    <div className="h-full flex flex-col bg-slate-950">
       <div className="p-8 pb-4">
         <div className="flex items-center justify-between mb-8">
           <div>

@@ -190,7 +190,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
   });
 
   return (
-    <div className="p-6 md:p-8 max-w-[1600px] mx-auto min-h-screen bg-[#0B1120] text-slate-300">
+    <div className="p-6 md:p-8 max-w-[1600px] mx-auto min-h-screen bg-slate-950 text-slate-300">
       
       {/* 1. HERO SECTION & DISTRIBUTOR AUDIT SWITCHER */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl mb-6 relative overflow-hidden flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
