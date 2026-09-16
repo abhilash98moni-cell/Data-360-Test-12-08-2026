@@ -145,12 +145,10 @@ export default function App() {
           headers: token ? { 'Authorization': `Bearer ${token}` } : {}
         });
         const data = await res.json();
-        if (res.ok && data.success && data.audits) {
+        if (res.ok && data.success && Array.isArray(data.audits) && data.audits.length > 0) {
           setEngagements(data.audits);
-          if (data.audits.length > 0) {
+          if (!selectedEngId) {
             setSelectedEngId(data.audits[0].id);
-          } else {
-            setSelectedEngId('');
           }
         }
       } catch (err) {
@@ -433,9 +431,26 @@ export default function App() {
               findings={filteredFindings.length > 0 ? filteredFindings : findings}
               samplingRuns={samplingRuns}
               assignments={assignments}
+              selectedEngagementId={selectedEngId}
+              onSelectAuditContext={(id, distName, clientName) => {
+                setSelectedEngId(id);
+                const eng = engagements.find(e => e.id === id || e.code === id);
+                if (eng) {
+                  if (clientName || eng.clientName) setSelectedClient(clientName || eng.clientName);
+                  if (distName || eng.distributorName) {
+                    setSelectedDistributor(distName || eng.distributorName!);
+                  } else {
+                    const dists = getDistributorsForClient(eng.clientName);
+                    const matched = dists.find(d => eng.title.includes(d.name) || eng.location.includes(d.name) || (d.code && eng.location.includes(d.code)));
+                    if (matched) {
+                      setSelectedDistributor(matched.name);
+                    }
+                  }
+                }
+              }}
               onSelectEngagement={(id) => {
                 setSelectedEngId(id);
-                const eng = engagements.find(e => e.id === id);
+                const eng = engagements.find(e => e.id === id || e.code === id);
                 if (eng) {
                   if (eng.clientName) setSelectedClient(eng.clientName);
                   if (eng.distributorName) {

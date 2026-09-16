@@ -26,7 +26,11 @@ export const BASE_CLIENT_TENANTS: ClientTenantInfo[] = [
     name: 'Apex Electronics Corp',
     industry: 'Consumer Technology',
     distributors: [
-      { id: 'dist-1', name: 'Midwest Trading Co.', code: 'MDT-8092', region: 'Midwest Region (USA)', status: 'Active Audit' }
+      { id: 'dist-1', name: 'Midwest Trading Co.', code: 'MDT-8092', region: 'Midwest Region (USA)', status: 'Active Audit' },
+      { id: 'dist-2', name: 'ABC Distributors', code: 'ABC-2002', region: 'Eastern Region (USA)', status: 'Active Audit' },
+      { id: 'dist-3', name: 'XYZ Trading', code: 'XYZ-3003', region: 'Western Region (USA)', status: 'Active Audit' },
+      { id: 'dist-4', name: 'Sunrise Distributors', code: 'SND-4004', region: 'Southern Territory (USA)', status: 'Planning' },
+      { id: 'dist-5', name: 'Trident Supplies', code: 'TRD-5005', region: 'Northern Region (USA)', status: 'Submitted' }
     ]
   }
 ];

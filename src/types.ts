@@ -195,6 +195,34 @@ export interface AuditEngagement {
     low: number;
   };
   location: string;
+  forecastCompletion?: string;
+  baselineCompletion?: string;
+  daysRemaining?: number;
+  overdueItemsCount?: number;
+  varianceText?: string;
+  varianceStatus?: 'ahead' | 'delayed' | 'neutral' | 'completed';
+  timelinePhases?: {
+    irlKickoff: { progress: number; status: string; startWeek?: number; endWeek?: number };
+    dataCollection: { progress: number; status: string; startWeek?: number; endWeek?: number };
+    dataAnalytics: { progress: number; status: string; startWeek?: number; endWeek?: number };
+    supportingDocs: { progress: number; status: string; startWeek?: number; endWeek?: number };
+    transactionTesting: { progress: number; status: string; startWeek?: number; endWeek?: number };
+    interviewReporting: { progress: number; status: string; startWeek?: number; endWeek?: number };
+  };
+  documents?: Array<{
+    id: string;
+    name: string;
+    size: string;
+    category: string;
+    uploadDate: string;
+    status: string;
+  }>;
+  activityLogs?: Array<{
+    id: string;
+    timestamp: string;
+    user: string;
+    action: string;
+  }>;
 }
 
 export interface AuditFinding {
