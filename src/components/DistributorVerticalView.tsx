@@ -219,7 +219,7 @@ export const DistributorVerticalView: React.FC<DistributorVerticalViewProps> = (
                             <p>{item.description}</p>
                             
                             {/* Auditor Provided Sample / Reference Material Button */}
-                            {item.sampleMaterialEnabled && item.referenceMaterial && item.referenceMaterial.displayToDistributor && (
+                            {item.sampleMaterialEnabled && item.referenceMaterial && item.referenceMaterial.displayToDistributor && item.refNumber !== '1.1' && (
                               <div className="mt-2.5">
                                 <button
                                   type="button"
