@@ -273,3 +273,48 @@ export async function customizeQuestionnaire(
     return { success: false, error: err.message };
   }
 }
+
+export async function updateQuestionnaireQuestionStatus(
+  client: string,
+  distributor: string,
+  auditId: string = 'eng-101',
+  questionId: string,
+  reviewerStatus: string,
+  reviewerNote?: string,
+  reviewerUser?: string
+): Promise<{ success: boolean; state?: AuthoritativeQuestionnaireState; error?: string }> {
+  try {
+    const res = await fetch('/api/questionnaire/update-item-status', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-user-role': 'Auditor',
+        ...getAuthHeaders()
+      },
+      body: JSON.stringify({
+        client,
+        distributor,
+        auditId,
+        questionId,
+        reviewerStatus,
+        reviewerNote,
+        reviewerUser
+      })
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error || `HTTP ${res.status}: Failed to update review status`);
+    }
+
+    const data = await res.json();
+    return data;
+  } catch (err: any) {
+    console.error('updateQuestionnaireQuestionStatus API error:', err);
+    return {
+      success: false,
+      error: err.message || 'Failed to update review status'
+    };
+  }
+}
+

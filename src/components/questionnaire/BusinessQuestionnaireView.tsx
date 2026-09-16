@@ -24,7 +24,8 @@ import {
   Flag,
   Bookmark,
   Eye,
-  RefreshCw
+  RefreshCw,
+  X
 } from 'lucide-react';
 import {
   BUSINESS_QUESTIONNAIRE_SECTIONS,
@@ -41,12 +42,14 @@ import {
   requestEditAccessQuestionnaire,
   reviewEditAccessQuestionnaire,
   customizeQuestionnaire,
+  updateQuestionnaireQuestionStatus,
   getAuthHeaders
 } from '../../services/questionnaireApiClient';
 import {
   AuthoritativeQuestionnaireState,
   QuestionnaireAnswerItem,
-  QuestionnaireAuditorNoteItem
+  QuestionnaireAuditorNoteItem,
+  QuestionnaireReviewerStatus
 } from '../../services/questionnaireService';
 import { UserSession } from '../AuthModal';
 import { EngagementWorkspaceActionBar } from '../EngagementWorkspaceActionBar';
@@ -98,6 +101,14 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
   const [isRequestEditModalOpen, setIsRequestEditModalOpen] = useState<boolean>(false);
   const [editRequestReason, setEditRequestReason] = useState<string>("");
   const [isReviewEditModalOpen, setIsReviewEditModalOpen] = useState<boolean>(false);
+
+  // Question Review Dialog State (Auditor Clarification & Rejection)
+  const [reviewDialogTarget, setReviewDialogTarget] = useState<{
+    question: QuestionnaireQuestionDefinition;
+    action: 'Clarification Required' | 'Rejected';
+  } | null>(null);
+  const [reviewDialogComment, setReviewDialogComment] = useState<string>('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState<boolean>(false);
 
   // Unified Push State
   const activeDistributors = useMemo(() => getDistributorsForClient(selectedClient), [selectedClient]);
@@ -289,13 +300,27 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
 
   const clarificationCount = useMemo(() => {
     let count = 0;
-    Object.values(localAuditorNotes).forEach((note: any) => {
-      if (note?.isFlaggedForFollowUp || (note?.followUpNote && note.followUpNote.trim().length > 0)) {
-        count++;
+    const countedIds = new Set<string>();
+
+    if (questionnaireState?.questionReviews) {
+      Object.entries(questionnaireState.questionReviews).forEach(([qId, rev]: [string, any]) => {
+        if (rev?.reviewerStatus === 'Clarification Required') {
+          countedIds.add(qId);
+        }
+      });
+    }
+    Object.entries(localAnswers).forEach(([qId, ans]: [string, any]) => {
+      if (ans?.reviewerStatus === 'Clarification Required') {
+        countedIds.add(qId);
       }
     });
-    return count || overallStats.flaggedTotal || 0;
-  }, [localAuditorNotes, overallStats.flaggedTotal]);
+    Object.entries(localAuditorNotes).forEach(([qId, note]: [string, any]) => {
+      if (note?.isFlaggedForFollowUp || (note?.followUpNote && note.followUpNote.trim().length > 0)) {
+        countedIds.add(qId);
+      }
+    });
+    return countedIds.size;
+  }, [questionnaireState?.questionReviews, localAnswers, localAuditorNotes]);
 
   const handleOpenCustomizeModal = () => {
     const initial = questionnaireState?.customSections && questionnaireState.customSections.length > 0
@@ -502,6 +527,130 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
     } catch (err: any) {
       setSyncStatus('error');
       setErrorMessage(err.message || 'Error saving auditor notes.');
+    }
+  };
+
+  // Auditor Question-Level Evaluation (Accept Evidence, Require Clarification, Reject Evidence)
+  const handleReviewerStatusChange = async (
+    q: QuestionnaireQuestionDefinition,
+    newStatus: QuestionnaireReviewerStatus,
+    comment?: string
+  ) => {
+    const nowIso = new Date().toISOString();
+    const reviewerUser = currentUser?.name || currentUser?.email || 'Auditor';
+
+    // 1. Optimistically update questionnaireState
+    setQuestionnaireState((prev) => {
+      if (!prev) return prev;
+      const updatedReviews = { ...(prev.questionReviews || {}) };
+      updatedReviews[q.id] = {
+        reviewerStatus: newStatus,
+        reviewerComment: comment !== undefined ? comment : updatedReviews[q.id]?.reviewerComment,
+        reviewedBy: reviewerUser,
+        reviewedAt: nowIso
+      };
+      const updatedAnswers = { ...(prev.answers || {}) };
+      if (updatedAnswers[q.id]) {
+        updatedAnswers[q.id] = {
+          ...updatedAnswers[q.id],
+          reviewerStatus: newStatus,
+          reviewerComment: comment !== undefined ? comment : updatedAnswers[q.id]?.reviewerComment,
+          reviewedBy: reviewerUser,
+          reviewedAt: nowIso
+        };
+      } else {
+        updatedAnswers[q.id] = {
+          questionId: q.id,
+          responseValue: '',
+          lastUpdated: nowIso,
+          updatedBy: 'System',
+          reviewerStatus: newStatus,
+          reviewerComment: comment,
+          reviewedBy: reviewerUser,
+          reviewedAt: nowIso
+        };
+      }
+      return {
+        ...prev,
+        questionReviews: updatedReviews,
+        answers: updatedAnswers
+      };
+    });
+
+    // 2. Optimistically update localAnswers
+    setLocalAnswers((prev) => {
+      const existing = prev[q.id];
+      return {
+        ...prev,
+        [q.id]: {
+          ...(existing || {
+            questionId: q.id,
+            responseValue: '',
+            lastUpdated: nowIso,
+            updatedBy: 'System'
+          }),
+          reviewerStatus: newStatus,
+          reviewerComment: comment !== undefined ? comment : existing?.reviewerComment,
+          reviewedBy: reviewerUser,
+          reviewedAt: nowIso
+        }
+      };
+    });
+
+    // 3. Persist to backend and trigger notifications
+    try {
+      const res = await updateQuestionnaireQuestionStatus(
+        selectedClient,
+        selectedDistributor,
+        'eng-101',
+        q.id,
+        newStatus,
+        comment,
+        reviewerUser
+      );
+
+      if (res.success && res.state) {
+        setQuestionnaireState(res.state);
+        setSyncStatus('synced');
+        setLastSyncTime(new Date().toLocaleTimeString());
+        window.dispatchEvent(new CustomEvent('notification-updated'));
+      }
+      showToast(`Question ${q.questionNumber} marked as ${newStatus}.`, 'success');
+    } catch (err: any) {
+      console.error('Failed to update question reviewer status:', err);
+      showToast(`Failed to update status for Question ${q.questionNumber}: ${err.message}`, 'error');
+    }
+  };
+
+  const handleOpenReviewDialog = (
+    q: QuestionnaireQuestionDefinition,
+    action: 'Clarification Required' | 'Rejected'
+  ) => {
+    const existingComment =
+      questionnaireState?.questionReviews?.[q.id]?.reviewerComment ||
+      localAnswers[q.id]?.reviewerComment ||
+      '';
+    setReviewDialogComment(existingComment);
+    setReviewDialogTarget({ question: q, action });
+  };
+
+  const handleConfirmReviewDialog = async () => {
+    if (!reviewDialogTarget) return;
+    if (!reviewDialogComment.trim()) {
+      showToast(`Please enter a comment or reason for ${reviewDialogTarget.action}.`, 'error');
+      return;
+    }
+    setIsSubmittingReview(true);
+    try {
+      await handleReviewerStatusChange(
+        reviewDialogTarget.question,
+        reviewDialogTarget.action,
+        reviewDialogComment.trim()
+      );
+      setReviewDialogTarget(null);
+      setReviewDialogComment('');
+    } finally {
+      setIsSubmittingReview(false);
     }
   };
 
@@ -1406,6 +1555,11 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                 if (q.isActive === false && !isAuditor) return null;
                 const answer = localAnswers[q.id];
                 const auditorNote = localAuditorNotes[q.id];
+                const questionReview = questionnaireState?.questionReviews?.[q.id];
+                const itemReviewerStatus = questionReview?.reviewerStatus || answer?.reviewerStatus;
+                const itemReviewComment = questionReview?.reviewerComment || answer?.reviewerComment;
+                const itemReviewedBy = questionReview?.reviewedBy || answer?.reviewedBy;
+                const itemReviewedAt = questionReview?.reviewedAt || answer?.reviewedAt;
                 const isAnswered = Boolean(answer?.responseValue && answer.responseValue.trim().length > 0);
                 const isLocked = isAuditor || (questionnaireState?.isLocked && questionnaireState?.editAccessStatus !== 'APPROVED');
 
@@ -1440,7 +1594,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                       </div>
 
                       {/* Status Badges */}
-                      <div className="flex items-center gap-2 shrink-0">
+                      <div className="flex flex-wrap items-center gap-2 shrink-0">
                         {q.isRequired && (
                           <span className="text-[10px] bg-rose-500/10 text-rose-300 border border-rose-500/20 px-1.5 py-0.5 rounded font-semibold">
                             Mandatory
@@ -1455,8 +1609,60 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                             Pending
                           </span>
                         )}
+
+                        {/* Reviewer Status Badge */}
+                        {itemReviewerStatus ? (
+                          <span className={`flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full border ${
+                            itemReviewerStatus === 'Accepted'
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                              : itemReviewerStatus === 'Clarification Required'
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                              : itemReviewerStatus === 'Rejected'
+                              ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                              : 'bg-slate-800 text-slate-400 border-slate-700'
+                          }`}>
+                            {itemReviewerStatus === 'Accepted' && <Check className="h-3 w-3 text-emerald-400" />}
+                            {itemReviewerStatus === 'Clarification Required' && <HelpCircle className="h-3 w-3 text-amber-400" />}
+                            {itemReviewerStatus === 'Rejected' && <AlertTriangle className="h-3 w-3 text-rose-400" />}
+                            <span>Auditor: {itemReviewerStatus}</span>
+                          </span>
+                        ) : isAuditor ? (
+                          <span className="text-[10px] font-medium px-2 py-0.5 rounded-full border bg-slate-800/80 text-slate-400 border-slate-700/60">
+                            Pending Review
+                          </span>
+                        ) : null}
                       </div>
                     </div>
+
+                    {/* Auditor Evaluation Note Banner for Distributor / Auditor */}
+                    {itemReviewComment && (
+                      <div className={`p-3 rounded-xl border text-xs flex items-start gap-2.5 ${
+                        itemReviewerStatus === 'Clarification Required'
+                          ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+                          : itemReviewerStatus === 'Rejected'
+                          ? 'bg-rose-950/40 border-rose-500/40 text-rose-200'
+                          : 'bg-emerald-950/40 border-emerald-500/30 text-emerald-200'
+                      }`}>
+                        {itemReviewerStatus === 'Clarification Required' ? (
+                          <HelpCircle className="h-4 w-4 shrink-0 mt-0.5 text-amber-400" />
+                        ) : itemReviewerStatus === 'Rejected' ? (
+                          <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5 text-rose-400" />
+                        ) : (
+                          <Check className="h-4 w-4 shrink-0 mt-0.5 text-emerald-400" />
+                        )}
+                        <div className="space-y-1 flex-1">
+                          <div className="flex items-center justify-between gap-2 font-bold">
+                            <span>Auditor Reviewer Evaluation: {itemReviewerStatus || 'Feedback'}</span>
+                            {itemReviewedAt && (
+                              <span className="text-[10px] font-normal opacity-75 font-mono">
+                                {new Date(itemReviewedAt).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                          <p className="leading-relaxed whitespace-pre-wrap">{itemReviewComment}</p>
+                        </div>
+                      </div>
+                    )}
 
                     {/* Response Controls (Distributor & Auditor View) */}
                     <div className="space-y-3 pt-2">
@@ -1626,6 +1832,83 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                                   </div>
                                 </div>
                               ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* AUDITOR REVIEW CONTROLS (Question-level Reviewer Evaluation) */}
+                      {isAuditor && (
+                        <div className="mt-3 bg-slate-950 p-3.5 rounded-xl border border-indigo-500/30 space-y-2.5">
+                          <div className="flex items-center justify-between text-xs text-indigo-300 font-bold">
+                            <span className="flex items-center gap-1.5">
+                              <ShieldCheck className="h-4 w-4 text-indigo-400" />
+                              <span>Auditor Reviewer Evaluation:</span>
+                            </span>
+                            <span className="text-[10px] text-slate-400">Update status for Distributor</span>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleReviewerStatusChange(q, 'Accepted')}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5 ${
+                                itemReviewerStatus === 'Accepted'
+                                  ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-600/30'
+                                  : 'bg-slate-900 hover:bg-slate-800 text-emerald-400 border-slate-800'
+                              }`}
+                            >
+                              <Check className="h-3.5 w-3.5" />
+                              <span>Accept Evidence</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReviewDialog(q, 'Clarification Required')}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5 ${
+                                itemReviewerStatus === 'Clarification Required'
+                                  ? 'bg-amber-600 text-white border-amber-500 shadow-md shadow-amber-600/30'
+                                  : 'bg-slate-900 hover:bg-slate-800 text-amber-400 border-slate-800'
+                              }`}
+                            >
+                              <HelpCircle className="h-3.5 w-3.5" />
+                              <span>Require Clarification</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReviewDialog(q, 'Rejected')}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5 ${
+                                itemReviewerStatus === 'Rejected'
+                                  ? 'bg-rose-600 text-white border-rose-500 shadow-md shadow-rose-600/30'
+                                  : 'bg-slate-900 hover:bg-slate-800 text-rose-400 border-slate-800'
+                              }`}
+                            >
+                              <AlertTriangle className="h-3.5 w-3.5" />
+                              <span>Reject Evidence</span>
+                            </button>
+                          </div>
+
+                          {itemReviewerStatus && (
+                            <div className="flex flex-wrap items-center gap-2 pt-0.5 text-[11px] text-slate-400">
+                              <span>Current Status:</span>
+                              <span className={`font-bold ${
+                                itemReviewerStatus === 'Accepted' ? 'text-emerald-400' :
+                                itemReviewerStatus === 'Clarification Required' ? 'text-amber-400' :
+                                itemReviewerStatus === 'Rejected' ? 'text-rose-400' : 'text-slate-300'
+                              }`}>
+                                {itemReviewerStatus}
+                              </span>
+                              {itemReviewedBy && (
+                                <span className="text-slate-500 font-mono">
+                                  &bull; by {itemReviewedBy}
+                                </span>
+                              )}
+                              {itemReviewedAt && (
+                                <span className="text-slate-500 font-mono">
+                                  at {new Date(itemReviewedAt).toLocaleDateString()}
+                                </span>
+                              )}
                             </div>
                           )}
                         </div>
@@ -2151,6 +2434,137 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold cursor-pointer border border-slate-700 transition-colors"
               >
                 Close Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* AUDITOR REVIEW DIALOG (Clarification / Rejection Modal) */}
+      {reviewDialogTarget && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-xl w-full space-y-4 shadow-2xl relative">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <div className="flex items-center gap-3">
+                <div className={`p-2.5 rounded-xl border ${
+                  reviewDialogTarget.action === 'Clarification Required'
+                    ? 'bg-amber-600/20 text-amber-400 border-amber-500/30'
+                    : 'bg-rose-600/20 text-rose-400 border-rose-500/30'
+                }`}>
+                  {reviewDialogTarget.action === 'Clarification Required' ? (
+                    <HelpCircle className="h-6 w-6" />
+                  ) : (
+                    <AlertTriangle className="h-6 w-6" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">
+                    {reviewDialogTarget.action === 'Clarification Required'
+                      ? `Require Clarification — Question ${reviewDialogTarget.question.questionNumber}`
+                      : `Reject Evidence — Question ${reviewDialogTarget.question.questionNumber}`}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {reviewDialogTarget.action === 'Clarification Required'
+                      ? 'Request additional details, evidence, or explanation from the Distributor.'
+                      : 'Reject the submitted answer/evidence and provide deficiency explanation.'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setReviewDialogTarget(null);
+                  setReviewDialogComment('');
+                }}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Target Question Summary Box */}
+            <div className="p-3.5 bg-slate-950 rounded-xl border border-slate-800 space-y-2 text-xs">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-indigo-400 block mb-0.5">
+                  Question {reviewDialogTarget.question.questionNumber}
+                </span>
+                <p className="text-slate-200 font-medium leading-relaxed">
+                  {reviewDialogTarget.question.questionText}
+                </p>
+              </div>
+
+              {/* Current Distributor Response Preview */}
+              <div className="pt-2 border-t border-slate-900">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block mb-0.5">
+                  Distributor Response:
+                </span>
+                <p className="text-slate-300 bg-slate-900/80 p-2 rounded-lg border border-slate-800/80 font-mono text-[11px] whitespace-pre-wrap">
+                  {localAnswers[reviewDialogTarget.question.id]?.responseValue || 'No response recorded yet'}
+                  {localAnswers[reviewDialogTarget.question.id]?.explanation && (
+                    <span className="block mt-1 text-slate-400 font-sans">
+                      Details: {localAnswers[reviewDialogTarget.question.id]?.explanation}
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            {/* Reason / Clarification Textarea */}
+            <div className="space-y-1.5 text-xs">
+              <label className="text-slate-300 font-semibold block">
+                {reviewDialogTarget.action === 'Clarification Required'
+                  ? 'Clarification Message / Inquiries for Distributor:'
+                  : 'Rejection Reason / Required Remediation:'}
+              </label>
+              <textarea
+                autoFocus
+                rows={4}
+                value={reviewDialogComment}
+                onChange={(e) => setReviewDialogComment(e.target.value)}
+                placeholder={
+                  reviewDialogTarget.action === 'Clarification Required'
+                    ? 'Specify what clarification or additional evidence is needed from the distributor...'
+                    : 'Specify the grounds for rejecting this evidence and what is required to pass audit evaluation...'
+                }
+                className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              />
+            </div>
+
+            {/* Dialog Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setReviewDialogTarget(null);
+                  setReviewDialogComment('');
+                }}
+                disabled={isSubmittingReview}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmReviewDialog}
+                disabled={!reviewDialogComment.trim() || isSubmittingReview}
+                className={`px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50 ${
+                  reviewDialogTarget.action === 'Clarification Required'
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white shadow-md shadow-amber-600/30'
+                    : 'bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/30'
+                }`}
+              >
+                {reviewDialogTarget.action === 'Clarification Required' ? (
+                  <>
+                    <Send className="h-3.5 w-3.5" />
+                    <span>{isSubmittingReview ? 'Sending...' : 'Require Clarification'}</span>
+                  </>
+                ) : (
+                  <>
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    <span>{isSubmittingReview ? 'Rejecting...' : 'Reject Evidence'}</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

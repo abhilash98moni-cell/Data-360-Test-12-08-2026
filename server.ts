@@ -27,7 +27,8 @@ import {
   saveAuthoritativeQuestionnaireAuditorNotes,
   requestAuthoritativeQuestionnaireEditAccess,
   reviewAuthoritativeQuestionnaireEditAccess,
-  customizeAuthoritativeQuestionnaire
+  customizeAuthoritativeQuestionnaire,
+  updateAuthoritativeQuestionnaireQuestionStatus
 } from './src/services/questionnaireService.js';
 import { dbStore } from './src/services/dbStore.js';
 
@@ -6663,6 +6664,53 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     } catch (err: any) {
       console.error('Error in POST /api/questionnaire/auditor-notes:', err);
       return res.status(500).json({ success: false, error: err.message || 'Failed to save auditor notes' });
+    }
+  });
+
+  // Update Individual Business Questionnaire Question Reviewer Status Endpoint
+  app.post('/api/questionnaire/update-item-status', async (req, res) => {
+    try {
+      const { client, distributor, auditId, questionId, itemId, reviewerStatus, reviewerNote, reviewerUser } = req.body;
+      const targetQuestionId = questionId || itemId;
+
+      if (!client || !distributor || !targetQuestionId || !reviewerStatus) {
+        return res.status(400).json({
+          success: false,
+          error: 'client, distributor, questionId (or itemId), and reviewerStatus are required.'
+        });
+      }
+
+      const authSession = await resolveAuthSession(req);
+      const effectiveRole = (authSession?.role || req.headers['x-user-role'] || '').toString().toLowerCase();
+
+      // Only Auditors can evaluate responses
+      if (effectiveRole.includes('distributor')) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: Distributors cannot perform auditor evaluations.'
+        });
+      }
+
+      const result = await updateAuthoritativeQuestionnaireQuestionStatus(
+        client,
+        distributor,
+        auditId || 'eng-101',
+        targetQuestionId,
+        reviewerStatus,
+        reviewerNote,
+        reviewerUser || authSession?.name || 'Auditor'
+      );
+
+      return res.json({
+        success: true,
+        state: result.state
+      });
+    } catch (err: any) {
+      console.error('Error in POST /api/questionnaire/update-item-status:', err);
+      return res.status(500).json({
+        success: false,
+        error: err.message || 'Failed to update questionnaire question review status'
+      });
     }
   });
 

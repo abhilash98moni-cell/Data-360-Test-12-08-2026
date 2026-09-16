@@ -5,6 +5,15 @@ import { dispatchNotification } from './notificationService.js';
 
 export { getSupabaseServerClient };
 
+export type QuestionnaireReviewerStatus = 'Accepted' | 'Clarification Required' | 'Rejected' | 'Pending Review';
+
+export interface QuestionnaireQuestionReviewItem {
+  reviewerStatus: QuestionnaireReviewerStatus;
+  reviewerComment?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
+}
+
 export interface QuestionnaireAnswerItem {
   questionId: string;
   responseValue: string;
@@ -20,6 +29,10 @@ export interface QuestionnaireAnswerItem {
   }[];
   lastUpdated: string;
   updatedBy: string;
+  reviewerStatus?: QuestionnaireReviewerStatus;
+  reviewerComment?: string;
+  reviewedBy?: string;
+  reviewedAt?: string;
 }
 
 export interface QuestionnaireAuditorNoteItem {
@@ -29,6 +42,8 @@ export interface QuestionnaireAuditorNoteItem {
   followUpNote: string;
   linkedIRLRequirementId?: string;
   riskRating?: 'Low' | 'Medium' | 'High' | 'Critical';
+  reviewerStatus?: QuestionnaireReviewerStatus;
+  reviewerComment?: string;
   reviewedBy?: string;
   reviewedAt?: string;
 }
@@ -54,6 +69,7 @@ export interface AuthoritativeQuestionnaireState {
   submittedBy?: string;
   answers: Record<string, QuestionnaireAnswerItem>;
   auditorNotes?: Record<string, QuestionnaireAuditorNoteItem>;
+  questionReviews?: Record<string, QuestionnaireQuestionReviewItem>;
   version: number;
   updatedAt: string;
   updatedBy: string;
@@ -219,6 +235,19 @@ export async function saveAuthoritativeQuestionnaireAnswers(
 
   const { answeredCount, totalCount, completionPercentage } = calculateQuestionnaireProgress(answers);
 
+  // Preserve existing question reviews and reviewer evaluations
+  const preservedAnswers: Record<string, QuestionnaireAnswerItem> = { ...answers };
+  if (existingState.answers) {
+    for (const [qId, exAns] of Object.entries<any>(existingState.answers)) {
+      if (preservedAnswers[qId]) {
+        if (exAns.reviewerStatus) preservedAnswers[qId].reviewerStatus = exAns.reviewerStatus;
+        if (exAns.reviewerComment) preservedAnswers[qId].reviewerComment = exAns.reviewerComment;
+        if (exAns.reviewedBy) preservedAnswers[qId].reviewedBy = exAns.reviewedBy;
+        if (exAns.reviewedAt) preservedAnswers[qId].reviewedAt = exAns.reviewedAt;
+      }
+    }
+  }
+
   const updatedState: AuthoritativeQuestionnaireState = {
     client: clientName,
     distributor: distName,
@@ -230,7 +259,8 @@ export async function saveAuthoritativeQuestionnaireAnswers(
     answeredCount,
     totalCount,
     submittedBy: existingState.submittedBy,
-    answers,
+    answers: preservedAnswers,
+    questionReviews: existingState.questionReviews || {},
     version: nextVersion,
     updatedAt: nowIso,
     updatedBy: `${userName} (${userEmail})`
@@ -581,3 +611,172 @@ export async function customizeAuthoritativeQuestionnaire(
 
   return { found: true, state: newState };
 }
+
+function getQuestionRefNumber(questionId: string, customSections?: any[]): string {
+  const sections = customSections && customSections.length > 0 ? customSections : BUSINESS_QUESTIONNAIRE_SECTIONS;
+  for (const sec of sections) {
+    for (const q of sec.questions || []) {
+      if (q.id === questionId) {
+        return q.questionNumber || questionId;
+      }
+    }
+  }
+  return questionId;
+}
+
+/**
+ * Updates individual question review evaluation status (Accepted, Clarification Required, Rejected).
+ * Mirrors the IRL handleReviewerStatusChange flow with independent per-question state,
+ * notification dispatch, and audit logging.
+ */
+export async function updateAuthoritativeQuestionnaireQuestionStatus(
+  clientName: string,
+  distName: string,
+  auditId: string = 'eng-101',
+  questionId: string,
+  reviewerStatus: QuestionnaireReviewerStatus,
+  reviewerNote?: string,
+  reviewerUser: string = 'Auditor'
+): Promise<{ success: boolean; state: AuthoritativeQuestionnaireState }> {
+  const supabase = getSupabaseServerClient();
+  const stateKey = `${clientName}::${distName}::${auditId}`;
+  const nowIso = new Date().toISOString();
+
+  // 1. Fetch current authoritative state including auditor notes
+  const { state: currentState } = await getAuthoritativeQuestionnaireState(clientName, distName, auditId, true);
+
+  // 2. Update question-level review status in answers
+  const updatedAnswers: Record<string, QuestionnaireAnswerItem> = { ...(currentState.answers || {}) };
+  if (updatedAnswers[questionId]) {
+    updatedAnswers[questionId] = {
+      ...updatedAnswers[questionId],
+      reviewerStatus,
+      reviewerComment: reviewerNote !== undefined ? reviewerNote : updatedAnswers[questionId].reviewerComment,
+      reviewedBy: reviewerUser,
+      reviewedAt: nowIso
+    };
+  } else {
+    updatedAnswers[questionId] = {
+      questionId,
+      responseValue: '',
+      lastUpdated: nowIso,
+      updatedBy: 'System',
+      reviewerStatus,
+      reviewerComment: reviewerNote,
+      reviewedBy: reviewerUser,
+      reviewedAt: nowIso
+    };
+  }
+
+  // 3. Update questionReviews map
+  const updatedQuestionReviews: Record<string, QuestionnaireQuestionReviewItem> = { ...(currentState.questionReviews || {}) };
+  updatedQuestionReviews[questionId] = {
+    reviewerStatus,
+    reviewerComment: reviewerNote !== undefined ? reviewerNote : updatedQuestionReviews[questionId]?.reviewerComment,
+    reviewedBy: reviewerUser,
+    reviewedAt: nowIso
+  };
+
+  // 4. Update auditor notes map if present
+  const updatedAuditorNotes: Record<string, QuestionnaireAuditorNoteItem> = { ...(currentState.auditorNotes || {}) };
+  if (updatedAuditorNotes[questionId]) {
+    updatedAuditorNotes[questionId] = {
+      ...updatedAuditorNotes[questionId],
+      reviewerStatus,
+      reviewerComment: reviewerNote !== undefined ? reviewerNote : updatedAuditorNotes[questionId]?.reviewerComment,
+      reviewedBy: reviewerUser,
+      reviewedAt: nowIso
+    };
+  }
+
+  const nextVersion = (currentState.version || 1) + 1;
+  const nextState: AuthoritativeQuestionnaireState = {
+    ...currentState,
+    answers: updatedAnswers,
+    questionReviews: updatedQuestionReviews,
+    auditorNotes: updatedAuditorNotes,
+    version: nextVersion,
+    updatedAt: nowIso,
+    updatedBy: reviewerUser
+  };
+
+  // 5. Persist distributor-facing snapshot
+  const distState = { ...nextState };
+  delete distState.auditorNotes;
+
+  const insertDistRes = await supabase.from('system_audit_logs').insert({
+    event_type: 'QUESTIONNAIRE_DISTRIBUTOR_STATE',
+    target_user_email: stateKey,
+    details: distState,
+    created_at: nowIso
+  });
+
+  if (insertDistRes.error) {
+    console.error('Supabase updateAuthoritativeQuestionnaireQuestionStatus dist error:', insertDistRes.error);
+    throw new Error(`Failed to persist question review state: ${insertDistRes.error.message}`);
+  }
+
+  // 6. Persist auditor snapshot
+  await supabase.from('system_audit_logs').insert({
+    event_type: 'QUESTIONNAIRE_AUDITOR_STATE',
+    target_user_email: stateKey,
+    details: {
+      client: clientName,
+      distributor: distName,
+      auditId,
+      auditorNotes: updatedAuditorNotes,
+      questionReviews: updatedQuestionReviews,
+      updatedAt: nowIso,
+      updatedBy: reviewerUser
+    },
+    created_at: nowIso
+  });
+
+  // 7. Insert audit history log
+  const qNum = getQuestionRefNumber(questionId, currentState.customSections);
+  await supabase.from('system_audit_logs').insert({
+    user_name: reviewerUser,
+    user_email: 'auditor@data360.com',
+    user_role: 'Auditor',
+    organization: clientName,
+    action: 'Questionnaire Question Review Status Updated',
+    ip_address: '127.0.0.1',
+    details: `Auditor updated status for Questionnaire Question ${qNum} to "${reviewerStatus}". ${reviewerNote ? `Reason: "${reviewerNote}"` : ''}`
+  });
+
+  // 8. If clarification required or rejected, dispatch notification to distributor
+  if (reviewerStatus === 'Clarification Required' || reviewerStatus === 'Rejected') {
+    try {
+      await dispatchNotification({
+        target_role: 'Distributor',
+        target_organization: distName,
+        category: reviewerStatus === 'Clarification Required' ? 'Clarification Required' : 'Evidence Rejected',
+        title: reviewerStatus === 'Clarification Required'
+          ? `Clarification Requested on Questionnaire (Q${qNum})`
+          : `Evidence Rejected on Questionnaire (Q${qNum})`,
+        message: reviewerNote
+          ? `Auditor evaluation for Question ${qNum}: "${reviewerNote}"`
+          : `Auditor updated review status for Question ${qNum} to "${reviewerStatus}".`,
+        link_tab: 'engagement_workspace',
+        metadata: {
+          client: clientName,
+          distributor: distName,
+          auditId,
+          questionId,
+          questionNumber: qNum,
+          reviewerStatus,
+          reviewerComment: reviewerNote,
+          tab: 'questionnaire'
+        }
+      });
+    } catch (notifErr) {
+      console.warn('Notification dispatch error (non-fatal):', notifErr);
+    }
+  }
+
+  return {
+    success: true,
+    state: nextState
+  };
+}
+
