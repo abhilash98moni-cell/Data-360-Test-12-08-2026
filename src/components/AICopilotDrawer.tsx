@@ -23,7 +23,7 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
   const [messages, setMessages] = useState([
     {
       sender: 'ai',
-      text: 'Hello! I am Distributor Monitoring Platform (DMP) AI Copilot. I can analyze General Ledger populations, run Benford anomaly tests, draft observation memos, or explain BRD business rules.'
+      text: "Hello! I'm the DMP AI Copilot. I can help you understand and analyze information available in the DMP, explain audit concepts, and assist with audit documentation."
     }
   ]);
   const [inputValue, setInputValue] = useState('');
@@ -142,7 +142,7 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
                 <Loader2 className="h-4 w-4 animate-spin" />
               </div>
               <div className="p-3 rounded-xl max-w-[85%] bg-slate-950/80 text-slate-400 border border-slate-800 rounded-tl-none">
-                Analyzing audit workpapers...
+                Consulting Copilot...
               </div>
             </div>
           )}
@@ -154,7 +154,7 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
           <div className="flex gap-1.5 overflow-x-auto pb-1 text-[11px]">
             <button 
               onClick={() => {
-                setInputValue('Draft a formal observation memo for Midwest Rebate Overclaim.');
+                setInputValue('Draft a formal observation memo for the current audit exceptions.');
               }}
               className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 rounded-lg whitespace-nowrap cursor-pointer"
             >
@@ -162,11 +162,11 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
             </button>
             <button 
               onClick={() => {
-                setInputValue('Explain Benford Law anomaly at digit 7.');
+                setInputValue("Explain what Benford's Law is used for.");
               }}
               className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 rounded-lg whitespace-nowrap cursor-pointer"
             >
-              Explain Benford Anomaly
+              Explain Benford's Law
             </button>
           </div>
 
@@ -174,7 +174,7 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
           <div className="flex items-center gap-2 pt-1">
             <input 
               type="text"
-              placeholder="Ask Copilot about ledgers, sampling, or BRD..."
+              placeholder="Ask Copilot about the current audit or concepts..."
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSend()}

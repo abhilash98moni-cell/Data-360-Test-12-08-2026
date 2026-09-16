@@ -4633,7 +4633,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
       return res.json({ success: true, record });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: 'AI Copilot is temporarily unavailable. Please try again.' });
     }
   });
 
@@ -4712,7 +4712,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         history: historyList
       });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: 'AI Copilot is temporarily unavailable. Please try again.' });
     }
   });
 
@@ -5681,7 +5681,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       });
     } catch (err: any) {
       console.error('Audit create error:', err);
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: 'AI Copilot is temporarily unavailable. Please try again.' });
     }
   });
 
@@ -6540,7 +6540,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
       return res.json({ success: true, ...result });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: 'AI Copilot is temporarily unavailable. Please try again.' });
     }
   });
 
@@ -6565,7 +6565,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
       return res.json({ success: true, ...result });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: 'AI Copilot is temporarily unavailable. Please try again.' });
     }
   });
 
@@ -6576,7 +6576,7 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       const result = await customizeAuthoritativeQuestionnaire(client, distributor, auditId || 'eng-101', customSections, userEmail, userName);
       return res.json({ success: true, ...result });
     } catch (err: any) {
-      return res.status(500).json({ success: false, error: err.message });
+      return res.status(500).json({ success: false, error: 'AI Copilot is temporarily unavailable. Please try again.' });
     }
   });
 
@@ -6635,30 +6635,87 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       }
 
       const role = context?.role || user.role || 'Unknown Role';
-      const auditId = context?.auditId ? `Audit ID: ${context.auditId}` : 'No active audit selected';
-      const client = context?.client ? `Client: ${context.client}` : 'No active client';
-      const distributor = context?.distributor ? `Distributor: ${context.distributor}` : 'No active distributor';
+      const auditId = context?.auditId || 'unavailable/null';
+      const client = context?.client || 'unavailable/null';
+      const distributor = context?.distributor || 'unavailable/null';
 
-      const systemInstruction = `You are the AI Copilot inside a Distributor Monitoring Platform.
+      let samplesInfo = "unavailable/null";
+      let evidenceInfo = "unavailable/null";
+
+      if (context?.auditId && context?.auditId !== 'All Audits') {
+        const supabase = getSupabaseServerClient();
+        
+        // Fetch Samples
+        const { data: sampleData } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'GL_SAMPLE');
+        if (sampleData) {
+          const currentSamples = sampleData
+            .map(d => d.details)
+            .filter(d => d.auditId === context.auditId && (!context.distributor || context.distributor === 'All Distributors' || d.distributorId === context.distributor));
+          if (currentSamples.length > 0) {
+            const numExceptions = currentSamples.filter(s => !!s.exceptions).length;
+            samplesInfo = `Total samples tested: ${currentSamples.length}. Samples with exceptions: ${numExceptions}.`;
+          } else {
+            samplesInfo = "No sample data available for this audit.";
+          }
+        }
+        
+        // Fetch Evidence
+        const { data: evidenceData } = await supabase.from('system_audit_logs').select('*').eq('event_type', 'EVIDENCE_FILE');
+        if (evidenceData) {
+          const currentEvidence = evidenceData
+            .map(d => d.details)
+            .filter(d => d.auditId === context.auditId && (!context.distributor || context.distributor === 'All Distributors' || d.distributor === context.distributor));
+          if (currentEvidence.length > 0) {
+            evidenceInfo = `Total evidence files uploaded: ${currentEvidence.length}.`;
+          } else {
+            evidenceInfo = "No evidence files available for this audit.";
+          }
+        }
+      }
+
+      const systemInstruction = `You are the AI Copilot inside the Distributor Monitoring Platform.
 You are assisting the authenticated user.
-Current User Role: ${role}
-Current Context: ${client}, ${distributor}, ${auditId}
 
-Use the provided DMP context when answering questions.
-Do not invent audit information.
-Do not invent:
-- amounts
-- dates
-- distributor information
-- audit information
-- samples
-- evidence
+CURRENT DMP CONTEXT:
+User Role: ${role}
+Current Audit ID: ${auditId}
+Distributor: ${distributor}
+Client: ${client}
+Sample Testing: ${samplesInfo}
+Evidence: ${evidenceInfo}
+Findings: unavailable/null
+
+You may make factual claims about the DMP only when those facts are explicitly present in the application context supplied with this request.
+Never invent or estimate DMP data.
+Never fabricate:
+- transaction counts
+- ledger row counts
+- monetary amounts
+- percentages
+- probabilities
+- sample sizes
+- exception counts
 - findings
+- distributor names
+- audit results
 - contract references
+- evidence status
 - remediation status
-- conclusions
+- dates
+- names
+- financial impact
+- fraud indicators
+- test results
 
-If required information is not available in the supplied context, say that it is not available.
+Never create a number merely because a number would make the response more useful.
+
+If the required information is not present in the supplied context, say:
+'I don't have that information in the current audit context.'
+
+Do not infer that information from previous conversations, general knowledge, demo data, or assumptions.
+
+If the user says a greeting (e.g., Hi, Hello, Good morning) or thanks, respond naturally and briefly. For example: "Hello! I'm the DMP AI Copilot. I can help you analyze information available in the current audit or answer general audit-related questions." Do NOT respond to a greeting by generating audit findings or analyzing data.
+
 For general questions, provide general audit/domain guidance and clearly distinguish it from information retrieved from the DMP.
 Do not make audit decisions on behalf of the auditor.
 Do not change any DMP data unless a specific authorized application action exists for that purpose.`;
@@ -6678,7 +6735,7 @@ Do not change any DMP data unless a specific authorized application action exist
       });
 
       const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
+        model: 'gemini-3.6-flash',
         contents,
         config: {
           systemInstruction
