@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { BUSINESS_QUESTIONNAIRE_SECTIONS, TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS } from '../data/questionnaireData.js';
 import { getSupabaseServerClient } from '../lib/supabaseServer.js';
+import { dispatchNotification } from './notificationService.js';
 
 export { getSupabaseServerClient };
 
@@ -290,6 +291,7 @@ export async function submitAuthoritativeQuestionnaire(
     ...existingState,
     status: 'Submitted',
     isLocked: true,
+    editAccessStatus: 'LOCKED',
     submissionDate: nowIso,
     submittedBy: `${userName} (${userEmail})`,
     completionPercentage,
@@ -313,12 +315,19 @@ export async function submitAuthoritativeQuestionnaire(
 
   // Insert notification for Audit team
   try {
-    await supabase.from('notifications').insert({
+    await dispatchNotification({
+      target_role: 'Auditor',
+      target_organization: 'All',
+      category: 'Submission Completed',
       title: 'Business Questionnaire Submitted',
       message: `${distName} has formally submitted the Business Questionnaire (${answeredCount}/${totalCount} questions completed).`,
-      category: 'Submission Completed',
-      target_organization: clientName,
-      created_at: nowIso
+      link_tab: 'engagement_workspace',
+      metadata: {
+        client: clientName,
+        distributor: distName,
+        auditId,
+        tab: 'questionnaire'
+      }
     });
   } catch (notifErr) {
     console.warn('Failed to insert questionnaire submission notification:', notifErr);
@@ -390,7 +399,7 @@ export async function requestAuthoritativeQuestionnaireEditAccess(
   const newState = {
     ...currentState,
     editAccessStatus: 'REQUESTED' as const,
-    editAccessRequestReason: reason,
+    editAccessRequestReason: reason || '',
     editAccessRequestedAt: new Date().toISOString(),
     editAccessRequestedBy: userName || userEmail,
     version: currentState.version + 1,
@@ -407,6 +416,42 @@ export async function requestAuthoritativeQuestionnaireEditAccess(
 
   if (insertRes.error) throw new Error(insertRes.error.message);
 
+  // System audit log entry
+  try {
+    await supabase.from('system_audit_logs').insert({
+      user_name: userName || distName,
+      user_email: userEmail,
+      user_role: 'Distributor',
+      organization: distName,
+      action: 'Questionnaire Edit Access Requested',
+      ip_address: '127.0.0.1',
+      details: `Edit access requested by ${distName} for client ${clientName}. Reason: "${reason || 'Update responses and documentation'}"`
+    });
+  } catch (e) {
+    console.warn('Audit log insert note:', e);
+  }
+
+  // Dispatch persistent in-app notification to Auditor team
+  try {
+    await dispatchNotification({
+      target_role: 'Auditor',
+      target_organization: 'All',
+      category: 'Edit Access Requested',
+      title: 'Business Questionnaire Edit Access Requested',
+      message: `${distName} has requested edit access for the Business Questionnaire (${clientName}). Reason: ${reason || 'Update responses and documentation'}`,
+      link_tab: 'engagement_workspace',
+      metadata: {
+        client: clientName,
+        distributor: distName,
+        auditId,
+        reason,
+        tab: 'questionnaire'
+      }
+    });
+  } catch (e) {
+    console.warn('Notification dispatch error:', e);
+  }
+
   return { found: true, state: newState };
 }
 
@@ -416,7 +461,8 @@ export async function reviewAuthoritativeQuestionnaireEditAccess(
   auditId: string,
   action: 'APPROVE' | 'REJECT',
   userEmail: string,
-  userName: string
+  userName: string,
+  comment?: string
 ): Promise<AuthoritativeQuestionnaireRecord> {
   const supabase = getSupabaseServerClient();
   const stateKey = `${clientName}::${distName}::${auditId}`;
@@ -429,6 +475,7 @@ export async function reviewAuthoritativeQuestionnaireEditAccess(
     isLocked: action === 'APPROVE' ? false : true,
     editAccessApprovedAt: new Date().toISOString(),
     editAccessApprovedBy: userName || userEmail,
+    editAccessReviewerComment: comment || undefined,
     version: currentState.version + 1,
     updatedAt: new Date().toISOString(),
     updatedBy: userEmail
@@ -450,6 +497,45 @@ export async function reviewAuthoritativeQuestionnaireEditAccess(
   });
 
   if (insertRes.error) throw new Error(insertRes.error.message);
+
+  // System audit log entry
+  try {
+    await supabase.from('system_audit_logs').insert({
+      user_name: userName || 'Auditor',
+      user_email: userEmail,
+      user_role: 'Auditor',
+      organization: 'Audit Team',
+      action: `Questionnaire Edit Access ${action === 'APPROVE' ? 'Approved' : 'Rejected'}`,
+      ip_address: '127.0.0.1',
+      details: `Questionnaire edit access ${action === 'APPROVE' ? 'approved' : 'rejected'} for ${distName} (Client: ${clientName}). ${comment ? `Note: ${comment}` : ''}`
+    });
+  } catch (e) {
+    console.warn('Audit log insert note:', e);
+  }
+
+  // Dispatch persistent in-app notification to Distributor
+  try {
+    await dispatchNotification({
+      target_role: 'Distributor',
+      target_organization: distName,
+      category: action === 'APPROVE' ? 'Edit Access Approved' : 'Edit Access Rejected',
+      title: action === 'APPROVE' ? 'Questionnaire Edit Access Approved' : 'Questionnaire Edit Access Rejected',
+      message: action === 'APPROVE'
+        ? `Your request for edit access to the Business Questionnaire for ${clientName} has been approved. You can now edit and re-submit.`
+        : `Your request for edit access to the Business Questionnaire for ${clientName} has been declined.`,
+      link_tab: 'engagement_workspace',
+      metadata: {
+        client: clientName,
+        distributor: distName,
+        auditId,
+        action,
+        comment,
+        tab: 'questionnaire'
+      }
+    });
+  } catch (e) {
+    console.warn('Notification dispatch error:', e);
+  }
 
   return { found: true, state: newState };
 }

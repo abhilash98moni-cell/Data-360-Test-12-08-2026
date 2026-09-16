@@ -218,7 +218,8 @@ export async function reviewEditAccessQuestionnaire(
   auditId: string = 'eng-101',
   action: 'APPROVE' | 'REJECT',
   userEmail: string,
-  userName: string
+  userName: string,
+  comment?: string
 ): Promise<{ success: boolean; state?: AuthoritativeQuestionnaireState; error?: string }> {
   try {
     const res = await fetch('/api/questionnaire/edit-access-review', {
@@ -227,7 +228,7 @@ export async function reviewEditAccessQuestionnaire(
         'Content-Type': 'application/json',
         ...getAuthHeaders()
       },
-      body: JSON.stringify({ client, distributor, auditId, action, userEmail, userName })
+      body: JSON.stringify({ client, distributor, auditId, action, userEmail, userName, comment })
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Failed to review edit access');

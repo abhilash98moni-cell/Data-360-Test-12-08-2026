@@ -13,7 +13,8 @@ import {
   XCircle,
   FileText,
   Clock,
-  RefreshCw
+  RefreshCw,
+  Lock
 } from 'lucide-react';
 import { AppNotification, UserSession } from '../types';
 
@@ -288,6 +289,9 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
                   case 'Evidence Accepted': return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
                   case 'Evidence Rejected': return <XCircle className="h-4 w-4 text-rose-400" />;
                   case 'Required Data Updated': return <FileText className="h-4 w-4 text-indigo-400" />;
+                  case 'Edit Access Requested': return <Lock className="h-4 w-4 text-amber-400" />;
+                  case 'Edit Access Approved': return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
+                  case 'Edit Access Rejected': return <XCircle className="h-4 w-4 text-rose-400" />;
                   default: return <Bell className="h-4 w-4 text-slate-400" />;
                 }
               };

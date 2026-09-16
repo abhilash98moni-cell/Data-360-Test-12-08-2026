@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Search,
   Lock,
+  Unlock,
   Sparkles,
   ExternalLink,
   HelpCircle,
@@ -170,10 +171,6 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
   const handleRequestEditAccess = async () => {
     if (!questionnaireState || isEditRequesting) return;
     const trimmed = editRequestReason.trim();
-    if (trimmed.length < 50) {
-      if (showToast) showToast(`Request reason must be at least 50 characters long (${trimmed.length}/50).`, 'error');
-      return;
-    }
     setIsEditRequesting(true);
     setSyncStatus('saving');
     try {
@@ -1060,6 +1057,13 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                 </span>
               </div>
             )}
+            {!questionnaireState?.isLocked && questionnaireState?.editAccessStatus === 'APPROVED' && (
+              <div className="flex items-center gap-2 mb-1">
+                <span className="flex items-center gap-1 text-[11px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded border border-indigo-500/30 font-semibold">
+                  <Unlock className="h-3 w-3" /> Editing Access Active
+                </span>
+              </div>
+            )}
             <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight flex items-center gap-2">
               <FileText className="h-6 w-6 text-indigo-400" />
               Business Questionnaire
@@ -1104,7 +1108,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
             {isDistributor && questionnaireState?.isLocked && questionnaireState?.editAccessStatus !== 'REQUESTED' && (
               <button
                 onClick={() => setIsRequestEditModalOpen(true)}
-                disabled={isEditRequesting || editRequestReason.trim().length < 50}
+                disabled={isEditRequesting}
                 className="flex items-center gap-2 bg-amber-600/90 hover:bg-amber-600 text-white px-4 py-2 rounded-xl text-xs font-semibold shadow-lg shadow-amber-600/20 transition-all cursor-pointer disabled:opacity-50"
               >
                 <Lock className="h-3.5 w-3.5" />
@@ -1857,28 +1861,18 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
               Once approved, you will be able to make changes to your responses and upload additional evidence.
             </p>
 
-            {/* Reason Textarea with 50-char validation */}
+            {/* Reason Textarea */}
             <div className="space-y-1.5 text-xs">
               <div className="flex justify-between items-center">
-                <label className="text-slate-300 font-semibold block">Reason for Edit Request (Mandatory, min 50 chars):</label>
-                <span className={`font-mono text-[10px] ${
-                  editRequestReason.trim().length < 50 ? 'text-amber-400 font-bold' : 'text-emerald-400 font-bold'
-                }`}>
-                  {editRequestReason.trim().length} / 50 min chars
-                </span>
+                <label className="text-slate-300 font-semibold block">Reason for Edit Request (Optional):</label>
               </div>
               <textarea
                 value={editRequestReason}
                 onChange={(e) => setEditRequestReason(e.target.value)}
                 placeholder="State why responses or documents need updating..."
-                rows={4}
+                rows={2}
                 className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-amber-500/50"
               />
-              {editRequestReason.trim().length > 0 && editRequestReason.trim().length < 50 && (
-                <p className="text-[11px] text-amber-400">
-                  Please provide at least {50 - editRequestReason.trim().length} more characters explaining your request.
-                </p>
-              )}
             </div>
 
             <div className="flex justify-end gap-3 pt-3">
@@ -1891,7 +1885,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
               </button>
               <button
                 onClick={handleRequestEditAccess}
-                disabled={isEditRequesting || editRequestReason.trim().length < 50}
+                disabled={isEditRequesting}
                 className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-2 cursor-pointer disabled:opacity-50"
               >
                 {isEditRequesting ? (

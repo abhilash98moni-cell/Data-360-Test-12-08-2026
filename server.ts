@@ -6523,6 +6523,21 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     try {
       const { client, distributor, auditId, userEmail, userName, reason } = req.body;
       const result = await requestAuthoritativeQuestionnaireEditAccess(client, distributor, auditId || 'eng-101', userEmail, userName, reason);
+      
+      await dispatchNotification({
+        title: 'Edit Access Requested',
+        message: `${distributor} has requested edit access for the Business Questionnaire. Reason: ${reason || 'No reason provided.'}`,
+        category: 'Edit Access Requested',
+        target_role: 'Auditor',
+        target_organization: client,
+        metadata: {
+          auditId,
+          distributor,
+          reason,
+          action: 'request_edit_access'
+        }
+      });
+
       return res.json({ success: true, ...result });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
@@ -6534,6 +6549,20 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
     try {
       const { client, distributor, auditId, action, userEmail, userName } = req.body;
       const result = await reviewAuthoritativeQuestionnaireEditAccess(client, distributor, auditId || 'eng-101', action, userEmail, userName);
+      
+      await dispatchNotification({
+        title: action === 'APPROVE' ? 'Edit Access Approved' : 'Edit Access Rejected',
+        message: `Your request for edit access to the Business Questionnaire has been ${action === 'APPROVE' ? 'approved' : 'rejected'}.`,
+        category: action === 'APPROVE' ? 'Edit Access Approved' : 'System',
+        target_role: 'Distributor',
+        target_organization: distributor,
+        metadata: {
+          auditId,
+          distributor,
+          action: `edit_access_${action.toLowerCase()}`
+        }
+      });
+
       return res.json({ success: true, ...result });
     } catch (err: any) {
       return res.status(500).json({ success: false, error: err.message });
