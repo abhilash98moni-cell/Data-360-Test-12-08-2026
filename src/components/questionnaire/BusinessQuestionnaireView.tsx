@@ -392,7 +392,8 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
 
   // Save answer handler
   const handleAnswerChange = (questionId: string, value: string, explanation?: string) => {
-    if (questionnaireState?.isLocked && isDistributor) return;
+    if (isAuditor) return;
+    if (questionnaireState?.isLocked && questionnaireState?.editAccessStatus !== 'APPROVED') return;
 
     const existing = localAnswers[questionId] || {
       questionId,
@@ -420,6 +421,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
 
   // Explicit Save Draft Button
   const handleSaveDraft = async () => {
+    if (isAuditor) return;
     setSyncStatus('saving');
     try {
       const res = await saveQuestionnaireAnswers(
@@ -505,6 +507,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
 
   // Submit Final
   const handleFinalSubmit = async () => {
+    if (isAuditor) return;
     setIsSubmitting(true);
     try {
       const res = await submitQuestionnaire(
@@ -534,6 +537,8 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
 
   // Business Questionnaire Evidence File Upload
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, questionId: string) => {
+    if (isAuditor) return;
+    if (questionnaireState?.isLocked && questionnaireState?.editAccessStatus !== 'APPROVED') return;
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -852,6 +857,8 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
   };
 
   const handleRemoveAttachment = (questionId: string, attachmentId: string) => {
+    if (isAuditor) return;
+    if (questionnaireState?.isLocked && questionnaireState?.editAccessStatus !== 'APPROVED') return;
     const existing = localAnswers[questionId];
     if (!existing || !existing.attachments) return;
 
@@ -1400,7 +1407,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                 const answer = localAnswers[q.id];
                 const auditorNote = localAuditorNotes[q.id];
                 const isAnswered = Boolean(answer?.responseValue && answer.responseValue.trim().length > 0);
-                const isLocked = questionnaireState?.isLocked && isDistributor && questionnaireState?.editAccessStatus !== 'APPROVED';
+                const isLocked = isAuditor || (questionnaireState?.isLocked && questionnaireState?.editAccessStatus !== 'APPROVED');
 
                 return (
                   <div
@@ -1459,10 +1466,14 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                           <div className="flex items-center gap-3">
                             <button
                               disabled={isLocked}
-                              onClick={() => handleAnswerChange(q.id, 'Yes')}
-                              className={`flex-1 sm:flex-initial px-6 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                              onClick={() => !isLocked && handleAnswerChange(q.id, 'Yes')}
+                              className={`flex-1 sm:flex-initial px-6 py-2 rounded-xl text-xs font-bold transition-all ${
+                                isLocked ? 'cursor-default opacity-90' : 'cursor-pointer'
+                              } ${
                                 answer?.responseValue === 'Yes'
                                   ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30 ring-2 ring-emerald-400/40'
+                                  : isLocked
+                                  ? 'bg-slate-950 text-slate-400 border border-slate-800'
                                   : 'bg-slate-950 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white'
                               }`}
                             >
@@ -1470,10 +1481,14 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                             </button>
                             <button
                               disabled={isLocked}
-                              onClick={() => handleAnswerChange(q.id, 'No')}
-                              className={`flex-1 sm:flex-initial px-6 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                              onClick={() => !isLocked && handleAnswerChange(q.id, 'No')}
+                              className={`flex-1 sm:flex-initial px-6 py-2 rounded-xl text-xs font-bold transition-all ${
+                                isLocked ? 'cursor-default opacity-90' : 'cursor-pointer'
+                              } ${
                                 answer?.responseValue === 'No'
                                   ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30 ring-2 ring-rose-400/40'
+                                  : isLocked
+                                  ? 'bg-slate-950 text-slate-400 border border-slate-800'
                                   : 'bg-slate-950 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white'
                               }`}
                             >
@@ -1747,10 +1762,24 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                 </button>
               )}
 
+              {isAuditor && (
+                <button
+                  onClick={handleSaveAuditorNotes}
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-md shadow-indigo-600/20 transition-all cursor-pointer flex items-center gap-1.5"
+                >
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  <span>Save Audit Notes</span>
+                </button>
+              )}
+
               {activeSectionIdx < activeSections.length - 1 ? (
                 <button
                   onClick={() => {
-                    handleSaveDraft();
+                    if (isDistributor && !questionnaireState?.isLocked) {
+                      handleSaveDraft();
+                    } else if (isAuditor) {
+                      handleSaveAuditorNotes();
+                    }
                     setActiveSectionIdx((prev) => Math.min(activeSections.length - 1, prev + 1));
                     window.scrollTo({ top: 0, behavior: 'smooth' });
                   }}

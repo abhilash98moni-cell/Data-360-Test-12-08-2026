@@ -130,7 +130,18 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   // Submit & Persist IRL Data Endpoint (Final Submission)
   app.post('/api/iir/submit', async (req, res) => {
     try {
-      const { client, distributor, auditId, requests, isLocked, submissionDate, submittedBy } = req.body;
+      const { client, distributor, auditId, requests, isLocked, submissionDate, submittedBy, userRole } = req.body;
+
+      const authSession = await resolveAuthSession(req);
+      const effectiveRole = (authSession?.role || req.headers['x-user-role'] || userRole || '').toString().toLowerCase();
+
+      // Enforce Auditor Read-Only: Auditors cannot submit IRL on behalf of Distributor
+      if (effectiveRole.includes('auditor')) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: Auditors have read-only access and cannot submit the Initial Information Request on behalf of the Distributor.'
+        });
+      }
 
       if (!client || !distributor || !Array.isArray(requests) || requests.length === 0) {
         return res.status(400).json({ success: false, error: 'Client, distributor, and requests array are required.' });
@@ -245,7 +256,18 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   // Save Draft IRL Data Endpoint
   app.post('/api/iir/save-draft', async (req, res) => {
     try {
-      const { client, distributor, auditId, requests, submittedBy } = req.body;
+      const { client, distributor, auditId, requests, submittedBy, userRole } = req.body;
+
+      const authSession = await resolveAuthSession(req);
+      const effectiveRole = (authSession?.role || req.headers['x-user-role'] || userRole || '').toString().toLowerCase();
+
+      // Enforce Auditor Read-Only: Auditors cannot modify Distributor IRL draft data
+      if (effectiveRole.includes('auditor')) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: Auditors have read-only access and cannot modify or save Distributor IRL draft data.'
+        });
+      }
 
       if (!client || !distributor) {
         return res.status(400).json({ success: false, error: 'Client and distributor parameters are required.' });
@@ -1016,6 +1038,13 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
       const targetDistributor = isDistributorRole ? (req.auth.organization || clientDistributorName) : (clientDistributorName || req.auth.organization);
 
       const isRef = isReferenceMaterial === 'true' || isReferenceMaterial === true;
+
+      // Enforcement: Auditors have read-only access and cannot upload evidence to distributor response requirements
+      if (!isRef && resolvedUploaderRole === 'Auditor') {
+        return res.status(403).json({
+          error: 'Access Denied: Auditors have read-only access to Distributor submissions and cannot upload evidence files.'
+        });
+      }
 
       // Parse document usage (allow comma separated or array string)
       let parsedUsage = ['EVIDENCE'];
@@ -6455,6 +6484,17 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
         return res.status(400).json({ success: false, error: 'client, distributor, and answers are required.' });
       }
 
+      const authSession = await resolveAuthSession(req);
+      const effectiveRole = (authSession?.role || req.headers['x-user-role'] || userRole || '').toString().toLowerCase();
+
+      // Enforce Auditor Read-Only: Auditors cannot modify Distributor questionnaire answers
+      if (effectiveRole.includes('auditor')) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: Auditors have read-only access to Distributor Business Questionnaire responses and cannot modify or save answers.'
+        });
+      }
+
       const isDistributor = (userRole || '').toLowerCase().includes('distributor');
       if (isDistributor && userOrg && !distributor.toLowerCase().includes(userOrg.toLowerCase()) && !userOrg.toLowerCase().includes(distributor.toLowerCase())) {
         return res.status(403).json({
@@ -6489,6 +6529,17 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
       const { client, distributor, auditId, userEmail, userName, userRole, userOrg } = req.body;
       if (!client || !distributor) {
         return res.status(400).json({ success: false, error: 'client and distributor are required.' });
+      }
+
+      const authSession = await resolveAuthSession(req);
+      const effectiveRole = (authSession?.role || req.headers['x-user-role'] || userRole || '').toString().toLowerCase();
+
+      // Enforce Auditor Read-Only: Auditors cannot submit on behalf of Distributor
+      if (effectiveRole.includes('auditor')) {
+        return res.status(403).json({
+          success: false,
+          error: 'Access Denied: Auditors cannot submit the Business Questionnaire on behalf of the Distributor.'
+        });
       }
 
       const isDistributor = (userRole || '').toLowerCase().includes('distributor');

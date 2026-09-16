@@ -665,7 +665,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
   // Sub-question Response Handlers for Distributor
   const handleSubQuestionTextChange = (itemId: string, subQuestionId: string, val: string) => {
-    if (isLocked && viewRole === 'Distributor') return;
+    if (viewRole === 'Auditor' || isLocked) return;
     setRequestsAndSave(prev => prev.map(item => {
       if (item.id === itemId) {
         const existingResp = item.subQuestionResponses?.[subQuestionId] || { subQuestionId };
@@ -690,7 +690,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   };
 
   const handleSubQuestionOptionChange = (itemId: string, subQuestionId: string, option: string) => {
-    if (isLocked && viewRole === 'Distributor') return;
+    if (viewRole === 'Auditor' || isLocked) return;
     setRequestsAndSave(prev => prev.map(item => {
       if (item.id === itemId) {
         const existingResp = item.subQuestionResponses?.[subQuestionId] || { subQuestionId };
@@ -715,7 +715,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   };
 
   const handleSubQuestionFileUpload = async (itemId: string, subQuestionId: string, fileList: FileList | null) => {
-    if (isLocked && viewRole === 'Distributor') return;
+    if (viewRole === 'Auditor' || isLocked) return;
     if (!fileList || fileList.length === 0) return;
     const file = fileList[0];
     const fileExt = file.name.split('.').pop()?.toUpperCase() || 'PDF';
@@ -794,7 +794,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   };
 
   const handleSubQuestionFileDelete = (itemId: string, subQuestionId: string, fileId: string) => {
-    if (isLocked && viewRole === 'Distributor') return;
+    if (viewRole === 'Auditor' || isLocked) return;
     setRequestsAndSave(prev => prev.map(item => {
       if (item.id === itemId) {
         const existingResp = item.subQuestionResponses?.[subQuestionId];
@@ -1244,7 +1244,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     );
   };  // Handler: Update Text Response
   const handleTextResponseChange = (itemId: string, text: string) => {
-    if (isLocked && viewRole === 'Distributor') return;
+    if (viewRole === 'Auditor' || isLocked) return;
     setRequestsAndSave(prev => prev.map(item => {
       if (item.id === itemId) {
         const updated = { ...item, textResponse: text, lastUpdated: new Date().toISOString().substring(0, 19).replace('T', ' ') };
@@ -1257,7 +1257,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
   // Handler: Update No Upload Explanation
   const handleExplanationChange = (itemId: string, explanation: string) => {
-    if (isLocked && viewRole === 'Distributor') return;
+    if (viewRole === 'Auditor' || isLocked) return;
     setRequestsAndSave(prev => prev.map(item => {
       if (item.id === itemId) {
         const updated = { ...item, noUploadExplanation: explanation, lastUpdated: new Date().toISOString().substring(0, 19).replace('T', ' ') };
@@ -1271,7 +1271,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   // Handler: File Upload to Google Drive Storage
   const handleFileUpload = async (itemId: string, files: FileList | null) => {
     if (!files || files.length === 0) return;
-    if (isLocked && viewRole === 'Distributor') return;
+    if (viewRole === 'Auditor' || isLocked) return;
 
     const targetItem = requests.find(r => r.id === itemId);
     if (targetItem && (targetItem.isYesNoOnly || targetItem.responseType === 'Yes/No Only')) {
@@ -1350,7 +1350,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
   // Handler: Delete File
   const handleDeleteFile = (itemId: string, fileId: string) => {
-    if (isLocked && viewRole === 'Distributor') return;
+    if (viewRole === 'Auditor' || isLocked) return;
 
     let deletedFileName = '';
     setRequestsAndSave(prev => prev.map(item => {
@@ -1424,6 +1424,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
   // Handler: Save Draft
   const handleSaveDraft = async () => {
+    if (viewRole === 'Auditor') return;
     saveIIRRequestsToStorage(selectedClientProp, selectedDistributorName, requests);
     addAuditLog('Draft Saved', `Saved draft version with ${completedItemsCount} of ${totalItemsCount} requests completed`);
 
@@ -1453,6 +1454,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
   // Handler: Final Submission
   const handleFinalSubmit = async () => {
+    if (viewRole === 'Auditor') return;
     // Safety check: verify all mandatory items are complete before calling backend API
     const missingItems = requests.filter(item => Boolean(item.isMandatory ?? item.is_mandatory) && !isItemComplete(item));
     if (missingItems.length > 0) {
@@ -2364,8 +2366,9 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                 <div className="grid grid-cols-2 gap-3">
                                   <button
                                     type="button"
-                                    disabled={isLocked && viewRole === 'Distributor'}
+                                    disabled={viewRole === 'Auditor' || isLocked}
                                     onClick={() => {
+                                      if (viewRole === 'Auditor' || isLocked) return;
                                       const nextVal = item.textResponse === 'Yes' ? '' : 'Yes';
                                       handleTextResponseChange(item.id, nextVal);
                                       if (nextVal === 'Yes') {
@@ -2374,7 +2377,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                         showToast(`Selection cleared for ${item.refNumber}. Sub-questions hidden (data preserved).`, 'info');
                                       }
                                     }}
-                                    className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 ${
+                                    className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${viewRole === 'Auditor' || isLocked ? 'cursor-default opacity-80' : 'cursor-pointer'} ${
                                       item.textResponse === 'Yes'
                                         ? 'bg-emerald-600 text-white shadow-lg ring-2 ring-emerald-400'
                                         : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white'
@@ -2386,8 +2389,9 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
                                   <button
                                     type="button"
-                                    disabled={isLocked && viewRole === 'Distributor'}
+                                    disabled={viewRole === 'Auditor' || isLocked}
                                     onClick={() => {
+                                      if (viewRole === 'Auditor' || isLocked) return;
                                       const nextVal = item.textResponse === 'No' ? '' : 'No';
                                       handleTextResponseChange(item.id, nextVal);
                                       if (nextVal === 'No') {
@@ -2396,7 +2400,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                         showToast(`Selection cleared for ${item.refNumber}. Sub-questions hidden (data preserved).`, 'info');
                                       }
                                     }}
-                                    className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 ${
+                                    className={`py-2.5 px-4 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${viewRole === 'Auditor' || isLocked ? 'cursor-default opacity-80' : 'cursor-pointer'} ${
                                       item.textResponse === 'No'
                                         ? 'bg-rose-600 text-white shadow-lg ring-2 ring-rose-400'
                                         : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white'
@@ -2465,20 +2469,20 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                             {(subQ.responseFormat === 'text' || subQ.responseFormat === 'number') && (
                                               <input
                                                 type={subQ.responseFormat === 'number' ? 'number' : 'text'}
-                                                disabled={isLocked && viewRole === 'Distributor'}
+                                                disabled={viewRole === 'Auditor' || isLocked}
                                                 value={subResp.textResponse || ''}
                                                 onChange={(e) => handleSubQuestionTextChange(item.id, subQ.id, e.target.value)}
                                                 placeholder={subQ.responseFormat === 'number' ? 'Enter numeric value...' : 'Enter response or details...'}
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 disabled:opacity-75 disabled:cursor-not-allowed"
                                               />
                                             )}
 
                                             {subQ.responseFormat === 'dropdown' && (
                                               <select
-                                                disabled={isLocked && viewRole === 'Distributor'}
+                                                disabled={viewRole === 'Auditor' || isLocked}
                                                 value={subResp.selectedOption || ''}
                                                 onChange={(e) => handleSubQuestionOptionChange(item.id, subQ.id, e.target.value)}
-                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500"
+                                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-100 focus:outline-none focus:border-indigo-500 disabled:opacity-75 disabled:cursor-not-allowed"
                                               >
                                                 <option value="">-- Select Option --</option>
                                                 {(subQ.options || []).map((opt, i) => (
@@ -2491,9 +2495,9 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                               <div className="grid grid-cols-2 gap-2">
                                                 <button
                                                   type="button"
-                                                  disabled={isLocked && viewRole === 'Distributor'}
+                                                  disabled={viewRole === 'Auditor' || isLocked}
                                                   onClick={() => handleSubQuestionTextChange(item.id, subQ.id, 'Yes')}
-                                                  className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                                  className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${viewRole === 'Auditor' || isLocked ? 'cursor-default opacity-85' : 'cursor-pointer'} ${
                                                     subResp.textResponse === 'Yes'
                                                       ? 'bg-emerald-600 text-white'
                                                       : 'bg-slate-950 text-slate-400 border border-slate-800 hover:text-white'
@@ -2503,9 +2507,9 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                                 </button>
                                                 <button
                                                   type="button"
-                                                  disabled={isLocked && viewRole === 'Distributor'}
+                                                  disabled={viewRole === 'Auditor' || isLocked}
                                                   onClick={() => handleSubQuestionTextChange(item.id, subQ.id, 'No')}
-                                                  className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                                                  className={`py-1.5 px-3 rounded-lg text-xs font-bold transition-all ${viewRole === 'Auditor' || isLocked ? 'cursor-default opacity-85' : 'cursor-pointer'} ${
                                                     subResp.textResponse === 'No'
                                                       ? 'bg-rose-600 text-white'
                                                       : 'bg-slate-950 text-slate-400 border border-slate-800 hover:text-white'
@@ -2520,16 +2524,16 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                               <div className="space-y-2">
                                                 {subQ.responseFormat === 'text_and_file' && (
                                                   <textarea
-                                                    disabled={isLocked && viewRole === 'Distributor'}
+                                                    disabled={viewRole === 'Auditor' || isLocked}
                                                     value={subResp.textResponse || ''}
                                                     onChange={(e) => handleSubQuestionTextChange(item.id, subQ.id, e.target.value)}
                                                     placeholder="Type explanation or narrative context..."
                                                     rows={2}
-                                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500"
+                                                    className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 disabled:opacity-75 disabled:cursor-not-allowed"
                                                   />
                                                 )}
 
-                                                {(!isLocked || viewRole === 'Auditor') && (
+                                                {(viewRole === 'Distributor' && !isLocked) && (
                                                   <label className="border border-dashed border-slate-800 hover:border-indigo-500 bg-slate-950 rounded-lg p-2 text-center block cursor-pointer transition-all">
                                                     <input
                                                       type="file"
@@ -2569,7 +2573,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                                           >
                                                             <Download className="h-3.5 w-3.5" />
                                                           </button>
-                                                          {(!isLocked || viewRole === 'Auditor') && (
+                                                          {(viewRole === 'Distributor' && !isLocked) && (
                                                             <button
                                                               type="button"
                                                               onClick={() => handleSubQuestionFileDelete(item.id, subQ.id, file.id)}
@@ -2609,12 +2613,13 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                   <div className="grid grid-cols-2 gap-2 pt-0.5">
                                     <button
                                       type="button"
-                                      disabled={isLocked && viewRole === 'Distributor'}
+                                      disabled={viewRole === 'Auditor' || isLocked}
                                       onClick={() => {
+                                        if (viewRole === 'Auditor' || isLocked) return;
                                         handleTextResponseChange(item.id, 'Yes');
                                         showToast(`Answered 'Yes' for ${item.refNumber}`, 'success');
                                       }}
-                                      className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                                      className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${viewRole === 'Auditor' || isLocked ? 'cursor-default opacity-85' : 'cursor-pointer'} ${
                                         item.textResponse === 'Yes'
                                           ? 'bg-emerald-600 text-white shadow-md ring-2 ring-emerald-400'
                                           : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white'
@@ -2626,12 +2631,13 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
                                     <button
                                       type="button"
-                                      disabled={isLocked && viewRole === 'Distributor'}
+                                      disabled={viewRole === 'Auditor' || isLocked}
                                       onClick={() => {
+                                        if (viewRole === 'Auditor' || isLocked) return;
                                         handleTextResponseChange(item.id, 'No');
                                         showToast(`Answered 'No' for ${item.refNumber}`, 'info');
                                       }}
-                                      className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 ${
+                                      className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${viewRole === 'Auditor' || isLocked ? 'cursor-default opacity-85' : 'cursor-pointer'} ${
                                         item.textResponse === 'No'
                                           ? 'bg-rose-600 text-white shadow-md ring-2 ring-rose-400'
                                           : 'bg-slate-900 text-slate-300 border border-slate-800 hover:bg-slate-800 hover:text-white'
@@ -2658,10 +2664,10 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                       <textarea
                                         value={item.textResponse}
                                         onChange={(e) => handleTextResponseChange(item.id, e.target.value)}
-                                        disabled={isLocked && viewRole === 'Distributor'}
+                                        disabled={viewRole === 'Auditor' || isLocked}
                                         placeholder="Type narrative response or context here..."
                                         rows={3}
-                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 disabled:opacity-60"
+                                        className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-indigo-500 disabled:opacity-75 disabled:cursor-not-allowed"
                                       />
                                     </div>
                                   ) : (
@@ -2681,7 +2687,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                       </div>
 
                                       {/* Drag & Drop Upload Trigger */}
-                                      {(!isLocked || viewRole === 'Auditor') && (
+                                      {(viewRole === 'Distributor' && !isLocked) && (
                                         <label className="border-2 border-dashed border-slate-800 hover:border-indigo-500 bg-slate-950/80 rounded-xl p-3 text-center block cursor-pointer transition-all hover:bg-slate-950">
                                           <input 
                                             type="file" 
@@ -2729,7 +2735,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                                   <Download className="h-3.5 w-3.5" />
                                                 </button>
 
-                                                {(!isLocked || viewRole === 'Auditor') && (
+                                                {(viewRole === 'Distributor' && !isLocked) && (
                                                   <button
                                                     type="button"
                                                     onClick={() => handleDeleteFile(item.id, file.id)}
@@ -2777,10 +2783,10 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                               <textarea
                                 value={item.noUploadExplanation}
                                 onChange={(e) => handleExplanationChange(item.id, e.target.value)}
-                                disabled={isLocked && viewRole === 'Distributor'}
+                                disabled={viewRole === 'Auditor' || isLocked}
                                 placeholder="Explain why mandatory document cannot be provided (minimum 50 characters required)..."
                                 rows={2}
-                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-500"
+                                className="w-full bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-100 placeholder-slate-600 focus:outline-none focus:border-red-500 disabled:opacity-75 disabled:cursor-not-allowed"
                               />
 
                               {isValidationError && (
