@@ -71,7 +71,7 @@ export const Header: React.FC<HeaderProps> = ({
         
         <div className="flex flex-1 items-center gap-4 shrink-0">
           {/* Currency Switcher */}
-          <div className="flex items-center bg-slate-950 rounded-lg border border-slate-800 p-0.5 text-xs font-semibold">
+          <div className="hidden lg:flex items-center bg-slate-950 rounded-lg border border-slate-800 p-0.5 text-xs font-semibold">
             <button
               onClick={() => onCurrencyModeChange('INR')}
               className={`px-2 py-1 rounded flex items-center gap-1 transition-all cursor-pointer ${
@@ -111,29 +111,19 @@ export const Header: React.FC<HeaderProps> = ({
               <Moon className="h-4 w-4 text-indigo-600" />
             )}
           </button>
-
-          {/* Large Search Bar or Distributor View indicator */}
-          {isDistributor ? (
-            <div className="hidden md:flex flex-1 max-w-xl items-center justify-center ml-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-950/90 border border-indigo-500/30 rounded-lg shadow-sm">
-                <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
-                <span className="text-xs font-bold text-slate-200 tracking-wider uppercase">DISTRIBUTOR VIEW</span>
-              </div>
-            </div>
-          ) : (
-            <div className="hidden md:flex flex-1 max-w-xl relative ml-4">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-              <input 
-                type="text" 
-                placeholder="Search distributors, engagements, audits..." 
-                className="w-full bg-slate-950 border border-slate-800 text-sm text-white pl-9 pr-4 py-1.5 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors"
-              />
-            </div>
-          )}
         </div>
 
         {/* Right Action Tools */}
         <div className="flex items-center gap-3 shrink-0">
+          <div className="hidden md:flex items-center justify-center mr-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-950/90 border border-indigo-500/30 rounded-lg shadow-sm">
+              <span className={`h-2 w-2 rounded-full ${isDistributor ? 'bg-emerald-400' : 'bg-indigo-400'}`}></span>
+              <span className="text-xs font-bold text-slate-200 tracking-wider uppercase">
+                {isDistributor ? 'DISTRIBUTOR VIEW' : 'AUDITOR VIEW'}
+              </span>
+            </div>
+          </div>
+
           <button 
             onClick={onOpenCopilot}
             className="flex items-center gap-1.5 bg-slate-950 hover:bg-slate-800 border border-amber-500/30 text-amber-300 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all shadow-sm"

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Users, PlayCircle, Hourglass, CheckCircle2, AlertTriangle, Search, Briefcase, Plus, Calendar, Clock, ExternalLink,
   TrendingUp, ChevronRight, ListTodo, BarChart3, FileText, Check, ChevronDown, Building2, ShieldCheck, Download,
@@ -57,10 +57,29 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  const demoEngagements = useMemo(() => {
+    return [
+      { id: 'demo-1', code: 'AUD-2026-DIST-002', title: 'FY26 ABC Distributors Rebates Audit', distributorName: 'ABC Distributors', status: 'Fieldwork', progressPercent: 45, varianceStatus: 'on_track', overdueItemsCount: 0 },
+      { id: 'demo-2', code: 'AUD-2026-DIST-003', title: 'FY26 XYZ Trading Rebates Audit', distributorName: 'XYZ Trading', status: 'Fieldwork', progressPercent: 60, varianceStatus: 'on_track', overdueItemsCount: 0 },
+      { id: 'demo-3', code: 'AUD-2026-DIST-004', title: 'FY26 Sunrise Distributors Audit', distributorName: 'Sunrise Distributors', status: 'Fieldwork', progressPercent: 30, varianceStatus: 'on_track', overdueItemsCount: 0 },
+      { id: 'demo-4', code: 'AUD-2026-DIST-005', title: 'FY26 Zenith Logistics Audit', distributorName: 'Zenith Logistics', status: 'Fieldwork', progressPercent: 20, varianceStatus: 'on_track', overdueItemsCount: 0 },
+      { id: 'demo-5', code: 'AUD-2026-DIST-006', title: 'FY26 Horizon Supply Co Audit', distributorName: 'Horizon Supply Co', status: 'Fieldwork', progressPercent: 50, varianceStatus: 'on_track', overdueItemsCount: 0 },
+      { id: 'demo-6', code: 'AUD-2026-DIST-007', title: 'FY26 Alpha Distributors Audit', distributorName: 'Alpha Distributors', status: 'Planning', progressPercent: 0, varianceStatus: 'neutral', overdueItemsCount: 0 },
+      { id: 'demo-7', code: 'AUD-2026-DIST-008', title: 'FY26 Beta Supply Co Audit', distributorName: 'Beta Supply Co', status: 'Completed', progressPercent: 100, varianceStatus: 'completed', overdueItemsCount: 0 }
+    ].map((m: any) => ({
+       ...engagements[0],
+       ...m
+    })) as AuditEngagement[];
+  }, [engagements]);
+
+  const dashboardEngagements = useMemo(() => {
+    return [...engagements, ...demoEngagements];
+  }, [engagements, demoEngagements]);
+
   // Find currently selected audit with graceful fallback
-  const currentAudit: AuditEngagement = engagements.find(
+  const currentAudit: AuditEngagement = dashboardEngagements.find(
     e => e.id === activeAuditId || e.code === activeAuditId
-  ) || engagements[0] || {
+  ) || dashboardEngagements[0] || {
     id: 'eng-101',
     code: 'AUD-2026-DIST-001',
     title: 'FY26 Midwest Trading Co. Rebates & Inventory Audit',
@@ -153,7 +172,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
   ];
 
   // Filter distributor table rows
-  const filteredAudits = engagements.filter(audit => {
+  const filteredAudits = dashboardEngagements.filter(audit => {
     const name = audit.distributorName || audit.title;
     const matchesSearch = name.toLowerCase().includes(tableSearchQuery.toLowerCase()) ||
                           audit.code.toLowerCase().includes(tableSearchQuery.toLowerCase());
@@ -233,10 +252,10 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
               <div className="absolute left-0 top-full mt-2 w-full min-w-[360px] bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden divide-y divide-slate-800/60 animate-in fade-in zoom-in-95 duration-100">
                 <div className="px-3.5 py-2 text-[10px] uppercase font-bold text-slate-400 tracking-wider bg-slate-950/60 flex items-center justify-between">
                   <span>Available Distributor Audits</span>
-                  <span className="text-indigo-400 font-mono">{engagements.length} Audits</span>
+                  <span className="text-indigo-400 font-mono">{dashboardEngagements.length} Audits</span>
                 </div>
                 <div className="max-h-80 overflow-y-auto divide-y divide-slate-800/40">
-                  {engagements.map((eng) => {
+                  {dashboardEngagements.map((eng) => {
                     const isSelected = eng.id === currentAudit.id || eng.code === currentAudit.code;
                     return (
                       <button
@@ -341,7 +360,7 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
           </div>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-lg flex items-center gap-4 group hover:border-slate-700 transition-colors relative overflow-hidden">
+        <div className="bg-slate-900 border-[1.5px] border-dotted border-pink-500/60 rounded-xl p-5 shadow-lg flex items-center gap-4 group hover:border-pink-500/80 transition-colors relative overflow-hidden">
           <div className="absolute top-0 left-0 w-1 h-full bg-rose-500"></div>
           <div className="h-12 w-12 rounded-full bg-rose-900/30 flex items-center justify-center shrink-0">
             <AlertTriangle className="h-6 w-6 text-rose-500" />
@@ -393,10 +412,10 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
           </div>
         </div>
         
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto overflow-y-auto max-h-[380px]">
           <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-950/50 text-slate-400 text-[11px] uppercase tracking-wider">
+            <thead className="sticky top-0 z-10">
+              <tr className="bg-slate-950 text-slate-400 text-[11px] uppercase tracking-wider shadow-md shadow-slate-900/50">
                 <th className="px-6 py-3 font-semibold">Distributor Name</th>
                 <th className="px-6 py-3 font-semibold">Engagement ID</th>
                 <th className="px-6 py-3 font-semibold w-48">Overall Progress</th>

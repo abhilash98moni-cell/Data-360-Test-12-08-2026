@@ -356,79 +356,8 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
           </nav>
         </div>
 
-        {/* Audit Streams / Scope Section */}
-        {!isAdmin && (
-          !isDistributor ? (
-            <div>
-              {!isCollapsed && <p className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Active Audit Streams</p>}
-              <div className="space-y-1">
-                {auditStreams.map((stream, idx) => {
-                  const Icon = stream.icon;
-                  return (
-                    <div
-                      key={idx}
-                      onClick={() => onTabChange('engagements')}
-                      className={`flex items-center ${isCollapsed ? "justify-center px-0" : "justify-between px-3"} py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 hover:bg-slate-800/40 cursor-pointer transition-colors`}
-                    >
-                      <div className={`flex items-center gap-2.5 min-w-0 ${isCollapsed ? "justify-center" : ""}`}>
-                        <Icon className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                        {!isCollapsed && <span className="truncate">{stream.name}</span>}
-                      </div>
-                      {!isCollapsed && <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700/60 shrink-0">{stream.count}</span>}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            <div>
-              {!isCollapsed && <p className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Distributor Portal Scope</p>}
-              {!isCollapsed && <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-2 text-xs">
-                <div className="flex items-center justify-between">
-                  <span className="text-slate-400">Assigned Entity:</span>
-                  <span className="text-emerald-300 font-semibold">{currentUser?.organization || 'Midwest Trading Co.'}</span>
-                </div>
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-slate-400">Target Completion:</span>
-                  <span className="text-slate-200 font-mono">Aug 25, 2026</span></div></div>}
-            </div>
-          )
-        )}
+        {/* Audit Streams and Stats sections have been hidden per role requirements */}
 
-        {/* Practice Stats Card or Distributor Status Card */}
-        {!isDistributor ? (
-          !isCollapsed && (<div className="p-3 bg-gradient-to-br from-slate-800/80 to-slate-800/30 border border-slate-700/60 rounded-xl space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-slate-300">Practice Summary</span>
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 font-medium">
-                Q3 FY26
-              </span>
-            </div>
-            <div className="space-y-1">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-400">Total Exposure Identified:</span>
-                <span className="font-bold text-emerald-400">₹18.84 Cr</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-400">Avg Sampling Confidence:</span>
-                <span className="font-medium text-slate-200">96.3%</span></div></div></div>)
-        ) : (
-          !isCollapsed && (<div className="p-3 bg-gradient-to-br from-emerald-950/30 to-slate-900 border border-emerald-500/30 rounded-xl space-y-2">
-            <div className="flex items-center justify-between">
-              <span className="text-[11px] font-semibold text-emerald-300">Audit Status</span>
-              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/30 font-medium">
-                Fieldwork Active
-              </span>
-            </div>
-            <div className="space-y-1 text-xs">
-              <div className="flex justify-between text-slate-400">
-                <span>Request Progress:</span>
-                <span className="font-bold text-emerald-400">75% (18/24)</span>
-              </div>
-              <div className="flex justify-between text-slate-400">
-                <span>Assigned CAPAs:</span>
-                <span className="font-bold text-amber-400">1 Open</span></div></div></div>)
-        )}
 
       </div>
 
