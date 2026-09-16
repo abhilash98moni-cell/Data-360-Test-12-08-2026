@@ -1,3 +1,9 @@
+
+const getAuthHeaders = () => {
+  const token = typeof window !== "undefined" ? (localStorage.getItem("supabase_token") || sessionStorage.getItem("supabase_token")) : null;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 import React, { useState, useEffect } from 'react';
 import { downloadFileFromApi } from '../lib/downloadHelper';
 import { 
@@ -127,6 +133,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
 
       const res = await fetch(`/api/evidence?${params.toString()}`, {
         headers: {
+          ...getAuthHeaders(),
           'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
@@ -170,6 +177,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
     try {
       const res = await fetch(`/api/evidence/${recordId}/history`, {
         headers: {
+          ...getAuthHeaders(),
           'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
@@ -308,6 +316,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
+          ...getAuthHeaders(),
           'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
@@ -365,6 +374,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
+          ...getAuthHeaders(),
           'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
@@ -402,6 +412,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
+          ...getAuthHeaders(),
           'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
@@ -447,6 +458,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
+          ...getAuthHeaders(),
           'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || '',
           'x-user-organization': currentUser?.organization || ''
@@ -659,6 +671,7 @@ export const EvidenceManagementView: React.FC<EvidenceManagementViewProps> = ({
                     const res = await fetch('/api/storage/upload', {
                       method: 'POST',
                       headers: {
+                        ...getAuthHeaders(),
                         'x-user-email': currentUser?.email || '',
                         'x-user-role': currentUser?.role || '',
                         'x-user-organization': currentUser?.organization || ''

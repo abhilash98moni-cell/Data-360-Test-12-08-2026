@@ -2405,7 +2405,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                               )}
 
                               {/* Auditor Reference Material Button */}
-                              {item.sampleMaterialEnabled && item.referenceMaterial && (
+                              {item.sampleMaterialEnabled && item.referenceMaterial && item.refNumber !== '1.1' && (
                                 <button
                                   onClick={() => handleOpenReferenceModal(item)}
                                   className="px-2.5 py-1 bg-indigo-950/80 hover:bg-indigo-900 text-indigo-300 rounded-lg text-xs font-semibold transition-all border border-indigo-500/40 flex items-center gap-1.5 cursor-pointer shadow-xs hover:border-indigo-400"

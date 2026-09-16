@@ -1,3 +1,9 @@
+
+const getAuthHeaders = () => {
+  const token = typeof window !== "undefined" ? (localStorage.getItem("supabase_token") || sessionStorage.getItem("supabase_token")) : null;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   UploadCloud,
@@ -449,6 +455,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       const auditParam = encodeURIComponent(selectedAuditFilter || 'All Audits');
       const res = await fetch(`/api/sampling/required-data/responses?distributorId=${distParam}&auditId=${auditParam}`, {
         headers: {
+          ...getAuthHeaders(),
           'x-user-email': currentUser?.email || '',
           'x-user-role': currentUser?.role || 'Auditor'
         }
@@ -491,14 +498,14 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       const auditParam = encodeURIComponent(selectedAuditFilter || 'All Audits');
       const clientParam = encodeURIComponent(selectedClient || 'All Clients');
 
-      const popRes = await fetch(`/api/sampling/populations?distributorId=${distParam}&auditId=${auditParam}&client=${clientParam}`);
+      const popRes = await fetch(`/api/sampling/populations?distributorId=${distParam}&auditId=${auditParam}&client=${clientParam}`, { headers: getAuthHeaders() });
       const popData = await popRes.json();
       
       const populations: SamplingPopulation[] = (popData.success && Array.isArray(popData.populations)) ? popData.populations : [];
       setAvailablePopulations(populations);
 
       // 2. Fetch active sampling state
-      const stateRes = await fetch(`/api/sampling/state?distributorId=${distParam}&auditId=${auditParam}&client=${clientParam}`);
+      const stateRes = await fetch(`/api/sampling/state?distributorId=${distParam}&auditId=${auditParam}&client=${clientParam}`, { headers: getAuthHeaders() });
       const stateData = await stateRes.json();
       const activePopId = stateData.success && stateData.state ? stateData.state.activePopulationId : null;
 
@@ -512,7 +519,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
 
       // 4. Fetch population records
       const targetId = targetPop ? (targetPop.googleDriveFileId || targetPop.id) : activePopId;
-      const recRes = await fetch(`/api/sampling/population-records?fileId=${encodeURIComponent(targetId || '')}&distributorId=${distParam}&auditId=${auditParam}&client=${clientParam}`);
+      const recRes = await fetch(`/api/sampling/population-records?fileId=${encodeURIComponent(targetId || '')}&distributorId=${distParam}&auditId=${auditParam}&client=${clientParam}`, { headers: getAuthHeaders() });
       const recData = await recRes.json();
 
       if (recData.success && Array.isArray(recData.records)) {
@@ -579,7 +586,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       // Persist active population state in database
       await fetch('/api/sampling/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
         body: JSON.stringify({
           distributorId: selectedDistributor,
           auditId: selectedAuditFilter || 'eng-101',
@@ -595,7 +602,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       // Fetch records for this population
       const distParam = encodeURIComponent(selectedDistributor || 'All Distributors');
       const auditParam = encodeURIComponent(selectedAuditFilter || 'All Audits');
-      const recRes = await fetch(`/api/sampling/population-records?fileId=${encodeURIComponent(fileId)}&distributorId=${distParam}&auditId=${auditParam}`);
+      const recRes = await fetch(`/api/sampling/population-records?fileId=${encodeURIComponent(fileId)}&distributorId=${distParam}&auditId=${auditParam}`, { headers: getAuthHeaders() });
       const recData = await recRes.json();
 
       if (recData.success && Array.isArray(recData.records)) {
@@ -773,6 +780,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       const res = await fetch('/api/sampling/upload', {
         method: 'POST',
         headers: {
+          ...getAuthHeaders(),
           'x-user-email': currentUser?.email || 'auditor@data360.com',
           'x-user-name': currentUser?.name || 'Sarah Jenkins',
           'x-user-role': currentUser?.role || 'Auditor'
