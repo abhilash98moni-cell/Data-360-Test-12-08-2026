@@ -34,6 +34,8 @@ interface EngagementWorkspaceViewProps {
   onToggleIIRFullScreen?: () => void;
   onDistributorChangeGlobal?: (distributor: string) => void;
   targetVoucherNo?: string | null;
+  targetIRLItemId?: string | null;
+  targetQuestionnaireId?: string | null;
 }
 
 export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = ({
@@ -49,15 +51,25 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
   onToggleIIRFullScreen,
   onDistributorChangeGlobal,
   currencyMode,
-  targetVoucherNo
+  targetVoucherNo,
+  targetIRLItemId,
+  targetQuestionnaireId
 }) => {
-  const [activeSubTab, setActiveSubTab] = useState<EngagementSubTab>(targetVoucherNo ? 'sampling' : initialSubTab);
+  const [activeSubTab, setActiveSubTab] = useState<EngagementSubTab>(
+    targetVoucherNo ? 'sampling' : targetIRLItemId ? 'iir' : targetQuestionnaireId ? 'questionnaire' : initialSubTab
+  );
 
   React.useEffect(() => {
     if (targetVoucherNo) {
       setActiveSubTab('sampling');
+    } else if (targetIRLItemId) {
+      setActiveSubTab('iir');
+    } else if (targetQuestionnaireId) {
+      setActiveSubTab('questionnaire');
+    } else if (initialSubTab) {
+      setActiveSubTab(initialSubTab);
     }
-  }, [targetVoucherNo]);
+  }, [targetVoucherNo, targetIRLItemId, targetQuestionnaireId, initialSubTab]);
 
   const isDistributor = currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor');
   const isAuditor = !isDistributor;
@@ -135,6 +147,7 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
           currentUser={currentUser}
           currencyMode={currencyMode}
           onNavigateToIRL={() => setActiveSubTab('iir')}
+          targetQuestionId={targetQuestionnaireId}
         />
       )}
 
@@ -163,6 +176,7 @@ export const EngagementWorkspaceView: React.FC<EngagementWorkspaceViewProps> = (
           currentUser={currentUser}
           isFullScreen={isIIRFullScreen}
           onToggleFullScreen={onToggleIIRFullScreen}
+          targetItemId={targetIRLItemId}
         />
       )}
     </div>

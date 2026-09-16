@@ -185,6 +185,9 @@ export default function App() {
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
   const [isIIRFullScreen, setIsIIRFullScreen] = useState(false);
   const [targetVoucherNo, setTargetVoucherNo] = useState<string | null>(null);
+  const [targetIRLItemId, setTargetIRLItemId] = useState<string | null>(null);
+  const [targetQuestionnaireId, setTargetQuestionnaireId] = useState<string | null>(null);
+  const [workspaceSubTab, setWorkspaceSubTab] = useState<'questionnaire' | 'iir' | 'sampling'>('questionnaire');
 
   // Periodic polling for unread notifications
   React.useEffect(() => {
@@ -466,7 +469,23 @@ export default function App() {
                 setActiveTab('engagement_workspace');
               }}
               onOpenNewAudit={() => setIsNewAuditOpen(true)}
-              onTabChange={setActiveTab}
+              onTabChange={(tab, params) => {
+                if (params) {
+                  if (params.subTab) {
+                    setWorkspaceSubTab(params.subTab);
+                  }
+                  if (params.targetQuestionId !== undefined) {
+                    setTargetQuestionnaireId(params.targetQuestionId || null);
+                  }
+                  if (params.targetIRLId !== undefined) {
+                    setTargetIRLItemId(params.targetIRLId || null);
+                  }
+                  if (params.targetVoucherNo !== undefined) {
+                    setTargetVoucherNo(params.targetVoucherNo || null);
+                  }
+                }
+                setActiveTab(tab);
+              }}
               onOpenCopilot={() => setIsCopilotOpen(true)}
               currencyMode={currencyMode}
               currentUser={currentUser}
@@ -481,11 +500,13 @@ export default function App() {
               selectedAuditFilter={selectedEngId}
               currentUser={currentUser}
               currencyMode={currencyMode}
-              initialSubTab={activeTab === 'iir' ? 'iir' : 'questionnaire'}
+              initialSubTab={activeTab === 'iir' ? 'iir' : workspaceSubTab}
               isIIRFullScreen={isIIRFullScreen}
               onToggleIIRFullScreen={() => setIsIIRFullScreen(prev => !prev)}
               onDistributorChangeGlobal={setSelectedDistributor}
               targetVoucherNo={targetVoucherNo}
+              targetIRLItemId={targetIRLItemId}
+              targetQuestionnaireId={targetQuestionnaireId}
             />
           ) : activeTab === 'evidence' ? (
             <EvidenceManagementView 

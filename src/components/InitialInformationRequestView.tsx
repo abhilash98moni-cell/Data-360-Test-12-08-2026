@@ -1,5 +1,5 @@
 const getAuthHeaders = () => { const token = typeof window !== "undefined" ? (localStorage.getItem("supabase_token") || sessionStorage.getItem("supabase_token")) : null; return token ? { Authorization: `Bearer ${token}` } : {}; };
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { downloadFileFromApi } from '../lib/downloadHelper';
 import { 
   IIRRequestItem, 
@@ -81,6 +81,7 @@ interface InitialInformationRequestViewProps {
   currentUser?: UserSession | null;
   isFullScreen?: boolean;
   onToggleFullScreen?: () => void;
+  targetItemId?: string | null;
 }
 
 // Real-time Storage Helpers per Client & Distributor
@@ -186,7 +187,8 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   onDistributorChangeGlobal,
   currentUser,
   isFullScreen = false,
-  onToggleFullScreen
+  onToggleFullScreen,
+  targetItemId
 }) => {
   // Fullscreen state handler
   const [internalFullScreen, setInternalFullScreen] = useState(false);
@@ -373,6 +375,32 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
   // Accordion Expand/Collapse State (Category 1 to 6)
   const [expandedCategories, setExpandedCategories] = useState<number[]>([1, 2, 3, 4, 5, 6]);
+
+  // Deep-link to specific IRL item when targetItemId is provided
+  useEffect(() => {
+    if (!targetItemId || !requests || requests.length === 0) return;
+    const match = requests.find(
+      r => r.id === targetItemId || r.refNumber === targetItemId || r.id?.toLowerCase() === targetItemId?.toLowerCase()
+    );
+    if (match) {
+      if (!expandedCategories.includes(match.categoryNumber)) {
+        setExpandedCategories(prev => [...prev, match.categoryNumber]);
+      }
+      setStatusFilter('All');
+      setCategoryFilter('All');
+      setSearchQuery('');
+      setTimeout(() => {
+        const el = document.getElementById(`item-card-${match.id}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('ring-2', 'ring-indigo-500', 'bg-indigo-950/40');
+          setTimeout(() => {
+            el.classList.remove('ring-2', 'ring-indigo-500', 'bg-indigo-950/40');
+          }, 3500);
+        }
+      }, 400);
+    }
+  }, [targetItemId, requests]);
 
   // Active Modals / Drawers
   const [selectedFileForPreview, setSelectedFileForPreview] = useState<IIRFile | null>(null);

@@ -63,7 +63,7 @@ interface DashboardViewProps {
   assignments?: AuditAssignment[];
   onSelectEngagement: (engagementId: string) => void;
   onOpenNewAudit: () => void;
-  onTabChange: (tab: any) => void;
+  onTabChange: (tab: any, params?: any) => void;
   onOpenCopilot: () => void;
   currencyMode?: CurrencyMode;
   currentUser?: UserSession | null;

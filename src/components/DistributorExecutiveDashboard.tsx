@@ -8,6 +8,8 @@ import {
 } from '../types';
 import { isItemComplete } from '../utils/irlValidation';
 import { INITIAL_IIR_REQUESTS } from '../data/iirData';
+import { BUSINESS_QUESTIONNAIRE_SECTIONS } from '../data/questionnaireData';
+import { fetchQuestionnaireState } from '../services/questionnaireApiClient';
 import { UserSession } from './AuthModal';
 import { CurrencyMode } from '../utils/currencyFormatter';
 import {
@@ -29,6 +31,13 @@ import {
   CheckSquare
 } from 'lucide-react';
 
+export interface NavigationTargetParams {
+  subTab?: 'questionnaire' | 'iir' | 'sampling';
+  targetQuestionId?: string;
+  targetIRLId?: string;
+  targetVoucherNo?: string;
+}
+
 interface DistributorExecutiveDashboardProps {
   engagements: AuditEngagement[];
   findings?: AuditFinding[];
@@ -36,7 +45,7 @@ interface DistributorExecutiveDashboardProps {
   assignments?: AuditAssignment[];
   selectedEngagementId?: string;
   onSelectAuditContext?: (engagementId: string, distributorName?: string, clientName?: string) => void;
-  onTabChange: (tab: any) => void;
+  onTabChange: (tab: any, params?: NavigationTargetParams) => void;
   currentUser?: UserSession | null;
   currencyMode?: CurrencyMode;
 }
@@ -178,22 +187,54 @@ export const DistributorExecutiveDashboard: React.FC<DistributorExecutiveDashboa
   // 5. Live Questionnaire Data
   const [questionnaireAnswered, setQuestionnaireAnswered] = useState<number>(0);
   const [questionnaireLocked, setQuestionnaireLocked] = useState<boolean>(false);
+  const [questionnaireAnswers, setQuestionnaireAnswers] = useState<Record<string, any>>({});
+  const [questionnaireReviews, setQuestionnaireReviews] = useState<Record<string, any>>({});
 
   useEffect(() => {
-    fetch(`/api/questionnaires/state?client=${encodeURIComponent(clientOrg)}&distributor=${encodeURIComponent(distOrg)}`)
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.success && data.state) {
-          if (data.state.answers) {
-            setQuestionnaireAnswered(Object.keys(data.state.answers).length);
+    fetchQuestionnaireState(clientOrg, distOrg, currentAudit.id, currentUser?.role, currentUser?.organization)
+      .then(res => {
+        if (res && res.success && res.state) {
+          if (res.state.answers) {
+            setQuestionnaireAnswers(res.state.answers);
+            const count = Object.keys(res.state.answers).filter(
+              k => res.state.answers[k]?.responseValue && res.state.answers[k].responseValue.trim().length > 0
+            ).length;
+            setQuestionnaireAnswered(count);
           }
-          if (data.state.isLocked !== undefined) {
-            setQuestionnaireLocked(Boolean(data.state.isLocked));
+          if (res.state.questionReviews) {
+            setQuestionnaireReviews(res.state.questionReviews);
+          }
+          if (res.state.isLocked !== undefined) {
+            setQuestionnaireLocked(Boolean(res.state.isLocked));
           }
         }
       })
       .catch(() => {});
-  }, [clientOrg, distOrg]);
+  }, [clientOrg, distOrg, currentAudit.id, currentUser]);
+
+  // Dynamically find the next questionnaire question needing attention/completion
+  const nextTargetQuestionId = useMemo(() => {
+    // 1. Any question with Clarification Required
+    for (const sec of BUSINESS_QUESTIONNAIRE_SECTIONS) {
+      for (const q of sec.questions) {
+        const review = questionnaireReviews[q.id];
+        const ans = questionnaireAnswers[q.id];
+        if (review?.reviewerStatus === 'Clarification Required' || ans?.reviewerStatus === 'Clarification Required') {
+          return q.id;
+        }
+      }
+    }
+    // 2. First unanswered question
+    for (const sec of BUSINESS_QUESTIONNAIRE_SECTIONS) {
+      for (const q of sec.questions) {
+        const ans = questionnaireAnswers[q.id];
+        if (!ans || !ans.responseValue || ans.responseValue.trim().length === 0) {
+          return q.id;
+        }
+      }
+    }
+    return 'q-1.1';
+  }, [questionnaireReviews, questionnaireAnswers]);
 
   // 6. Live Evidence Files Count
   const [evidenceCount, setEvidenceCount] = useState<number>(14);
@@ -268,61 +309,6 @@ export const DistributorExecutiveDashboard: React.FC<DistributorExecutiveDashboa
 
   const attentionCount = clarificationRequiredCount > 0 ? clarificationRequiredCount : missingMandatoryCount;
 
-  // Timeline activities derived from real data
-  const timelineActivities = useMemo(() => {
-    const irlPercent = overallProgressPercent;
-    const qPercent = questionnaireAnswered > 0 ? Math.min(100, Math.round((questionnaireAnswered / 32) * 100)) : 0;
-    const docPercent = evidenceCount > 0 ? Math.min(100, Math.round((evidenceCount / 16) * 100)) : 0;
-
-    return [
-      {
-        name: 'IRL & Kick-off',
-        module: 'Data Collection',
-        progress: irlPercent,
-        status: irlPercent === 100 ? 'Completed' : 'In Progress',
-        startWeek: 1,
-        endWeek: 4,
-        color: 'from-blue-500 to-indigo-500'
-      },
-      {
-        name: 'Business Questionnaire',
-        module: 'Compliance Disclosures',
-        progress: questionnaireLocked ? 100 : qPercent,
-        status: questionnaireLocked ? 'Completed' : (qPercent > 0 ? 'In Progress' : 'Pending'),
-        startWeek: 2,
-        endWeek: 5,
-        color: 'from-indigo-500 to-purple-500'
-      },
-      {
-        name: 'Supporting Documents',
-        module: 'Evidence Vault',
-        progress: docPercent,
-        status: docPercent >= 75 ? 'In Progress' : 'Active',
-        startWeek: 2,
-        endWeek: 6,
-        color: 'from-emerald-500 to-teal-500'
-      },
-      {
-        name: 'Sampling Requests',
-        module: 'Testing & Review',
-        progress: 45,
-        status: 'Fieldwork',
-        startWeek: 3,
-        endWeek: 7,
-        color: 'from-amber-500 to-orange-500'
-      },
-      {
-        name: 'Responses / Interviews',
-        module: 'Audit Debrief',
-        progress: 15,
-        status: 'Scheduled',
-        startWeek: 5,
-        endWeek: 8,
-        color: 'from-slate-500 to-slate-400'
-      }
-    ];
-  }, [overallProgressPercent, questionnaireAnswered, questionnaireLocked, evidenceCount]);
-
   // Tasks table items derived from live pending items
   const tableTasks = useMemo(() => {
     const list: Array<{
@@ -334,6 +320,9 @@ export const DistributorExecutiveDashboard: React.FC<DistributorExecutiveDashboa
       statusCode: 'mandatory' | 'clarification' | 'pending' | 'in_progress';
       actionLabel: string;
       actionTab: string;
+      targetSubTab?: 'questionnaire' | 'iir' | 'sampling';
+      targetId?: string;
+      voucherNo?: string;
     }> = [];
 
     // Add Questionnaire if not locked
@@ -346,7 +335,9 @@ export const DistributorExecutiveDashboard: React.FC<DistributorExecutiveDashboa
         status: questionnaireAnswered > 0 ? `${questionnaireAnswered}/32 Completed` : 'Action Required',
         statusCode: questionnaireAnswered > 0 ? 'in_progress' : 'mandatory',
         actionLabel: 'Complete',
-        actionTab: 'engagement_workspace'
+        actionTab: 'engagement_workspace',
+        targetSubTab: 'questionnaire',
+        targetId: nextTargetQuestionId
       });
     }
 
@@ -370,12 +361,36 @@ export const DistributorExecutiveDashboard: React.FC<DistributorExecutiveDashboa
         status: isClarification ? 'Clarification Required' : (item.isMandatory ? 'Mandatory Upload' : 'Pending Upload'),
         statusCode: isClarification ? 'clarification' : (item.isMandatory ? 'mandatory' : 'pending'),
         actionLabel: isClarification ? 'Respond' : 'Upload',
-        actionTab: 'engagement_workspace'
+        actionTab: 'engagement_workspace',
+        targetSubTab: 'iir',
+        targetId: item.id || item.refNumber
       });
     });
 
     return list;
-  }, [questionnaireLocked, questionnaireAnswered, iirRequests, currentAudit.endDate]);
+  }, [questionnaireLocked, questionnaireAnswered, nextTargetQuestionId, iirRequests, currentAudit.endDate]);
+
+  const handleTaskActionClick = (t: any) => {
+    const isBQ = t.id === 'TASK-BQ' || t.module?.toLowerCase().includes('questionnaire') || t.targetSubTab === 'questionnaire';
+    const isSampling = t.module?.toLowerCase().includes('sampling') || t.targetSubTab === 'sampling';
+
+    if (isBQ) {
+      onTabChange('engagement_workspace', {
+        subTab: 'questionnaire',
+        targetQuestionId: t.targetId || nextTargetQuestionId
+      });
+    } else if (isSampling) {
+      onTabChange('engagement_workspace', {
+        subTab: 'sampling',
+        targetVoucherNo: t.voucherNo || t.targetId || t.id
+      });
+    } else {
+      onTabChange('engagement_workspace', {
+        subTab: 'iir',
+        targetIRLId: t.targetId || t.id
+      });
+    }
+  };
 
   return (
     <div className="w-full p-3 sm:p-4 space-y-3 max-w-7xl mx-auto">
@@ -610,80 +625,94 @@ export const DistributorExecutiveDashboard: React.FC<DistributorExecutiveDashboa
         </div>
       </div>
 
-      {/* 4. MAIN ROW 1 (SIDE-BY-SIDE): AUDIT TIMELINE (LEFT) + RECENT COMMUNICATION (RIGHT) */}
+      {/* 4. MAIN ROW (SIDE-BY-SIDE): MY KEY TASKS & DEADLINES (LEFT) + RECENT COMMUNICATION (RIGHT) */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
         
-        {/* LEFT COLUMN: AUDIT TIMELINE (COMPACT HORIZONTAL GANTT-STYLE) */}
+        {/* LEFT COLUMN: MY KEY TASKS & DEADLINES (TABLE) */}
         <div className="lg:col-span-7 bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 shadow-md flex flex-col justify-between space-y-2.5">
           <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
             <div>
               <h2 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5">
-                <BarChart3 className="h-4 w-4 text-indigo-400" />
-                <span>Audit Timeline</span>
+                <Table className="h-4 w-4 text-indigo-400" />
+                <span>My Key Tasks & Deadlines</span>
               </h2>
-              <p className="text-[10px] text-slate-400">Progress across active compliance modules</p>
+              <p className="text-[10px] text-slate-400">Action items requiring completion or response</p>
             </div>
-            {/* Compact Legend */}
-            <div className="flex items-center gap-2.5 text-[10px] text-slate-400">
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
-                <span>Completed</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-indigo-500 inline-block"></span>
-                <span>In Progress</span>
-              </span>
-              <span className="flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-slate-600 inline-block"></span>
-                <span>Scheduled</span>
-              </span>
-            </div>
+            <button
+              onClick={() => onTabChange('engagement_workspace', { subTab: 'iir' })}
+              className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+            >
+              <span>View All ({iirRequests.length})</span>
+              <ChevronDown className="h-3 w-3 -rotate-90" />
+            </button>
           </div>
 
-          {/* Timeline Table / Gantt View */}
-          <div className="space-y-2 overflow-x-auto">
-            {/* Week Labels Header */}
-            <div className="grid grid-cols-12 gap-1 text-[10px] font-mono text-slate-500 border-b border-slate-800/40 pb-1">
-              <div className="col-span-5 font-sans font-semibold text-slate-400">Activity</div>
-              <div className="col-span-7 grid grid-cols-6 text-center">
-                <span>W1</span>
-                <span>W2</span>
-                <span>W3</span>
-                <span>W4</span>
-                <span>W5</span>
-                <span>W6+</span>
-              </div>
-            </div>
-
-            {/* Activity Rows */}
-            <div className="space-y-1.5">
-              {timelineActivities.map((act, idx) => (
-                <div key={idx} className="grid grid-cols-12 gap-1 items-center text-xs py-1 hover:bg-slate-800/30 rounded px-1 transition-colors">
-                  <div className="col-span-5 min-w-0 pr-2">
-                    <div className="font-medium text-white truncate text-[11px]">{act.name}</div>
-                    <div className="text-[9px] text-slate-400 truncate">{act.module} • {act.progress}%</div>
-                  </div>
-                  <div className="col-span-7 relative h-4 bg-slate-950/80 rounded border border-slate-800/80 overflow-hidden flex items-center">
-                    {/* Gantt Bar Segment */}
-                    <div
-                      className={`h-full bg-gradient-to-r ${act.color} rounded transition-all duration-500 opacity-90`}
-                      style={{
-                        width: `${Math.max(8, act.progress)}%`,
-                        marginLeft: `${((act.startWeek - 1) / 6) * 100}%`
-                      }}
-                    />
-                    <span className="absolute right-1.5 text-[9px] font-mono text-slate-400">
-                      {act.status}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
+          {/* Compact Table */}
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-800 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                  <th className="py-1.5 px-2">Requirement / Task</th>
+                  <th className="py-1.5 px-2">Module</th>
+                  <th className="py-1.5 px-2">Due Date</th>
+                  <th className="py-1.5 px-2">Status</th>
+                  <th className="py-1.5 px-2 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {tableTasks.length > 0 ? (
+                  tableTasks.map((t) => (
+                    <tr key={t.id} className="hover:bg-slate-800/30 transition-colors">
+                      <td className="py-2 px-2">
+                        <div className="font-semibold text-white truncate max-w-[180px] text-[11px]">{t.title}</div>
+                        <div className="text-[9px] font-mono text-indigo-400">{t.id}</div>
+                      </td>
+                      <td className="py-2 px-2 text-[11px] text-slate-300 truncate max-w-[110px]">
+                        {t.module}
+                      </td>
+                      <td className="py-2 px-2 text-[10px] text-slate-400 whitespace-nowrap">
+                        {t.dueDate}
+                      </td>
+                      <td className="py-2 px-2 whitespace-nowrap">
+                        <span className={`px-1.5 py-0.5 text-[9px] font-semibold rounded border ${
+                          t.statusCode === 'clarification'
+                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
+                            : t.statusCode === 'mandatory'
+                            ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
+                            : 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                        }`}>
+                          {t.status}
+                        </span>
+                      </td>
+                      <td className="py-2 px-2 text-right whitespace-nowrap">
+                        <button
+                          onClick={() => handleTaskActionClick(t)}
+                          className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-semibold transition-all shadow cursor-pointer"
+                        >
+                          {t.actionLabel}
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5} className="py-4 text-center text-slate-400 text-xs">
+                      All tasks and requirements currently fulfilled!
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
 
-          <div className="pt-1.5 border-t border-slate-800/60 flex items-center justify-between text-[10px] text-slate-400">
-            <span>Audit Fieldwork Phase: <strong className="text-indigo-300">{currentAudit.status}</strong></span>
-            <span>Target Completion: <strong className="text-slate-200">{currentAudit.endDate || 'Aug 25, 2026'}</strong></span>
+          <div className="pt-1.5 border-t border-slate-800/60 text-[10px] text-slate-400 flex items-center justify-between">
+            <span>Pending items requiring response: <strong className="text-amber-400">{pendingItemsCount}</strong></span>
+            <button
+              onClick={() => onTabChange('engagement_workspace', { subTab: 'iir' })}
+              className="text-indigo-400 hover:text-indigo-300 font-medium"
+            >
+              Go to IRL Schedule →
+            </button>
           </div>
         </div>
 
@@ -747,159 +776,6 @@ export const DistributorExecutiveDashboard: React.FC<DistributorExecutiveDashboa
               <MessageSquare className="h-3.5 w-3.5 text-indigo-400" />
               <span>Open Communication Thread</span>
             </button>
-          </div>
-        </div>
-
-      </div>
-
-      {/* 5. MAIN ROW 2 (SIDE-BY-SIDE): MY KEY TASKS & DEADLINES (LEFT) + QUICK ACTIONS (RIGHT) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-        
-        {/* LEFT COLUMN: MY KEY TASKS & DEADLINES (TABLE) */}
-        <div className="lg:col-span-7 bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 shadow-md flex flex-col justify-between space-y-2.5">
-          <div className="flex items-center justify-between border-b border-slate-800/80 pb-2">
-            <div>
-              <h2 className="text-xs sm:text-sm font-bold text-white flex items-center gap-1.5">
-                <Table className="h-4 w-4 text-indigo-400" />
-                <span>My Key Tasks & Deadlines</span>
-              </h2>
-              <p className="text-[10px] text-slate-400">Action items requiring completion or response</p>
-            </div>
-            <button
-              onClick={() => onTabChange('engagement_workspace')}
-              className="text-[11px] text-indigo-400 hover:text-indigo-300 font-semibold flex items-center gap-1 cursor-pointer transition-colors"
-            >
-              <span>View All ({iirRequests.length})</span>
-              <ChevronDown className="h-3 w-3 -rotate-90" />
-            </button>
-          </div>
-
-          {/* Compact Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-slate-800 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
-                  <th className="py-1.5 px-2">Requirement / Task</th>
-                  <th className="py-1.5 px-2">Module</th>
-                  <th className="py-1.5 px-2">Due Date</th>
-                  <th className="py-1.5 px-2">Status</th>
-                  <th className="py-1.5 px-2 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800/60">
-                {tableTasks.length > 0 ? (
-                  tableTasks.map((t) => (
-                    <tr key={t.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-2 px-2">
-                        <div className="font-semibold text-white truncate max-w-[180px] text-[11px]">{t.title}</div>
-                        <div className="text-[9px] font-mono text-indigo-400">{t.id}</div>
-                      </td>
-                      <td className="py-2 px-2 text-[11px] text-slate-300 truncate max-w-[110px]">
-                        {t.module}
-                      </td>
-                      <td className="py-2 px-2 text-[10px] text-slate-400 whitespace-nowrap">
-                        {t.dueDate}
-                      </td>
-                      <td className="py-2 px-2 whitespace-nowrap">
-                        <span className={`px-1.5 py-0.5 text-[9px] font-semibold rounded border ${
-                          t.statusCode === 'clarification'
-                            ? 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-                            : t.statusCode === 'mandatory'
-                            ? 'bg-rose-500/10 text-rose-400 border-rose-500/30'
-                            : 'bg-blue-500/10 text-blue-400 border-blue-500/30'
-                        }`}>
-                          {t.status}
-                        </span>
-                      </td>
-                      <td className="py-2 px-2 text-right whitespace-nowrap">
-                        <button
-                          onClick={() => onTabChange(t.actionTab)}
-                          className="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-[10px] font-semibold transition-all shadow cursor-pointer"
-                        >
-                          {t.actionLabel}
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={5} className="py-4 text-center text-slate-400 text-xs">
-                      All tasks and requirements currently fulfilled!
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="pt-1.5 border-t border-slate-800/60 text-[10px] text-slate-400 flex items-center justify-between">
-            <span>Pending items requiring response: <strong className="text-amber-400">{pendingItemsCount}</strong></span>
-            <button
-              onClick={() => onTabChange('engagement_workspace')}
-              className="text-indigo-400 hover:text-indigo-300 font-medium"
-            >
-              Go to IRL Schedule →
-            </button>
-          </div>
-        </div>
-
-        {/* RIGHT COLUMN: QUICK ACTIONS (GRID DIRECTLY BELOW COMMUNICATION) */}
-        <div className="lg:col-span-5 bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 shadow-md flex flex-col justify-between space-y-2.5">
-          <div className="border-b border-slate-800/80 pb-2">
-            <h2 className="text-xs sm:text-sm font-bold text-white">Quick Actions</h2>
-            <p className="text-[10px] text-slate-400">Shortcuts to primary distributor audit actions</p>
-          </div>
-
-          {/* 4 Action Cards Grid */}
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={() => onTabChange('evidence')}
-              className="p-2.5 bg-slate-950/60 hover:bg-slate-950 border border-slate-800 hover:border-indigo-500/40 rounded-lg text-left space-y-1 transition-all cursor-pointer group"
-            >
-              <div className="p-1.5 rounded bg-indigo-500/10 text-indigo-400 group-hover:scale-105 transition-transform w-fit">
-                <Upload className="h-3.5 w-3.5" />
-              </div>
-              <h3 className="text-xs font-bold text-white">Upload Documents</h3>
-              <p className="text-[10px] text-slate-400 leading-tight">Add evidence to vault</p>
-            </button>
-
-            <button
-              onClick={() => onTabChange('engagement_workspace')}
-              className="p-2.5 bg-slate-950/60 hover:bg-slate-950 border border-slate-800 hover:border-indigo-500/40 rounded-lg text-left space-y-1 transition-all cursor-pointer group"
-            >
-              <div className="p-1.5 rounded bg-blue-500/10 text-blue-400 group-hover:scale-105 transition-transform w-fit">
-                <FileText className="h-3.5 w-3.5" />
-              </div>
-              <h3 className="text-xs font-bold text-white">Business Questionnaire</h3>
-              <p className="text-[10px] text-slate-400 leading-tight">Complete disclosures</p>
-            </button>
-
-            <button
-              onClick={() => onTabChange('communication')}
-              className="p-2.5 bg-slate-950/60 hover:bg-slate-950 border border-slate-800 hover:border-indigo-500/40 rounded-lg text-left space-y-1 transition-all cursor-pointer group"
-            >
-              <div className="p-1.5 rounded bg-emerald-500/10 text-emerald-400 group-hover:scale-105 transition-transform w-fit">
-                <MessageSquare className="h-3.5 w-3.5" />
-              </div>
-              <h3 className="text-xs font-bold text-white">View Messages</h3>
-              <p className="text-[10px] text-slate-400 leading-tight">Open auditor chat</p>
-            </button>
-
-            <button
-              onClick={() => onTabChange('engagement_workspace')}
-              className="p-2.5 bg-slate-950/60 hover:bg-slate-950 border border-slate-800 hover:border-indigo-500/40 rounded-lg text-left space-y-1 transition-all cursor-pointer group"
-            >
-              <div className="p-1.5 rounded bg-purple-500/10 text-purple-400 group-hover:scale-105 transition-transform w-fit">
-                <CheckSquare className="h-3.5 w-3.5" />
-              </div>
-              <h3 className="text-xs font-bold text-white">Sampling Requests</h3>
-              <p className="text-[10px] text-slate-400 leading-tight">Review sampled records</p>
-            </button>
-          </div>
-
-          <div className="pt-1 border-t border-slate-800/60 text-[10px] text-slate-400 flex items-center justify-between">
-            <span>Evidence lodged: <strong className="text-emerald-400">{evidenceCount} files</strong></span>
-            <span>Questionnaire: <strong className="text-indigo-300">{questionnaireLocked ? 'Locked' : 'Active'}</strong></span>
           </div>
         </div>
 

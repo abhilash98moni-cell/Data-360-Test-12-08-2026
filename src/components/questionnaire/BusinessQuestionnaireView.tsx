@@ -61,13 +61,16 @@ interface BusinessQuestionnaireViewProps {
   selectedDistributor: string;
   currentUser: UserSession | null;
   onNavigateToIRL?: (refNumber?: string) => void;
+  currencyMode?: any;
+  targetQuestionId?: string | null;
 }
 
 export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps & { currentUser: any }> = ({
   selectedClient,
   selectedDistributor,
   currentUser,
-  onNavigateToIRL
+  onNavigateToIRL,
+  targetQuestionId
 }) => {
   const isDistributor = currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor');
   const isAuditor = !isDistributor;
@@ -178,6 +181,30 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
   }, [questionnaireState]);
 
   const activeSection = activeSections[activeSectionIdx] || activeSections[0];
+
+  // Deep link to specific question when targetQuestionId is provided
+  useEffect(() => {
+    if (!targetQuestionId || !activeSections || activeSections.length === 0) return;
+    const secIdx = activeSections.findIndex((s: any) =>
+      s.questions?.some((q: any) => q.id === targetQuestionId)
+    );
+    if (secIdx !== -1) {
+      setActiveSectionIdx(secIdx);
+      setSelectedQuestionId(targetQuestionId);
+      setFilterMode('all');
+      setSearchQuery('');
+      setTimeout(() => {
+        const el = document.getElementById(`question-${targetQuestionId}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          el.classList.add('ring-2', 'ring-indigo-500', 'bg-indigo-950/40');
+          setTimeout(() => {
+            el.classList.remove('ring-2', 'ring-indigo-500', 'bg-indigo-950/40');
+          }, 3500);
+        }
+      }, 400);
+    }
+  }, [targetQuestionId, activeSections]);
 
   const handleRequestEditAccess = async () => {
     if (!questionnaireState || isEditRequesting) return;
@@ -1566,6 +1593,7 @@ export const BusinessQuestionnaireView: React.FC<BusinessQuestionnaireViewProps 
                 return (
                   <div
                     key={q.id}
+                    id={`question-${q.id}`}
                     className={`bg-slate-900 border rounded-2xl p-4 sm:p-6 transition-all space-y-4 shadow-md ${
                       auditorNote?.isFlaggedForFollowUp && isAuditor
                         ? 'border-amber-500/40 ring-1 ring-amber-500/20'
