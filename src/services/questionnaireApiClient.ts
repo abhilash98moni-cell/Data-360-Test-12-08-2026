@@ -1,4 +1,4 @@
-import { AuthoritativeQuestionnaireState, QuestionnaireAnswerItem, QuestionnaireAuditorNoteItem } from './questionnaireService';
+import { AuthoritativeQuestionnaireState, QuestionnaireAnswerItem, QuestionnaireAuditorNoteItem } from './questionnaireTypes';
 
 export const getAuthHeaders = () => {
   if (typeof window === 'undefined') return {};
