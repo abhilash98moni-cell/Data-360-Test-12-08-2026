@@ -55,10 +55,13 @@ app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.get([
   '/api/Question_1_1_Corporate_Org_Chart_Template.pdf',
   '/api/Question_1_4_Active_Employee_Listing_Template.pdf',
+  '/api/Org_Chart_Sample_Structure_Guidance.pdf',
   '/api/templates/Question_1_1_Corporate_Org_Chart_Template.pdf',
   '/api/templates/Question_1_4_Active_Employee_Listing_Template.pdf',
+  '/api/templates/Org_Chart_Sample_Structure_Guidance.pdf',
   '/Question_1_1_Corporate_Org_Chart_Template.pdf',
-  '/Question_1_4_Active_Employee_Listing_Template.pdf'
+  '/Question_1_4_Active_Employee_Listing_Template.pdf',
+  '/Org_Chart_Sample_Structure_Guidance.pdf'
 ], (req: any, res: any) => {
   const requestedFile = path.basename(req.path);
   const isDownload = req.query.download === '1' || req.query.download === 'true' || req.query.dl === '1';
@@ -71,18 +74,27 @@ app.get([
   res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Cache-Control', 'public, max-age=3600');
 
-  const possiblePaths = [
-    path.join(process.cwd(), 'public', requestedFile),
-    path.join(process.cwd(), 'dist', requestedFile),
-    path.join(process.cwd(), 'uploads', requestedFile),
-    path.join(__dirname, '..', 'public', requestedFile),
-    path.join(__dirname, '..', 'dist', requestedFile),
-    path.join(__dirname, '..', 'uploads', requestedFile)
-  ];
+  const filesToCheck = [requestedFile];
+  if (requestedFile === 'Org_Chart_Sample_Structure_Guidance.pdf') {
+    filesToCheck.push('Question_1_1_Corporate_Org_Chart_Template.pdf');
+  } else if (requestedFile === 'Question_1_1_Corporate_Org_Chart_Template.pdf') {
+    filesToCheck.push('Org_Chart_Sample_Structure_Guidance.pdf');
+  }
 
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) {
-      return res.sendFile(p);
+  for (const f of filesToCheck) {
+    const possiblePaths = [
+      path.join(process.cwd(), 'public', f),
+      path.join(process.cwd(), 'dist', f),
+      path.join(process.cwd(), 'uploads', f),
+      path.join(__dirname, '..', 'public', f),
+      path.join(__dirname, '..', 'dist', f),
+      path.join(__dirname, '..', 'uploads', f)
+    ];
+
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        return res.sendFile(p);
+      }
     }
   }
 

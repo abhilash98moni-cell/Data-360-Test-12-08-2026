@@ -63,10 +63,13 @@ async function startServer() {
   app.get([
     '/Question_1_1_Corporate_Org_Chart_Template.pdf',
     '/Question_1_4_Active_Employee_Listing_Template.pdf',
+    '/Org_Chart_Sample_Structure_Guidance.pdf',
     '/api/Question_1_1_Corporate_Org_Chart_Template.pdf',
     '/api/Question_1_4_Active_Employee_Listing_Template.pdf',
+    '/api/Org_Chart_Sample_Structure_Guidance.pdf',
     '/api/templates/Question_1_1_Corporate_Org_Chart_Template.pdf',
-    '/api/templates/Question_1_4_Active_Employee_Listing_Template.pdf'
+    '/api/templates/Question_1_4_Active_Employee_Listing_Template.pdf',
+    '/api/templates/Org_Chart_Sample_Structure_Guidance.pdf'
   ], (req: any, res: any) => {
     const requestedFile = path.basename(req.path);
     const isDownload = req.query.download === '1' || req.query.download === 'true' || req.query.dl === '1';
@@ -1534,7 +1537,7 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   app.get('/api/storage/preview/:fileId', handleStoragePreview);
 
   // Dedicated routes to serve Questionnaire Sample PDF templates
-  app.get(['/Question_1_1_Corporate_Org_Chart_Template.pdf', '/Question_1_4_Active_Employee_Listing_Template.pdf'], (req: any, res: any) => {
+  app.get(['/Question_1_1_Corporate_Org_Chart_Template.pdf', '/Question_1_4_Active_Employee_Listing_Template.pdf', '/Org_Chart_Sample_Structure_Guidance.pdf'], (req: any, res: any) => {
     const requestedFile = path.basename(req.path);
     const isDownload = req.query.download === '1' || req.query.download === 'true' || req.query.dl === '1';
     const disposition = isDownload ? 'attachment' : 'inline';
