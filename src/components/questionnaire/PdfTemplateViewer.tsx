@@ -55,7 +55,48 @@ export const PdfTemplateViewer: React.FC<PdfTemplateViewerProps> = ({
       });
       renderTasksRef.current = {};
 
-      const loadingTask = pdfjsLib.getDocument(pdfUrl);
+      // Candidate URLs to fetch the PDF asset from
+      const candidateUrls = [
+        pdfUrl,
+        `/api/templates/${fileName}`,
+        `/api/${fileName}`,
+        `/${fileName}`,
+        `/uploads/${fileName}`
+      ];
+
+      let pdfBytes: Uint8Array | null = null;
+      let lastFetchError: any = null;
+
+      for (const url of candidateUrls) {
+        try {
+          const res = await fetch(url, { cache: 'no-cache' });
+          if (!res.ok) continue;
+          const buffer = await res.arrayBuffer();
+          const bytes = new Uint8Array(buffer);
+          // Verify valid PDF magic bytes: %PDF- (0x25, 0x50, 0x44, 0x46)
+          if (
+            bytes.length > 50 &&
+            bytes[0] === 0x25 && // %
+            bytes[1] === 0x50 && // P
+            bytes[2] === 0x44 && // D
+            bytes[3] === 0x46    // F
+          ) {
+            pdfBytes = bytes;
+            break;
+          }
+        } catch (err: any) {
+          lastFetchError = err;
+        }
+      }
+
+      if (!pdfBytes) {
+        throw new Error(
+          lastFetchError?.message ||
+            'Unable to load inline preview: Server did not return a valid PDF document.'
+        );
+      }
+
+      const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
       const loadedDoc = await loadingTask.promise;
       setPdfDoc(loadedDoc);
       setNumPages(loadedDoc.numPages);
@@ -66,7 +107,7 @@ export const PdfTemplateViewer: React.FC<PdfTemplateViewerProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [pdfUrl]);
+  }, [pdfUrl, fileName]);
 
   useEffect(() => {
     loadPdf();

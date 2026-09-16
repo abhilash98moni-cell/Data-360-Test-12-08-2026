@@ -543,28 +543,51 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
     logReferenceAction('Downloaded', item, `User downloaded ${fileName}`);
     showToast(`Downloading auditor reference material ${fileName}...`, 'success');
     
-    // Method 1: Fetch as blob to guarantee download in all browsers (including Brave & sandboxed iframes)
+    // Method 1: Fetch as blob with candidate URLs and magic byte validation (%PDF-)
     try {
-      const res = await fetch(`/${fileName}?download=1`);
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        a.target = '_blank';
-        a.rel = 'noopener noreferrer';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          window.URL.revokeObjectURL(url);
-          if (document.body.contains(a)) document.body.removeChild(a);
-        }, 10000);
-        return;
+      const candidateUrls = [
+        `/${fileName}?download=1`,
+        `/api/templates/${fileName}?download=1`,
+        `/api/${fileName}?download=1`,
+        `/${fileName}`,
+        `/api/templates/${fileName}`
+      ];
+
+      for (const url of candidateUrls) {
+        try {
+          const res = await fetch(url, { cache: 'no-cache' });
+          if (res.ok) {
+            const buf = await res.arrayBuffer();
+            const bytes = new Uint8Array(buf);
+            // Verify valid PDF magic bytes: %PDF-
+            if (
+              bytes.length > 50 &&
+              bytes[0] === 0x25 &&
+              bytes[1] === 0x50 &&
+              bytes[2] === 0x44 &&
+              bytes[3] === 0x46
+            ) {
+              const blob = new Blob([bytes], { type: 'application/pdf' });
+              const blobUrl = window.URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = blobUrl;
+              a.download = fileName;
+              a.target = '_blank';
+              a.rel = 'noopener noreferrer';
+              document.body.appendChild(a);
+              a.click();
+              setTimeout(() => {
+                window.URL.revokeObjectURL(blobUrl);
+                if (document.body.contains(a)) document.body.removeChild(a);
+              }, 10000);
+              return;
+            }
+          }
+        } catch (_) {}
       }
     } catch (_) {}
 
-    // Method 2: Direct link with attachment disposition header
+    // Method 2: Direct link with attachment disposition header fallback
     try {
       const a = document.createElement('a');
       a.href = `/${fileName}?download=1`;

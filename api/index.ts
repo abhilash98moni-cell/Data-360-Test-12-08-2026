@@ -51,6 +51,43 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// Dedicated endpoints to serve Questionnaire Sample PDF templates with full headers
+app.get([
+  '/api/Question_1_1_Corporate_Org_Chart_Template.pdf',
+  '/api/Question_1_4_Active_Employee_Listing_Template.pdf',
+  '/api/templates/Question_1_1_Corporate_Org_Chart_Template.pdf',
+  '/api/templates/Question_1_4_Active_Employee_Listing_Template.pdf',
+  '/Question_1_1_Corporate_Org_Chart_Template.pdf',
+  '/Question_1_4_Active_Employee_Listing_Template.pdf'
+], (req: any, res: any) => {
+  const requestedFile = path.basename(req.path);
+  const isDownload = req.query.download === '1' || req.query.download === 'true' || req.query.dl === '1';
+  const disposition = isDownload ? 'attachment' : 'inline';
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `${disposition}; filename="${requestedFile}"`);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Type');
+  res.setHeader('Accept-Ranges', 'bytes');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+
+  const possiblePaths = [
+    path.join(process.cwd(), 'public', requestedFile),
+    path.join(process.cwd(), 'dist', requestedFile),
+    path.join(process.cwd(), 'uploads', requestedFile),
+    path.join(__dirname, '..', 'public', requestedFile),
+    path.join(__dirname, '..', 'dist', requestedFile),
+    path.join(__dirname, '..', 'uploads', requestedFile)
+  ];
+
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      return res.sendFile(p);
+    }
+  }
+
+  return res.status(404).json({ error: 'PDF template not found' });
+});
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {

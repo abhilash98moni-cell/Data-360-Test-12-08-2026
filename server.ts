@@ -60,7 +60,14 @@ async function startServer() {
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
   // Dedicated routes to serve Questionnaire Sample PDF templates with full disposition & header control
-  app.get(['/Question_1_1_Corporate_Org_Chart_Template.pdf', '/Question_1_4_Active_Employee_Listing_Template.pdf'], (req: any, res: any) => {
+  app.get([
+    '/Question_1_1_Corporate_Org_Chart_Template.pdf',
+    '/Question_1_4_Active_Employee_Listing_Template.pdf',
+    '/api/Question_1_1_Corporate_Org_Chart_Template.pdf',
+    '/api/Question_1_4_Active_Employee_Listing_Template.pdf',
+    '/api/templates/Question_1_1_Corporate_Org_Chart_Template.pdf',
+    '/api/templates/Question_1_4_Active_Employee_Listing_Template.pdf'
+  ], (req: any, res: any) => {
     const requestedFile = path.basename(req.path);
     const isDownload = req.query.download === '1' || req.query.download === 'true' || req.query.dl === '1';
     const disposition = isDownload ? 'attachment' : 'inline';
