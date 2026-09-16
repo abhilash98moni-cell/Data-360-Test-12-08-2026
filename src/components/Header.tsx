@@ -63,6 +63,8 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenNotifications,
   onNavigateToProfile
 }) => {
+  const isDistributor = currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor');
+
   return (
     <header className="bg-slate-900 border-b border-slate-800 text-white sticky top-0 z-40 px-3 sm:px-4 lg:px-6 py-2.5 shadow-md w-full max-w-full">
       <div className="flex items-center justify-between gap-2 max-w-full">
@@ -110,15 +112,28 @@ export const Header: React.FC<HeaderProps> = ({
             )}
           </button>
 
-          {/* Large Search Bar */}
-          <div className="hidden md:flex flex-1 max-w-xl relative ml-4">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
-            <input 
-              type="text" 
-              placeholder="Search distributors, engagements, audits..." 
-              className="w-full bg-slate-950 border border-slate-800 text-sm text-white pl-9 pr-4 py-1.5 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors"
-            />
-          </div>
+          {/* Large Search Bar or Distributor View indicator */}
+          {isDistributor ? (
+            <div className="hidden md:flex flex-1 max-w-xl items-center justify-center ml-4">
+              <div className="inline-flex items-center gap-2.5 px-3.5 py-1.5 bg-indigo-950/70 border border-indigo-500/30 rounded-full shadow-inner">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+                </span>
+                <span className="text-xs font-bold text-indigo-200 tracking-wider uppercase">Distributor View</span>
+                <span className="text-[10px] text-slate-400 border-l border-indigo-500/30 pl-2">Executive Portal</span>
+              </div>
+            </div>
+          ) : (
+            <div className="hidden md:flex flex-1 max-w-xl relative ml-4">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-500" />
+              <input 
+                type="text" 
+                placeholder="Search distributors, engagements, audits..." 
+                className="w-full bg-slate-950 border border-slate-800 text-sm text-white pl-9 pr-4 py-1.5 rounded-lg focus:outline-none focus:border-indigo-500 transition-colors"
+              />
+            </div>
+          )}
         </div>
 
         {/* Right Action Tools */}
@@ -140,7 +155,7 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Bell className="h-5 w-5" />
               <span className="absolute top-0 right-0 flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-600 px-1 text-[10px] font-black text-white ring-2 ring-slate-900 leading-none">
-                3
+                {unreadAlertsCount || 3}
               </span>
             </button>
           </div>
@@ -154,11 +169,15 @@ export const Header: React.FC<HeaderProps> = ({
                 className="flex items-center gap-2 hover:bg-slate-800/80 p-1 rounded-xl transition-all border border-transparent cursor-pointer"
               >
                 <div className="h-8 w-8 rounded-full font-bold text-xs flex items-center justify-center border bg-indigo-500/20 border-indigo-400/40 text-indigo-300">
-                  AS
+                  {currentUser.avatarInitials || (currentUser.name ? currentUser.name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() : (isDistributor ? 'DU' : 'AS'))}
                 </div>
                 <div className="hidden lg:flex flex-col items-start justify-center">
-                  <p className="text-sm font-semibold text-white leading-tight">Abhilash S</p>
-                  <p className="text-[10px] text-slate-400 leading-tight">Auditor</p>
+                  <p className="text-sm font-semibold text-white leading-tight">
+                    {currentUser.name || (isDistributor ? 'Distributor Admin' : 'Abhilash S')}
+                  </p>
+                  <p className="text-[10px] text-slate-400 leading-tight truncate max-w-[120px]">
+                    {currentUser.organization || currentUser.role || (isDistributor ? 'Distributor' : 'Auditor')}
+                  </p>
                 </div>
               </button>
             ) : (
