@@ -126,7 +126,7 @@ export const Header: React.FC<HeaderProps> = ({
 
           <button 
             onClick={onOpenCopilot}
-            className="flex items-center gap-1.5 bg-slate-950 hover:bg-slate-800 border border-amber-500/30 text-amber-300 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all shadow-sm"
+            className="flex items-center gap-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 rounded-lg px-3 py-1.5 text-xs font-semibold transition-all shadow-sm"
           >
             <Sparkles className="h-3.5 w-3.5 text-amber-400" />
             <span className="hidden sm:inline">AI Copilot</span>

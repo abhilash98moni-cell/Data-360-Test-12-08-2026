@@ -1,80 +1,55 @@
+
 @import "tailwindcss";
 
 .light-theme {
   color-scheme: light;
-  background-color: #F4F7FC !important;
-  background-image: radial-gradient(circle at 10% 20%, rgba(225, 232, 250, 0.7), transparent 30%), radial-gradient(circle at 90% 80%, rgba(230, 225, 255, 0.6), transparent 40%) !important;
-  background-attachment: fixed !important;
-  color: #14213D !important;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
 }
 
 /* 1. Page Backgrounds (Applied to root elements normally) */
-.light-theme.bg-slate-50,
-.light-theme .bg-slate-950 {
-  background-color: #F4F7FC !important;
+.light-theme.bg-slate-950 {
+  background-color: #f8fafc !important;
 }
 
-/* Maintain Canvas on elements mapping to main */
-.light-theme main.bg-slate-950\/90 {
-  background-color: transparent !important;
-}
-
-/* Maintain opacity for secondary panels */
+/* 2. Primary Surfaces (Cards, Modals, KPI Cards) */
 .light-theme .bg-slate-950,
+.light-theme .bg-slate-950\/90,
+.light-theme .bg-slate-950\/80,
+.light-theme .bg-slate-950\/60,
+.light-theme .bg-slate-950\/40,
+.light-theme .bg-slate-950\/30,
+.light-theme .bg-slate-950\/20,
 .light-theme .hover\:bg-slate-950:hover,
-.light-theme .focus\:bg-slate-950:focus {
-  background-color: #F8FAFE !important;
-}
-.light-theme .bg-slate-950\/90 { background-color: rgba(248, 250, 254, 0.9) !important; }
-.light-theme .bg-slate-950\/80 { background-color: rgba(248, 250, 254, 0.8) !important; }
-.light-theme .bg-slate-950\/60 { background-color: rgba(248, 250, 254, 0.6) !important; }
-.light-theme .bg-slate-950\/40 { background-color: rgba(248, 250, 254, 0.4) !important; }
-.light-theme .bg-slate-950\/30 { background-color: rgba(248, 250, 254, 0.3) !important; }
-.light-theme .bg-slate-950\/20 { background-color: rgba(248, 250, 254, 0.2) !important; }
-
-
-/* Make sure the main element is transparent so it shows root */
-.light-theme main {
-  background-color: transparent !important;
-}
-
-/* 2. Primary Surfaces (Cards, Modals, KPI Cards, Sidebar, Header) */
+.light-theme .focus\:bg-slate-950:focus,
 .light-theme .bg-slate-900,
-.light-theme .bg-slate-850 {
-  background-color: #FFFFFF !important;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.03) !important;
-}
-.light-theme .bg-slate-900\/90 { background-color: rgba(255, 255, 255, 0.9) !important; }
-.light-theme .bg-slate-900\/80 { background-color: rgba(255, 255, 255, 0.8) !important; }
-.light-theme .bg-slate-900\/60 { background-color: rgba(255, 255, 255, 0.6) !important; }
-.light-theme .bg-slate-900\/50 { background-color: rgba(255, 255, 255, 0.5) !important; }
-.light-theme .bg-slate-900\/40 { background-color: rgba(255, 255, 255, 0.4) !important; }
-
-
+.light-theme .bg-slate-900\/90,
+.light-theme .bg-slate-900\/80,
+.light-theme .bg-slate-900\/60,
+.light-theme .bg-slate-900\/50,
+.light-theme .bg-slate-900\/40,
+.light-theme .bg-slate-850,
 .light-theme .hover\:bg-slate-900:hover,
 .light-theme .hover\:bg-slate-900\/50:hover,
 .light-theme .hover\:bg-slate-900\/60:hover,
 .light-theme .focus\:bg-slate-900:focus {
-  background-color: #F0F4FA !important;
+  background-color: #ffffff !important;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.03) !important;
 }
 
 /* 3. Secondary Surfaces (Table Headers, Hover States, Search Bars) */
 .light-theme .bg-slate-800,
-.light-theme .hover\:bg-slate-800:hover {
-  background-color: #F1F6FC !important;
-}
-.light-theme .bg-slate-800\/80, .light-theme .hover\:bg-slate-800\/80:hover { background-color: rgba(241, 246, 252, 0.8) !important; }
-.light-theme .bg-slate-800\/60, .light-theme .hover\:bg-slate-800\/60:hover { background-color: rgba(241, 246, 252, 0.6) !important; }
-.light-theme .bg-slate-800\/50, .light-theme .hover\:bg-slate-800\/50:hover { background-color: rgba(241, 246, 252, 0.5) !important; }
-.light-theme .bg-slate-800\/40, .light-theme .hover\:bg-slate-800\/40:hover { background-color: rgba(241, 246, 252, 0.4) !important; }
-.light-theme .bg-slate-800\/30, .light-theme .hover\:bg-slate-800\/30:hover { background-color: rgba(241, 246, 252, 0.3) !important; }
-
-
-/* Inputs and interactive elements */
-.light-theme input,
-.light-theme textarea,
-.light-theme select {
-  background-color: #F8FAFE !important;
+.light-theme .bg-slate-800\/80,
+.light-theme .bg-slate-800\/60,
+.light-theme .bg-slate-800\/50,
+.light-theme .bg-slate-800\/40,
+.light-theme .bg-slate-800\/30,
+.light-theme .hover\:bg-slate-800:hover,
+.light-theme .hover\:bg-slate-800\/80:hover,
+.light-theme .hover\:bg-slate-800\/50:hover,
+.light-theme .hover\:bg-slate-800\/40:hover,
+.light-theme .hover\:bg-slate-800\/30:hover {
+  background-color: #f1f5f9 !important;
 }
 
 /* Remove box-shadow when hovering elements that shouldn't look like floating cards */
@@ -87,7 +62,7 @@
 .light-theme .bg-slate-700,
 .light-theme .bg-slate-750,
 .light-theme .hover\:bg-slate-700:hover {
-  background-color: #E7EDF5 !important;
+  background-color: #e2e8f0 !important;
 }
 
 /* 4. Borders */
@@ -108,11 +83,11 @@
 .light-theme .border-t-slate-800,
 .light-theme .border-l-slate-800,
 .light-theme .border-r-slate-800 {
-  border-color: #DCE4EF !important;
+  border-color: #e2e8f0 !important;
 }
 
 .light-theme .hover\:border-slate-700:hover {
-  border-color: #B0C4DE !important;
+  border-color: #cbd5e1 !important;
 }
 
 /* 5. Typography */
@@ -121,17 +96,20 @@
 .light-theme .text-white,
 .light-theme .hover\:text-slate-200:hover,
 .light-theme .hover\:text-white:hover {
-  color: #14213D !important;
+  color: #0f172a !important;
 }
 
-.light-theme .text-slate-300,
+.light-theme .text-slate-300 {
+  color: #334155 !important;
+}
+
 .light-theme .text-slate-400,
 .light-theme .text-slate-400\/80 {
-  color: #5F6F85 !important;
+  color: #475569 !important;
 }
 
 .light-theme .text-slate-500 {
-  color: #8A98AA !important;
+  color: #64748b !important;
 }
 
 /* Additional text colors */
@@ -385,15 +363,4 @@
 /* Fix hover text-white inside buttons that are light in light-mode */
 .light-theme .hover\:text-white:hover {
   color: #0f172a !important; 
-}
-
-/* Force white text on hover for primary colored buttons even if they have hover:text-white */
-.light-theme button.hover\:bg-indigo-600:hover,
-.light-theme button.hover\:bg-blue-600:hover,
-.light-theme button.hover\:bg-emerald-600:hover,
-.light-theme button.hover\:bg-rose-600:hover,
-.light-theme button.hover\:bg-purple-600:hover,
-.light-theme button.bg-indigo-600.hover\:text-white:hover,
-.light-theme button.bg-blue-600.hover\:text-white:hover {
-  color: #ffffff !important;
 }

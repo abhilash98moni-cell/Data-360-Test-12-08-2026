@@ -66,10 +66,13 @@ export const ExecutiveAuditTimelineDashboard: React.FC<ExecutiveAuditTimelineDas
       { id: 'demo-5', code: 'AUD-2026-DIST-006', title: 'FY26 Horizon Supply Co Audit', distributorName: 'Horizon Supply Co', status: 'Fieldwork', progressPercent: 50, varianceStatus: 'on_track', overdueItemsCount: 0 },
       { id: 'demo-6', code: 'AUD-2026-DIST-007', title: 'FY26 Alpha Distributors Audit', distributorName: 'Alpha Distributors', status: 'Planning', progressPercent: 0, varianceStatus: 'neutral', overdueItemsCount: 0 },
       { id: 'demo-7', code: 'AUD-2026-DIST-008', title: 'FY26 Beta Supply Co Audit', distributorName: 'Beta Supply Co', status: 'Completed', progressPercent: 100, varianceStatus: 'completed', overdueItemsCount: 0 }
-    ].map((m: any) => ({
-       ...engagements[0],
-       ...m
-    })) as AuditEngagement[];
+    ].map((m: any) => {
+      const { timelinePhases, ...baseEngagement } = engagements[0] || {};
+      return {
+        ...baseEngagement,
+        ...m
+      };
+    }) as AuditEngagement[];
   }, [engagements]);
 
   const dashboardEngagements = useMemo(() => {
