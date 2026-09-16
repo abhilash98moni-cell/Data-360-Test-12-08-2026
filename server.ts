@@ -1916,13 +1916,15 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
            if (distributorId && distributorId !== 'All Distributors' && rDist && rDist !== targetDistributorId) return false;
            
            if (targetRowId || targetSampleId || targetVoucherNo) {
-             const sId = cleanStr(r.sample_id || r.sampleId || '');
-             const vNo = cleanStr(r.voucher_no || r.voucherNo || '');
-             const rId = cleanStr(r.row_id || r.rowId || '');
-             
-             if (targetRowId && rId === targetRowId) return true;
-             if (!targetRowId && targetSampleId && sId === targetSampleId) return true;
-             if (!targetRowId && !targetSampleId && targetVoucherNo && vNo === targetVoucherNo) return true;
+             const recRowId = isValidKey(r.row_id || r.rowId) ? cleanStr(r.row_id || r.rowId) : '';
+             const recSampleId = isValidKey(r.sample_id || r.sampleId) ? cleanStr(r.sample_id || r.sampleId) : '';
+             const recVoucherNo = isValidKey(r.voucher_no || r.voucherNo) ? cleanStr(r.voucher_no || r.voucherNo) : '';
+
+             if (targetRowId && recRowId) return targetRowId === recRowId;
+             if (targetRowId && (targetRowId === recSampleId || targetRowId === recVoucherNo)) return true;
+             if (recRowId && (recRowId === targetSampleId || recRowId === targetVoucherNo)) return true;
+             if (targetSampleId && recSampleId) return targetSampleId === recSampleId;
+             if (targetVoucherNo && recVoucherNo) return targetVoucherNo === recVoucherNo;
              return false;
            }
            return true;
@@ -1971,14 +1973,16 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           return false;
         }
 
-        const rId = cleanStr(parsed?.row_id || parsed?.rowId || '');
-        const sId = cleanStr(parsed?.sample_id || parsed?.sampleId || '');
-        const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo || '');
+        const recRowId = isValidKey(parsed?.row_id || parsed?.rowId) ? cleanStr(parsed?.row_id || parsed?.rowId) : '';
+        const recSampleId = isValidKey(parsed?.sample_id || parsed?.sampleId) ? cleanStr(parsed?.sample_id || parsed?.sampleId) : '';
+        const recVoucherNo = isValidKey(parsed?.voucher_no || parsed?.voucherNo) ? cleanStr(parsed?.voucher_no || parsed?.voucherNo) : '';
         
         if (targetRowId || targetSampleId || targetVoucherNo) {
-          if (targetRowId && rId === targetRowId) return true;
-          if (!targetRowId && targetSampleId && sId === targetSampleId) return true;
-          if (!targetRowId && !targetSampleId && targetVoucherNo && vNo === targetVoucherNo) return true;
+          if (targetRowId && recRowId) return targetRowId === recRowId;
+          if (targetRowId && (targetRowId === recSampleId || targetRowId === recVoucherNo)) return true;
+          if (recRowId && (recRowId === targetSampleId || recRowId === targetVoucherNo)) return true;
+          if (targetSampleId && recSampleId) return targetSampleId === recSampleId;
+          if (targetVoucherNo && recVoucherNo) return targetVoucherNo === recVoucherNo;
           return false;
         }
         
@@ -2265,13 +2269,18 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
           if (targetDistributor && targetDistributor !== 'All Distributors' && recDistributor && recDistributor !== cleanStr(targetDistributor)) {
             return false;
           }
-          const rId = cleanStr(parsed?.row_id || parsed?.rowId || '');
-          const sId = cleanStr(parsed?.sample_id || parsed?.sampleId || '');
-          const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo || '');
+          const recRowId = isValidKey(parsed?.row_id || parsed?.rowId) ? cleanStr(parsed?.row_id || parsed?.rowId) : '';
+          const recSampleId = isValidKey(parsed?.sample_id || parsed?.sampleId) ? cleanStr(parsed?.sample_id || parsed?.sampleId) : '';
+          const recVoucherNo = isValidKey(parsed?.voucher_no || parsed?.voucherNo) ? cleanStr(parsed?.voucher_no || parsed?.voucherNo) : '';
           
-          if (targetRowId && isValidKey(targetRowId) && rId && rId === targetRowId) return true;
-          if (targetSampleId && isValidKey(targetSampleId) && sId && sId === targetSampleId) return true;
-          if (targetVoucherNo && isValidKey(targetVoucherNo) && vNo && vNo === targetVoucherNo) return true;
+          if (targetRowId || targetSampleId || targetVoucherNo) {
+            if (targetRowId && recRowId) return targetRowId === recRowId;
+            if (targetRowId && (targetRowId === recSampleId || targetRowId === recVoucherNo)) return true;
+            if (recRowId && (recRowId === targetSampleId || recRowId === targetVoucherNo)) return true;
+            if (targetSampleId && recSampleId) return targetSampleId === recSampleId;
+            if (targetVoucherNo && recVoucherNo) return targetVoucherNo === recVoucherNo;
+            return false;
+          }
           return false;
         });
 

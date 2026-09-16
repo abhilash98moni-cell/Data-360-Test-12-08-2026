@@ -1738,9 +1738,21 @@ app.get('/api/sampling/required-data/responses', async (req: any, res: any) => {
          if (distributorId && distributorId !== 'All Distributors' && r.distributor_id && cleanStr(r.distributor_id) !== cleanStr(distributorId)) {
            return false;
          }
-         if (sampleId || voucherNo) {
-           const s = cleanStr(sampleId || voucherNo);
-           return cleanStr(r.sample_id) === s || cleanStr(r.voucher_no) === s || cleanStr(r.voucherNo) === s;
+         const targetRowId = cleanStr(req.query.rowId || req.query.row_id || '');
+         const targetSampleId = cleanStr(sampleId);
+         const targetVoucherNo = cleanStr(voucherNo);
+
+         if (targetRowId || targetSampleId || targetVoucherNo) {
+           const recRowId = cleanStr(r.row_id || r.rowId || '');
+           const recSampleId = cleanStr(r.sample_id || r.sampleId || '');
+           const recVoucherNo = cleanStr(r.voucher_no || r.voucherNo || '');
+
+           if (targetRowId && recRowId) return targetRowId === recRowId;
+           if (targetRowId && (targetRowId === recSampleId || targetRowId === recVoucherNo)) return true;
+           if (recRowId && (recRowId === targetSampleId || recRowId === targetVoucherNo)) return true;
+           if (targetSampleId && recSampleId) return targetSampleId === recSampleId;
+           if (targetVoucherNo && recVoucherNo) return targetVoucherNo === recVoucherNo;
+           return false;
          }
          return true;
       });
@@ -1759,6 +1771,9 @@ app.post('/api/sampling/required-data/responses', async (req: any, res: any) => 
     const session = authenticateRequestSession(req);
     const supabase = getSupabaseServerClient();
     const cleanStr = (s: any) => String(s || '').trim().toLowerCase();
+    const targetEngagementId = cleanStr(payload.engagement_id || payload.auditId || '');
+    const targetDistributorId = cleanStr(payload.distributor_id || payload.distributorName || '');
+    const targetRowId = cleanStr(payload.row_id || payload.rowId || '');
     const targetSampleId = cleanStr(payload.sample_id);
     const targetVoucherNo = cleanStr(payload.voucher_no || payload.voucherNo);
     
@@ -1776,10 +1791,29 @@ app.post('/api/sampling/required-data/responses', async (req: any, res: any) => 
       if (typeof parsed === 'string') {
          try { parsed = JSON.parse(parsed); } catch(e) {}
       }
-      const sId = cleanStr(parsed?.sample_id);
-      const vNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo);
-      return (targetSampleId && (sId === targetSampleId || vNo === targetSampleId)) || 
-             (targetVoucherNo && (vNo === targetVoucherNo || sId === targetVoucherNo));
+      const recEngagement = cleanStr(parsed?.engagement_id || parsed?.engagementId || '');
+      const recDistributor = cleanStr(parsed?.distributor_id || parsed?.distributorName || parsed?.distributor || '');
+      
+      if (targetEngagementId && targetEngagementId !== 'all audits' && recEngagement && recEngagement !== 'all audits' && recEngagement !== targetEngagementId) {
+        return false;
+      }
+      if (targetDistributorId && targetDistributorId !== 'all distributors' && recDistributor && recDistributor !== 'all distributors' && recDistributor !== targetDistributorId) {
+        return false;
+      }
+
+      const recRowId = cleanStr(parsed?.row_id || parsed?.rowId || '');
+      const recSampleId = cleanStr(parsed?.sample_id || parsed?.sampleId || '');
+      const recVoucherNo = cleanStr(parsed?.voucher_no || parsed?.voucherNo || '');
+
+      if (targetRowId || targetSampleId || targetVoucherNo) {
+        if (targetRowId && recRowId) return targetRowId === recRowId;
+        if (targetRowId && (targetRowId === recSampleId || targetRowId === recVoucherNo)) return true;
+        if (recRowId && (recRowId === targetSampleId || recRowId === targetVoucherNo)) return true;
+        if (targetSampleId && recSampleId) return targetSampleId === recSampleId;
+        if (targetVoucherNo && recVoucherNo) return targetVoucherNo === recVoucherNo;
+        return false;
+      }
+      return false;
     });
 
     if (existingRecord) {
@@ -1791,6 +1825,7 @@ app.post('/api/sampling/required-data/responses', async (req: any, res: any) => 
          ...parsedDetails,
          engagement_id: payload.engagement_id || parsedDetails.engagement_id,
          distributor_id: payload.distributor_id || payload.distributorName || parsedDetails.distributor_id,
+         row_id: payload.row_id || payload.rowId || parsedDetails.row_id || targetRowId || targetSampleId,
          sample_id: payload.sample_id || parsedDetails.sample_id,
          voucher_no: payload.voucher_no || payload.voucherNo || parsedDetails.voucher_no,
          voucherNo: payload.voucher_no || payload.voucherNo || parsedDetails.voucherNo,
@@ -1923,6 +1958,7 @@ app.post('/api/sampling/required-data/responses', async (req: any, res: any) => 
        const newDetails = {
          engagement_id: payload.engagement_id,
          distributor_id: payload.distributor_id || payload.distributorName || '',
+         row_id: payload.row_id || payload.rowId || targetRowId || payload.sample_id || '',
          sample_id: payload.sample_id,
          voucher_no: payload.voucher_no || payload.voucherNo || '',
          voucherNo: payload.voucher_no || payload.voucherNo || '',

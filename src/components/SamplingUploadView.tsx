@@ -103,6 +103,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
   const isDistributor = currentUser?.role === 'Distributor' || currentUser?.role?.includes('Distributor');
   const [openQuestionnaireFor, setOpenQuestionnaireFor] = useState<GLRecord | null>(null);
   const [questionnaireResponses, setQuestionnaireResponses] = useState<Record<string, any>>({});
+  const [rawResponsesList, setRawResponsesList] = useState<any[]>([]);
 
   const isValidSampleKey = (k: any): boolean => {
     if (!k) return false;
@@ -110,20 +111,48 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
     return s !== '' && s !== '—' && s !== '-' && s !== 'undefined' && s !== 'null' && s !== 'n/a';
   };
 
-  const getRowQuestionnaireResponse = (row: any, responsesMap: Record<string, any>) => {
-    if (!row || !responsesMap) return null;
-    const candidates = [
-      row.id,
-      row.sampleId,
-      row.voucherNo && row.voucherNo !== '—' ? row.voucherNo : null,
-      row.originalRow ? `row-${row.originalRow}` : null
-    ].filter(isValidSampleKey);
+  const getRowQuestionnaireResponse = (row: any, responsesMap: Record<string, any>, rawList?: any[]) => {
+    if (!row) return null;
+    const clean = (s: any) => String(s || '').trim().toLowerCase();
 
-    for (const key of candidates) {
-      const strKey = String(key);
-      if (responsesMap[strKey]) return responsesMap[strKey];
-      const lowerKey = strKey.toLowerCase();
-      if (responsesMap[lowerKey]) return responsesMap[lowerKey];
+    // 1. Strict match on raw responses list
+    if (rawList && Array.isArray(rawList)) {
+      const rowIdStr = clean(row.id || row.rowId);
+      const sampleIdStr = clean(row.sampleId);
+      const voucherStr = isValidSampleKey(row.voucherNo) ? clean(row.voucherNo) : '';
+
+      // Priority 1: Match on row_id
+      if (isValidSampleKey(rowIdStr)) {
+        const found = rawList.find(r => clean(r.row_id || r.rowId) === rowIdStr);
+        if (found) return found;
+      }
+      // Priority 2: Match on sample_id
+      if (isValidSampleKey(sampleIdStr)) {
+        const found = rawList.find(r => clean(r.sample_id || r.sampleId) === sampleIdStr);
+        if (found) return found;
+      }
+      // Priority 3: Match on voucher_no (only if distinct and valid)
+      if (voucherStr) {
+        const found = rawList.find(r => clean(r.voucher_no || r.voucherNo) === voucherStr);
+        if (found) return found;
+      }
+    }
+
+    // 2. Dictionary fallback
+    if (responsesMap) {
+      const candidates = [
+        row.id,
+        row.sampleId,
+        row.voucherNo && row.voucherNo !== '—' ? row.voucherNo : null,
+        row.originalRow ? `row-${row.originalRow}` : null
+      ].filter(isValidSampleKey);
+
+      for (const key of candidates) {
+        const strKey = String(key);
+        if (responsesMap[strKey]) return responsesMap[strKey];
+        const lowerKey = strKey.toLowerCase();
+        if (responsesMap[lowerKey]) return responsesMap[lowerKey];
+      }
     }
     return null;
   };
@@ -426,23 +455,24 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       });
       const data = await res.json();
       if (data.success && Array.isArray(data.responses)) {
+        setRawResponsesList(data.responses);
         const map: Record<string, any> = {};
         data.responses.forEach((r: any) => {
           const sId = r.sample_id;
           const vNo = r.voucher_no || r.voucherNo;
           const rowId = r.row_id || r.rowId;
 
-          if (isValidSampleKey(sId)) {
-            map[sId] = r;
-            map[String(sId).toLowerCase()] = r;
-          }
-          if (isValidSampleKey(vNo)) {
-            map[vNo] = r;
-            map[String(vNo).toLowerCase()] = r;
-          }
           if (isValidSampleKey(rowId)) {
             map[rowId] = r;
             map[String(rowId).toLowerCase()] = r;
+          }
+          if (isValidSampleKey(sId)) {
+            if (!map[sId]) map[sId] = r;
+            if (!map[String(sId).toLowerCase()]) map[String(sId).toLowerCase()] = r;
+          }
+          if (isValidSampleKey(vNo)) {
+            if (!map[vNo]) map[vNo] = r;
+            if (!map[String(vNo).toLowerCase()]) map[String(vNo).toLowerCase()] = r;
           }
         });
         setQuestionnaireResponses(map);
@@ -486,14 +516,26 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       const recData = await recRes.json();
 
       if (recData.success && Array.isArray(recData.records)) {
+        const idCounts: Record<string, number> = {};
+        recData.records.forEach((r: any) => {
+          const raw = r.id || (r.voucherNo && r.voucherNo !== '—' ? r.voucherNo : '') || r.sampleId;
+          if (raw) idCounts[raw] = (idCounts[raw] || 0) + 1;
+        });
+
         const mappedRecords: GLRecord[] = recData.records.map((r: any, idx: number) => {
-          const fallbackId = `TX-${r.originalRow || idx + 1}`;
-          const finalId = r.id || (r.voucherNo && r.voucherNo !== '—' ? r.voucherNo : '') || r.sampleId || fallbackId;
+          const rawId = r.id || (r.voucherNo && r.voucherNo !== '—' ? r.voucherNo : '') || r.sampleId;
+          const isDuplicated = rawId && (idCounts[rawId] || 0) > 1;
+          const finalId = (!rawId || isDuplicated)
+            ? (rawId ? `${rawId}-row-${r.originalRow || idx + 1}` : `TX-${r.originalRow || idx + 1}`)
+            : rawId;
+
           return {
             ...r,
             id: finalId,
             sampleId: r.sampleId || finalId,
-            voucherNo: r.voucherNo || '—'
+            voucherNo: r.voucherNo || '—',
+            rowId: finalId,
+            originalRow: r.originalRow || idx + 1
           };
         });
         setRecords(mappedRecords);
@@ -557,14 +599,26 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       const recData = await recRes.json();
 
       if (recData.success && Array.isArray(recData.records)) {
+        const idCounts: Record<string, number> = {};
+        recData.records.forEach((r: any) => {
+          const raw = r.id || (r.voucherNo && r.voucherNo !== '—' ? r.voucherNo : '') || r.sampleId;
+          if (raw) idCounts[raw] = (idCounts[raw] || 0) + 1;
+        });
+
         const mappedRecords: GLRecord[] = recData.records.map((r: any, idx: number) => {
-          const fallbackId = `TX-${r.originalRow || idx + 1}`;
-          const finalId = r.id || (r.voucherNo && r.voucherNo !== '—' ? r.voucherNo : '') || r.sampleId || fallbackId;
+          const rawId = r.id || (r.voucherNo && r.voucherNo !== '—' ? r.voucherNo : '') || r.sampleId;
+          const isDuplicated = rawId && (idCounts[rawId] || 0) > 1;
+          const finalId = (!rawId || isDuplicated)
+            ? (rawId ? `${rawId}-row-${r.originalRow || idx + 1}` : `TX-${r.originalRow || idx + 1}`)
+            : rawId;
+
           return {
             ...r,
             id: finalId,
             sampleId: r.sampleId || finalId,
-            voucherNo: r.voucherNo || '—'
+            voucherNo: r.voucherNo || '—',
+            rowId: finalId,
+            originalRow: r.originalRow || idx + 1
           };
         });
         setRecords(mappedRecords);
@@ -1307,7 +1361,7 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
                     </td>
                     <td className="py-2.5 px-3 text-center whitespace-nowrap bg-slate-950/20">
                       {(() => {
-                        const resp = getRowQuestionnaireResponse(row, questionnaireResponses);
+                        const resp = getRowQuestionnaireResponse(row, questionnaireResponses, rawResponsesList);
                         const st = resp?.status;
                         const isAccepted = st === 'Accepted';
                         const isCompleted = st === 'Completed' || st === 'Submitted';
@@ -1582,12 +1636,13 @@ export const SamplingUploadView: React.FC<SamplingUploadViewProps> = ({
       {/* Required Data Questionnaire Modal for Transaction */}
       {openQuestionnaireFor && (
         <RequiredDataQuestionnaire
+          key={`q-${openQuestionnaireFor.id || openQuestionnaireFor.sampleId || openQuestionnaireFor.voucherNo || openQuestionnaireFor.originalRow}`}
           transaction={openQuestionnaireFor}
           engagementId={selectedAuditFilter || 'eng-101'}
           currentUser={currentUser}
           isDistributorWorkflow={isDistributor}
           currencyMode={currencyMode}
-          selectedDistributor={selectedDistributor}
+          selectedDistributor={selectedDistributor && selectedDistributor !== 'All Distributors' ? selectedDistributor : (activePopulation?.distributorName || openQuestionnaireFor?.distributor || 'Midwest Trading Co.')}
           selectedClient={selectedClient}
           onClose={() => {
             setOpenQuestionnaireFor(null);

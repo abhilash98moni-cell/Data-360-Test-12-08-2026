@@ -143,11 +143,21 @@ export const RequiredDataQuestionnaire: React.FC<QuestionnaireProps> = ({
   // Load Questions & Existing Responses from DB on mount
   useEffect(() => {
     loadData();
-  }, [targetSampleId, targetVoucherNo, engagementId]);
+  }, [targetRowId, targetSampleId, targetVoucherNo, engagementId, activeDistributor]);
 
   const loadData = async () => {
     setLoading(true);
     setErrorMessage(null);
+    setStatus('Draft');
+    setIsPushed(false);
+    setPushedAt(null);
+    setPushedBy(null);
+    setPushedTo(null);
+    setGeneralNotes('');
+    setGeneralFiles([]);
+    setItemResponses({});
+    setActiveClarificationMessage('');
+    setClarificationHistory([]);
     try {
       const headers = { 'x-user-email': currentUser?.email || '' };
       
