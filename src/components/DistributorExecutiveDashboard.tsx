@@ -34,7 +34,7 @@ import {
 } from '../services/questionnaireApiClient';
 import {
   calculateQuestionnaireProgress
-} from '../services/questionnaireTypes';
+} from '../services/questionnaireService';
 import {
   TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS
 } from '../data/questionnaireData';

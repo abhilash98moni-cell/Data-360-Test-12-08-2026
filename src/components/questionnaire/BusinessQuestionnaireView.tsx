@@ -50,7 +50,7 @@ import {
   QuestionnaireAnswerItem,
   QuestionnaireAuditorNoteItem,
   QuestionnaireReviewerStatus
-} from '../../services/questionnaireTypes';
+} from '../../services/questionnaireService';
 import { UserSession } from '../AuthModal';
 import { EngagementWorkspaceActionBar } from '../EngagementWorkspaceActionBar';
 import { executeEngagementPush } from '../../services/unifiedEngagementPush';
