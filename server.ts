@@ -6617,66 +6617,86 @@ app.get('/api/sampling/questions', authenticateRequest, async (req: any, res: an
 
   // AI Copilot Gemini chat endpoint
   app.post('/api/copilot/chat', async (req, res) => {
-    const { message, history } = req.body;
+    // 1. Authenticate user
+    const user = await resolveAuthSession(req);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Authentication required. Please log in to use AI Copilot.' });
+    }
+
+    const { message, history, context } = req.body;
     if (!message) {
-      return res.status(400).json({ error: 'Message is required' });
+      return res.status(400).json({ success: false, error: 'Message is required' });
     }
 
     try {
       const ai = getGeminiClient();
-      if (ai) {
-        const systemInstruction = `You are Data360 AI Audit Copilot, an enterprise forensic audit and compliance assistant. You assist with distributor compliance, GL ledger anomaly analysis, Benford's law tests, Monetary Unit Sampling (MUS), internal controls, and BRD rules. Keep answers concise, authoritative, and actionable.`;
+      if (!ai) {
+        return res.status(503).json({ success: false, error: 'AI Copilot is not configured for this environment.' });
+      }
 
-        const contents: any[] = [];
-        if (Array.isArray(history)) {
-          for (const h of history) {
-            contents.push({
-              role: h.sender === 'user' ? 'user' : 'model',
-              parts: [{ text: h.text }]
-            });
-          }
-        }
-        contents.push({
-          role: 'user',
-          parts: [{ text: message }]
-        });
+      const role = context?.role || user.role || 'Unknown Role';
+      const auditId = context?.auditId ? `Audit ID: ${context.auditId}` : 'No active audit selected';
+      const client = context?.client ? `Client: ${context.client}` : 'No active client';
+      const distributor = context?.distributor ? `Distributor: ${context.distributor}` : 'No active distributor';
 
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents,
-          config: {
-            systemInstruction
-          }
-        });
+      const systemInstruction = `You are the AI Copilot inside a Distributor Monitoring Platform.
+You are assisting the authenticated user.
+Current User Role: ${role}
+Current Context: ${client}, ${distributor}, ${auditId}
 
-        if (response.text) {
-          return res.json({
-            success: true,
-            text: response.text
+Use the provided DMP context when answering questions.
+Do not invent audit information.
+Do not invent:
+- amounts
+- dates
+- distributor information
+- audit information
+- samples
+- evidence
+- findings
+- contract references
+- remediation status
+- conclusions
+
+If required information is not available in the supplied context, say that it is not available.
+For general questions, provide general audit/domain guidance and clearly distinguish it from information retrieved from the DMP.
+Do not make audit decisions on behalf of the auditor.
+Do not change any DMP data unless a specific authorized application action exists for that purpose.`;
+
+      const contents: any[] = [];
+      if (Array.isArray(history)) {
+        for (const h of history) {
+          contents.push({
+            role: h.sender === 'user' ? 'user' : 'model',
+            parts: [{ text: h.text }]
           });
         }
       }
+      contents.push({
+        role: 'user',
+        parts: [{ text: message }]
+      });
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents,
+        config: {
+          systemInstruction
+        }
+      });
+
+      if (response.text) {
+        return res.json({
+          success: true,
+          text: response.text
+        });
+      } else {
+        throw new Error("No text in Gemini response");
+      }
     } catch (err: any) {
-      console.warn('Gemini API call note:', err.message);
+      console.error('Gemini API call error:', err.message);
+      return res.status(500).json({ success: false, error: 'AI Copilot is temporarily unavailable. Please try again.' });
     }
-
-    // Graceful fallback if GEMINI_API_KEY is not configured or in offline prototype mode
-    let aiReply = "I have analyzed your request across active audit workpapers. Based on the 142,000 ledger rows ingested, I found a 96.2% probability of $185,000 rebate overclaiming for Midwest Trading Co. Would you like me to auto-generate a formal observation notice?";
-    const lower = message.toLowerCase();
-    if (lower.includes('brd') || lower.includes('rule')) {
-      aiReply = "According to Business Rule BR-001 (Segregation of Duties), the auditor who logged a finding cannot be the sole approver who closes it. Workpapers lock automatically upon Partner sign-off (BR-002).";
-    } else if (lower.includes('sampling') || lower.includes('mus')) {
-      aiReply = "For Monetary Unit Sampling (MUS) with $14.2M population and 95% confidence level ($150k tolerable error), the required sample size is 1,450 items with a sampling interval of $9,793.";
-    } else if (lower.includes('benford') || lower.includes('anomaly')) {
-      aiReply = "Benford First-Digit Analysis on invoice amounts flagged digit '7' with 18.4% frequency (expected 5.8%), indicating potential split-invoice structuring under the $50k approval threshold.";
-    } else if (lower.includes('evidence') || lower.includes('upload') || lower.includes('drive')) {
-      aiReply = "Evidence files are synchronized to Google Drive under the Data360_Test folder hierarchy with automated SHA-256 integrity verification and status tracking.";
-    }
-
-    return res.json({
-      success: true,
-      text: aiReply
-    });
   });
 
 

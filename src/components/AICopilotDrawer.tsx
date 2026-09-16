@@ -1,14 +1,24 @@
 import React, { useState } from 'react';
 import { Sparkles, X, Send, Bot, User, Loader2 } from 'lucide-react';
+import { UserSession } from '../types';
+import { getAuthHeaders } from '../services/questionnaireApiClient';
 
 interface AICopilotDrawerProps {
   isOpen: boolean;
   onClose: () => void;
+  currentUser: UserSession | null;
+  auditId: string;
+  client: string;
+  distributor: string;
 }
 
 export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
   isOpen,
-  onClose
+  onClose,
+  currentUser,
+  auditId,
+  client,
+  distributor
 }) => {
   const [messages, setMessages] = useState([
     {
@@ -33,35 +43,45 @@ export const AICopilotDrawer: React.FC<AICopilotDrawerProps> = ({
     try {
       const res = await fetch('/api/copilot/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-email': currentUser?.email || '',
+          'x-user-name': currentUser?.name || '',
+          'x-user-role': currentUser?.role || 'Auditor',
+          ...getAuthHeaders()
+        },
         body: JSON.stringify({
           message: userMsg,
-          history: currentMessages.slice(-6)
+          history: currentMessages.slice(-6),
+          context: {
+            auditId,
+            client,
+            distributor,
+            role: currentUser?.role || 'Unknown',
+            userName: currentUser?.name || 'Unknown'
+          }
         })
       });
 
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.text) {
-          setMessages(prev => [...prev, { sender: 'ai', text: data.text }]);
-          setIsLoading(false);
-          return;
+      const data = await res.json();
+      
+      if (res.ok && data.success && data.text) {
+        setMessages(prev => [...prev, { sender: 'ai', text: data.text }]);
+      } else {
+        if (res.status === 401) {
+          setMessages(prev => [...prev, { sender: 'ai', text: "Authentication required. Please log in to use AI Copilot." }]);
+        } else if (data.error && data.error.includes("not configured")) {
+          setMessages(prev => [...prev, { sender: 'ai', text: "AI Copilot is not configured for this environment." }]);
+        } else {
+          setMessages(prev => [...prev, { sender: 'ai', text: "AI Copilot is temporarily unavailable. Please try again." }]);
         }
       }
     } catch (err) {
-      console.warn('AI copilot fetch note:', err);
+      console.error('AI copilot fetch error:', err);
+      setMessages(prev => [...prev, { sender: 'ai', text: "AI Copilot is temporarily unavailable. Please try again." }]);
+    } finally {
+      setIsLoading(false);
     }
-
-    // Fallback response
-    let aiReply = "I have analyzed your request across active audit workpapers. Based on the 142,000 ledger rows ingested, I found a 96.2% probability of $185,000 rebate overclaiming for Midwest Trading Co. Would you like me to auto-generate a formal observation notice?";
-    if (userMsg.toLowerCase().includes('brd') || userMsg.toLowerCase().includes('rule')) {
-      aiReply = "According to Business Rule BR-001 (Segregation of Duties), the auditor who logged a finding cannot be the sole approver who closes it. Workpapers lock automatically upon Partner sign-off (BR-002).";
-    } else if (userMsg.toLowerCase().includes('sampling') || userMsg.toLowerCase().includes('mus')) {
-      aiReply = "For Monetary Unit Sampling (MUS) with $14.2M population and 95% confidence level ($150k tolerable error), the required sample size is 1,450 items with a sampling interval of $9,793.";
-    }
-
-    setMessages(prev => [...prev, { sender: 'ai', text: aiReply }]);
-    setIsLoading(false);
   };
 
   return (

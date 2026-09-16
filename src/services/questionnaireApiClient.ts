@@ -199,6 +199,9 @@ export async function requestEditAccessQuestionnaire(
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
+        'x-user-email': userEmail || '',
+        'x-user-name': userName || '',
+        'x-user-role': 'Distributor',
         ...getAuthHeaders()
       },
       body: JSON.stringify({ client, distributor, auditId, userEmail, userName, reason })
@@ -226,6 +229,9 @@ export async function reviewEditAccessQuestionnaire(
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
+        'x-user-email': userEmail || '',
+        'x-user-name': userName || '',
+        'x-user-role': 'Auditor',
         ...getAuthHeaders()
       },
       body: JSON.stringify({ client, distributor, auditId, action, userEmail, userName, comment })
@@ -252,6 +258,9 @@ export async function customizeQuestionnaire(
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
+        'x-user-email': userEmail || '',
+        'x-user-name': userName || '',
+        'x-user-role': 'Auditor',
         ...getAuthHeaders()
       },
       body: JSON.stringify({ client, distributor, auditId, customSections, userEmail, userName })
