@@ -58,10 +58,10 @@ export const INITIAL_IIR_REQUESTS: IIRRequestItem[] = [
       requirementId: 'iir-1.1',
       requirementVersion: 1,
       referenceType: 'Instruction / Guidance Document',
-      fileName: 'Org_Chart_Sample_Structure_Guidance.pdf',
-      fileSizeMB: 1.8,
+      fileName: 'Question_1_1_Corporate_Org_Chart_Template.pdf',
+      fileSizeMB: 0.05,
       fileType: 'PDF',
-      description: 'Use this sample guidance document to format executive leadership and branch office reporting lines.',
+      description: 'Corporate Org Chart Template PDF detailing executive leadership, sales, compliance, and finance hierarchy.',
       uploadedBy: 'Sarah Jenkins (Audit Lead)',
       uploadDate: '2026-07-20 14:00:00',
       fileVersion: 1,
@@ -70,12 +70,12 @@ export const INITIAL_IIR_REQUESTS: IIRRequestItem[] = [
       versionHistory: [
         {
           version: 1,
-          fileName: 'Org_Chart_Sample_Structure_Guidance.pdf',
-          fileSizeMB: 1.8,
+          fileName: 'Question_1_1_Corporate_Org_Chart_Template.pdf',
+          fileSizeMB: 0.05,
           fileType: 'PDF',
           uploadDate: '2026-07-20 14:00:00',
           uploadedBy: 'Sarah Jenkins (Audit Lead)',
-          description: 'Initial reference structure guideline for Org Chart submission.'
+          description: 'Official corporate organizational chart template PDF.'
         }
       ]
     }
@@ -181,17 +181,27 @@ export const INITIAL_IIR_REQUESTS: IIRRequestItem[] = [
       auditId: 'AUD-FY26-001',
       requirementId: 'iir-1.4',
       requirementVersion: 1,
-      referenceType: 'Blank Template',
-      fileName: 'Employee_Master_Standard_Template.xlsx',
-      fileSizeMB: 0.4,
-      fileType: 'Excel',
-      description: 'Standardized Excel template. Please keep header row intact (Emp ID, Name, Dept, Location, Joining Date).',
+      referenceType: 'Instruction / Guidance Document',
+      fileName: 'Question_1_4_Active_Employee_Listing_Template.pdf',
+      fileSizeMB: 0.04,
+      fileType: 'PDF',
+      description: 'Active Employee Listing Template PDF including employee ID, name, designation, department, hire date, and location.',
       uploadedBy: 'Sarah Jenkins (Audit Lead)',
       uploadDate: '2026-07-21 10:15:00',
       fileVersion: 1,
       status: 'Active',
       displayToDistributor: true,
-      versionHistory: []
+      versionHistory: [
+        {
+          version: 1,
+          fileName: 'Question_1_4_Active_Employee_Listing_Template.pdf',
+          fileSizeMB: 0.04,
+          fileType: 'PDF',
+          uploadDate: '2026-07-21 10:15:00',
+          uploadedBy: 'Sarah Jenkins (Audit Lead)',
+          description: 'Official active employee listing template PDF.'
+        }
+      ]
     }
   },
   {

@@ -59,6 +59,46 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+  // Dedicated routes to serve Questionnaire Sample PDF templates with full disposition & header control
+  app.get(['/Question_1_1_Corporate_Org_Chart_Template.pdf', '/Question_1_4_Active_Employee_Listing_Template.pdf'], (req: any, res: any) => {
+    const requestedFile = path.basename(req.path);
+    const isDownload = req.query.download === '1' || req.query.download === 'true' || req.query.dl === '1';
+    const disposition = isDownload ? 'attachment' : 'inline';
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `${disposition}; filename="${requestedFile}"`);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Type');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+
+    const filePath = path.join(process.cwd(), 'public', requestedFile);
+    if (fs.existsSync(filePath)) {
+      return res.sendFile(filePath);
+    }
+    const distFilePath = path.join(process.cwd(), 'dist', requestedFile);
+    if (fs.existsSync(distFilePath)) {
+      return res.sendFile(distFilePath);
+    }
+    const uploadPath = path.join(process.cwd(), 'uploads', requestedFile);
+    if (fs.existsSync(uploadPath)) {
+      return res.sendFile(uploadPath);
+    }
+    return res.status(404).send('PDF template not found');
+  });
+
+  // Public static assets middleware (serves PDF templates, icons, etc.)
+  app.use(express.static(path.join(process.cwd(), 'public'), {
+    maxAge: '1h',
+    setHeaders: (res, filePath) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      if (filePath.endsWith('.pdf')) {
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Accept-Ranges', 'bytes');
+      }
+    }
+  }));
+
   // Health check endpoint
   app.get('/api/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -1485,6 +1525,34 @@ app.get('/api/distributors', authenticateRequest, async (req: any, res: any) => 
   app.get('/api/storage/preview', handleStoragePreview);
   app.get('/api/storage/preview/*', handleStoragePreview);
   app.get('/api/storage/preview/:fileId', handleStoragePreview);
+
+  // Dedicated routes to serve Questionnaire Sample PDF templates
+  app.get(['/Question_1_1_Corporate_Org_Chart_Template.pdf', '/Question_1_4_Active_Employee_Listing_Template.pdf'], (req: any, res: any) => {
+    const requestedFile = path.basename(req.path);
+    const isDownload = req.query.download === '1' || req.query.download === 'true' || req.query.dl === '1';
+    const disposition = isDownload ? 'attachment' : 'inline';
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `${disposition}; filename="${requestedFile}"`);
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Length, Content-Type');
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=3600');
+
+    const filePath = path.join(process.cwd(), 'public', requestedFile);
+    if (fs.existsSync(filePath)) {
+      return res.sendFile(filePath);
+    }
+    const distFilePath = path.join(process.cwd(), 'dist', requestedFile);
+    if (fs.existsSync(distFilePath)) {
+      return res.sendFile(distFilePath);
+    }
+    const uploadPath = path.join(process.cwd(), 'uploads', requestedFile);
+    if (fs.existsSync(uploadPath)) {
+      return res.sendFile(uploadPath);
+    }
+    return res.status(404).send('PDF template not found');
+  });
 
   // Delete file from Google Drive
   app.delete('/api/storage/delete/:fileId', async (req, res) => {

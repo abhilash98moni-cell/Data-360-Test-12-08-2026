@@ -62,6 +62,7 @@ import {
   GitFork
 } from 'lucide-react';
 import { CLIENT_TENANTS, getDistributorsForClient } from '../data/clientsAndDistributors';
+import { PdfTemplateViewer } from './questionnaire/PdfTemplateViewer';
 
 import { UserSession } from './AuthModal';
 import { DistributorVerticalView } from './DistributorVerticalView';
@@ -105,6 +106,19 @@ const loadIIRRequestsFromStorage = (client: string, dist: string, fallback: IIRR
             // Only clean up legacy pre-populated sample response if present
             if (sub1a === 'Germany, France, Japan, and Singapore') {
               return { ...item, textResponse: '', status: 'Pending', subQuestionResponses: {} };
+            }
+          }
+          // Ensure Questions 1.1 and 1.4 always use the new PDF templates
+          if (item.refNumber === '1.1' || item.id === 'iir-1.1') {
+            const fallback11 = fallback.find(f => f.refNumber === '1.1' || f.id === 'iir-1.1');
+            if (fallback11?.referenceMaterial) {
+              return { ...item, referenceMaterial: fallback11.referenceMaterial, sampleMaterialEnabled: true };
+            }
+          }
+          if (item.refNumber === '1.4' || item.id === 'iir-1.4') {
+            const fallback14 = fallback.find(f => f.refNumber === '1.4' || f.id === 'iir-1.4');
+            if (fallback14?.referenceMaterial) {
+              return { ...item, referenceMaterial: fallback14.referenceMaterial, sampleMaterialEnabled: true };
             }
           }
           return item;
@@ -487,7 +501,7 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
       timestamp: '2026-07-28 09:13:00',
       action: 'Downloaded',
       ipAddress: '192.168.1.104',
-      details: 'Downloaded Org_Chart_Sample_Structure_Guidance.pdf'
+      details: 'Downloaded Question_1_1_Corporate_Org_Chart_Template.pdf'
     }
   ]);
 
@@ -523,10 +537,46 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
   };
 
   // Download Reference Material
-  const handleDownloadReferenceMaterial = (item: IIRRequestItem) => {
+  const handleDownloadReferenceMaterial = async (item: IIRRequestItem) => {
     if (!item.referenceMaterial) return;
-    logReferenceAction('Downloaded', item, `User downloaded ${item.referenceMaterial.fileName}`);
-    showToast(`Downloading auditor reference material ${item.referenceMaterial.fileName}...`, 'success');
+    const fileName = item.referenceMaterial.fileName;
+    logReferenceAction('Downloaded', item, `User downloaded ${fileName}`);
+    showToast(`Downloading auditor reference material ${fileName}...`, 'success');
+    
+    // Method 1: Fetch as blob to guarantee download in all browsers (including Brave & sandboxed iframes)
+    try {
+      const res = await fetch(`/${fileName}?download=1`);
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fileName;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          window.URL.revokeObjectURL(url);
+          if (document.body.contains(a)) document.body.removeChild(a);
+        }, 10000);
+        return;
+      }
+    } catch (_) {}
+
+    // Method 2: Direct link with attachment disposition header
+    try {
+      const a = document.createElement('a');
+      a.href = `/${fileName}?download=1`;
+      a.download = fileName;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        if (document.body.contains(a)) document.body.removeChild(a);
+      }, 5000);
+    } catch (_) {}
   };
 
   // Questionnaire Customization Modal States
@@ -4283,7 +4333,21 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
 
                     {referencePreviewActive && (
                       <div className="p-4 space-y-3">
-                        {selectedItemForReference.referenceMaterial.fileType === 'Excel' || selectedItemForReference.referenceMaterial.fileName.endsWith('.xlsx') ? (
+                        {/* Questions 1.1 and 1.4 PDF Templates */}
+                        {selectedItemForReference.refNumber === '1.1' ||
+                        selectedItemForReference.refNumber === '1.4' ||
+                        selectedItemForReference.referenceMaterial.fileName === 'Question_1_1_Corporate_Org_Chart_Template.pdf' ||
+                        selectedItemForReference.referenceMaterial.fileName === 'Question_1_4_Active_Employee_Listing_Template.pdf' ? (
+                          <PdfTemplateViewer
+                            pdfUrl={`/${selectedItemForReference.refNumber === '1.1' ? 'Question_1_1_Corporate_Org_Chart_Template.pdf' : 'Question_1_4_Active_Employee_Listing_Template.pdf'}`}
+                            fileName={
+                              selectedItemForReference.refNumber === '1.1'
+                                ? 'Question_1_1_Corporate_Org_Chart_Template.pdf'
+                                : 'Question_1_4_Active_Employee_Listing_Template.pdf'
+                            }
+                            onDownload={() => handleDownloadReferenceMaterial(selectedItemForReference)}
+                          />
+                        ) : selectedItemForReference.referenceMaterial.fileType === 'Excel' || selectedItemForReference.referenceMaterial.fileName.endsWith('.xlsx') ? (
                           <div className="space-y-3">
                             <div className="flex items-center justify-between text-xs text-slate-400 bg-slate-900 p-2.5 rounded-lg border border-slate-800">
                               <span className="font-semibold text-emerald-400 flex items-center gap-1">
@@ -4299,89 +4363,38 @@ export const InitialInformationRequestView: React.FC<InitialInformationRequestVi
                                 <thead>
                                   <tr className="bg-slate-900 text-indigo-300 font-mono border-b border-slate-800">
                                     <th className="p-2 border-r border-slate-800 text-[10px] text-slate-500">#</th>
-                                    {selectedItemForReference.refNumber === '1.4' ? (
-                                      <>
-                                        <th className="p-2 border-r border-slate-800">Fiscal Period</th>
-                                        <th className="p-2 border-r border-slate-800">Gross Revenue ($)</th>
-                                        <th className="p-2 border-r border-slate-800">Net Revenue ($)</th>
-                                        <th className="p-2 border-r border-slate-800 font-sans">Required Tax Clearance Ref</th>
-                                        <th className="p-2">Auditor Notes</th>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <th className="p-2 border-r border-slate-800">Entity / Department</th>
-                                        <th className="p-2 border-r border-slate-800">Officer / Lead Name</th>
-                                        <th className="p-2 border-r border-slate-800">Compliance Role</th>
-                                        <th className="p-2 border-r border-slate-800">Reporting Line</th>
-                                        <th className="p-2">Verification Document</th>
-                                      </>
-                                    )}
+                                    <th className="p-2 border-r border-slate-800">Entity / Department</th>
+                                    <th className="p-2 border-r border-slate-800">Officer / Lead Name</th>
+                                    <th className="p-2 border-r border-slate-800">Compliance Role</th>
+                                    <th className="p-2 border-r border-slate-800">Reporting Line</th>
+                                    <th className="p-2">Verification Document</th>
                                   </tr>
                                 </thead>
                                 <tbody className="divide-y divide-slate-800/80 font-mono text-[11px] text-slate-300">
-                                  {selectedItemForReference.refNumber === '1.4' ? (
-                                    <>
-                                      <tr className="hover:bg-slate-900/50">
-                                        <td className="p-2 border-r border-slate-800 text-slate-500">1</td>
-                                        <td className="p-2 border-r border-slate-800 font-bold text-white">FY2024 - Q1</td>
-                                        <td className="p-2 border-r border-slate-800 text-emerald-400">$1,450,000.00</td>
-                                        <td className="p-2 border-r border-slate-800">$1,280,000.00</td>
-                                        <td className="p-2 border-r border-slate-800 font-sans text-indigo-300">TAX-2024-8841-A</td>
-                                        <td className="p-2 font-sans text-slate-400">Standard audited quarterly statement</td>
-                                      </tr>
-                                      <tr className="hover:bg-slate-900/50">
-                                        <td className="p-2 border-r border-slate-800 text-slate-500">2</td>
-                                        <td className="p-2 border-r border-slate-800 font-bold text-white">FY2024 - Q2</td>
-                                        <td className="p-2 border-r border-slate-800 text-emerald-400">$1,620,000.00</td>
-                                        <td className="p-2 border-r border-slate-800">$1,410,000.00</td>
-                                        <td className="p-2 border-r border-slate-800 font-sans text-indigo-300">TAX-2024-9102-B</td>
-                                        <td className="p-2 font-sans text-slate-400">Includes mid-year tax clearance</td>
-                                      </tr>
-                                      <tr className="hover:bg-slate-900/50">
-                                        <td className="p-2 border-r border-slate-800 text-slate-500">3</td>
-                                        <td className="p-2 border-r border-slate-800 font-bold text-white">FY2024 - Q3</td>
-                                        <td className="p-2 border-r border-slate-800 text-emerald-400">$1,780,000.00</td>
-                                        <td className="p-2 border-r border-slate-800">$1,550,000.00</td>
-                                        <td className="p-2 border-r border-slate-800 font-sans text-indigo-300">TAX-2024-9450-C</td>
-                                        <td className="p-2 font-sans text-slate-400">Audited by External Certified CPA</td>
-                                      </tr>
-                                      <tr className="bg-indigo-950/40 font-bold border-t-2 border-indigo-500/40 text-indigo-200">
-                                        <td className="p-2 border-r border-slate-800">SUM</td>
-                                        <td className="p-2 border-r border-slate-800">FY2024 Total</td>
-                                        <td className="p-2 border-r border-slate-800 text-emerald-300">$4,850,000.00</td>
-                                        <td className="p-2 border-r border-slate-800">$4,240,000.00</td>
-                                        <td className="p-2 border-r border-slate-800 font-sans text-xs">Annual Clearance Attached</td>
-                                        <td className="p-2 font-sans text-xs text-indigo-300">Expected sample format</td>
-                                      </tr>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <tr className="hover:bg-slate-900/50">
-                                        <td className="p-2 border-r border-slate-800 text-slate-500">1</td>
-                                        <td className="p-2 border-r border-slate-800 font-bold text-white">Executive Management</td>
-                                        <td className="p-2 border-r border-slate-800">Robert Vance</td>
-                                        <td className="p-2 border-r border-slate-800 text-indigo-300">Managing Director</td>
-                                        <td className="p-2 border-r border-slate-800">Board of Directors</td>
-                                        <td className="p-2 font-sans text-slate-400">Board Appointment Resolution</td>
-                                      </tr>
-                                      <tr className="hover:bg-slate-900/50">
-                                        <td className="p-2 border-r border-slate-800 text-slate-500">2</td>
-                                        <td className="p-2 border-r border-slate-800 font-bold text-white">Ethics & Compliance</td>
-                                        <td className="p-2 border-r border-slate-800">Elena Rostova</td>
-                                        <td className="p-2 border-r border-slate-800 text-emerald-400">Compliance Officer</td>
-                                        <td className="p-2 border-r border-slate-800">Audit Committee</td>
-                                        <td className="p-2 font-sans text-slate-400">Independent Compliance Charter</td>
-                                      </tr>
-                                      <tr className="hover:bg-slate-900/50">
-                                        <td className="p-2 border-r border-slate-800 text-slate-500">3</td>
-                                        <td className="p-2 border-r border-slate-800 font-bold text-white">Finance & Accounting</td>
-                                        <td className="p-2 border-r border-slate-800">David Thorne</td>
-                                        <td className="p-2 border-r border-slate-800 text-indigo-300">Head of Finance</td>
-                                        <td className="p-2 border-r border-slate-800">Managing Director</td>
-                                        <td className="p-2 font-sans text-slate-400">Delegation of Authority (DoA)</td>
-                                      </tr>
-                                    </>
-                                  )}
+                                  <tr className="hover:bg-slate-900/50">
+                                    <td className="p-2 border-r border-slate-800 text-slate-500">1</td>
+                                    <td className="p-2 border-r border-slate-800 font-bold text-white">Executive Management</td>
+                                    <td className="p-2 border-r border-slate-800">Robert Vance</td>
+                                    <td className="p-2 border-r border-slate-800 text-indigo-300">Managing Director</td>
+                                    <td className="p-2 border-r border-slate-800">Board of Directors</td>
+                                    <td className="p-2 font-sans text-slate-400">Board Appointment Resolution</td>
+                                  </tr>
+                                  <tr className="hover:bg-slate-900/50">
+                                    <td className="p-2 border-r border-slate-800 text-slate-500">2</td>
+                                    <td className="p-2 border-r border-slate-800 font-bold text-white">Ethics & Compliance</td>
+                                    <td className="p-2 border-r border-slate-800">Elena Rostova</td>
+                                    <td className="p-2 border-r border-slate-800 text-emerald-400">Compliance Officer</td>
+                                    <td className="p-2 border-r border-slate-800">Audit Committee</td>
+                                    <td className="p-2 font-sans text-slate-400">Independent Compliance Charter</td>
+                                  </tr>
+                                  <tr className="hover:bg-slate-900/50">
+                                    <td className="p-2 border-r border-slate-800 text-slate-500">3</td>
+                                    <td className="p-2 border-r border-slate-800 font-bold text-white">Finance & Accounting</td>
+                                    <td className="p-2 border-r border-slate-800">David Thorne</td>
+                                    <td className="p-2 border-r border-slate-800 text-indigo-300">Head of Finance</td>
+                                    <td className="p-2 border-r border-slate-800">Managing Director</td>
+                                    <td className="p-2 font-sans text-slate-400">Delegation of Authority (DoA)</td>
+                                  </tr>
                                 </tbody>
                               </table>
                             </div>
