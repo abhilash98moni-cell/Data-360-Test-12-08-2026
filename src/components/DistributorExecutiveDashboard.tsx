@@ -28,16 +28,6 @@ import {
   Table,
   CheckSquare
 } from 'lucide-react';
-import {
-  fetchQuestionnaireState,
-  getAuthHeaders
-} from '../services/questionnaireApiClient';
-import {
-  calculateQuestionnaireProgress
-} from '../services/questionnaireService';
-import {
-  TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS
-} from '../data/questionnaireData';
 
 interface DistributorExecutiveDashboardProps {
   engagements: AuditEngagement[];
@@ -185,150 +175,25 @@ export const DistributorExecutiveDashboard: React.FC<DistributorExecutiveDashboa
       .catch(() => {});
   }, [clientOrg, distOrg, currentAudit.id]);
 
-  // Module Progress Selector inside Card 1
-  type ProgressModuleOption = 'overall' | 'questionnaire' | 'irl' | 'sampling';
-  const [selectedProgressModule, setSelectedProgressModule] = useState<ProgressModuleOption>('overall');
-  const [isProgressDropdownOpen, setIsProgressDropdownOpen] = useState(false);
-  const progressDropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (progressDropdownRef.current && !progressDropdownRef.current.contains(event.target as Node)) {
-        setIsProgressDropdownOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
   // 5. Live Questionnaire Data
   const [questionnaireAnswered, setQuestionnaireAnswered] = useState<number>(0);
-  const [questionnaireTotal, setQuestionnaireTotal] = useState<number>(TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS || 32);
-  const [questionnairePercent, setQuestionnairePercent] = useState<number>(0);
   const [questionnaireLocked, setQuestionnaireLocked] = useState<boolean>(false);
 
   useEffect(() => {
-    fetchQuestionnaireState(clientOrg, distOrg, currentAudit.id, currentUser?.role || 'Distributor', distOrg)
+    fetch(`/api/questionnaires/state?client=${encodeURIComponent(clientOrg)}&distributor=${encodeURIComponent(distOrg)}`)
+      .then(res => res.json())
       .then(data => {
         if (data && data.success && data.state) {
-          const qProgress = calculateQuestionnaireProgress(data.state.answers || {}, data.state.customSections);
-          const totalQ = data.state.totalCount || qProgress.totalCount || TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS || 32;
-          const answeredQ = data.state.isLocked ? totalQ : (data.state.answeredCount ?? qProgress.answeredCount);
-          const percentQ = data.state.isLocked ? 100 : (data.state.completionPercentage ?? qProgress.completionPercentage);
-          setQuestionnaireAnswered(answeredQ);
-          setQuestionnaireTotal(totalQ);
-          setQuestionnairePercent(percentQ);
+          if (data.state.answers) {
+            setQuestionnaireAnswered(Object.keys(data.state.answers).length);
+          }
           if (data.state.isLocked !== undefined) {
             setQuestionnaireLocked(Boolean(data.state.isLocked));
           }
-        } else {
-          // Fallback to legacy endpoint if needed
-          fetch(`/api/questionnaires/state?client=${encodeURIComponent(clientOrg)}&distributor=${encodeURIComponent(distOrg)}`)
-            .then(res => res.json())
-            .then(fallbackData => {
-              if (fallbackData && fallbackData.success && fallbackData.state) {
-                const count = fallbackData.state.answers ? Object.keys(fallbackData.state.answers).length : 0;
-                setQuestionnaireAnswered(count);
-                setQuestionnaireTotal(TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS || 32);
-                setQuestionnairePercent(Math.round((count / (TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS || 32)) * 100));
-                if (fallbackData.state.isLocked !== undefined) {
-                  setQuestionnaireLocked(Boolean(fallbackData.state.isLocked));
-                }
-              }
-            })
-            .catch(() => {});
-        }
-      })
-      .catch(() => {
-        fetch(`/api/questionnaires/state?client=${encodeURIComponent(clientOrg)}&distributor=${encodeURIComponent(distOrg)}`)
-          .then(res => res.json())
-          .then(fallbackData => {
-            if (fallbackData && fallbackData.success && fallbackData.state) {
-              const count = fallbackData.state.answers ? Object.keys(fallbackData.state.answers).length : 0;
-              setQuestionnaireAnswered(count);
-              setQuestionnaireTotal(TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS || 32);
-              setQuestionnairePercent(Math.round((count / (TOTAL_BUSINESS_QUESTIONNAIRE_QUESTIONS || 32)) * 100));
-              if (fallbackData.state.isLocked !== undefined) {
-                setQuestionnaireLocked(Boolean(fallbackData.state.isLocked));
-              }
-            }
-          })
-          .catch(() => {});
-      });
-  }, [clientOrg, distOrg, currentAudit.id, currentUser?.role]);
-
-  // 5b. Live Sampling Data
-  const [assignedSamples, setAssignedSamples] = useState<any[]>([]);
-  const [samplingResponses, setSamplingResponses] = useState<any[]>([]);
-
-  useEffect(() => {
-    // 1. Fetch assigned samples
-    fetch(`/api/sampling/transactions?distributorId=${encodeURIComponent(distOrg)}&auditId=${encodeURIComponent(currentAudit.id)}`, {
-      headers: {
-        'x-user-email': currentUser?.email || '',
-        'x-user-role': currentUser?.role || 'Distributor',
-        'x-user-org': distOrg,
-        ...getAuthHeaders()
-      }
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.success && Array.isArray(data.samples)) {
-          setAssignedSamples(data.samples);
         }
       })
       .catch(() => {});
-
-    // 2. Fetch responses
-    fetch(`/api/sampling/required-data/responses?distributorId=${encodeURIComponent(distOrg)}&auditId=${encodeURIComponent(currentAudit.id)}`, {
-      headers: {
-        'x-user-email': currentUser?.email || '',
-        'x-user-role': currentUser?.role || 'Distributor',
-        'x-user-org': distOrg,
-        ...getAuthHeaders()
-      }
-    })
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.success && Array.isArray(data.responses)) {
-          setSamplingResponses(data.responses);
-        }
-      })
-      .catch(() => {});
-  }, [distOrg, currentAudit.id, currentUser]);
-
-  const samplingMetrics = useMemo(() => {
-    if (assignedSamples.length > 0) {
-      const total = assignedSamples.length;
-      const completed = assignedSamples.filter(s => {
-        const hasResp = samplingResponses.some((r: any) =>
-          r.sample_id === s.sampleId ||
-          r.sample_id === s.id ||
-          (s.voucherNo && s.voucherNo !== '—' && r.voucher_no === s.voucherNo)
-        );
-        const st = (s.status || s.testingStatus || '').toLowerCase();
-        return hasResp || st === 'completed' || st === 'accepted' || st === 'tested' || st === 'verified';
-      }).length;
-      const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-      return { completed, total, percent };
-    }
-
-    // Fallback to active samplingRun from props for this engagement
-    const auditSamplingRun = (samplingRuns || []).find(r => r.auditId === currentAudit.id) || (samplingRuns || [])[0];
-    if (auditSamplingRun) {
-      const total = auditSamplingRun.sampleSize || 0;
-      let completed = 0;
-      if (auditSamplingRun.status === 'Verified') {
-        completed = total - (auditSamplingRun.exceptionsFound || 0);
-      } else if (auditSamplingRun.status === 'In Progress') {
-        completed = Math.round(total * 0.45);
-      }
-      const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-      return { completed, total, percent };
-    }
-
-    return { completed: 0, total: 0, percent: 0 };
-  }, [assignedSamples, samplingResponses, samplingRuns, currentAudit.id]);
+  }, [clientOrg, distOrg]);
 
   // 6. Live Evidence Files Count
   const [evidenceCount, setEvidenceCount] = useState<number>(14);
@@ -402,60 +267,6 @@ export const DistributorExecutiveDashboard: React.FC<DistributorExecutiveDashboa
     : (currentAudit.progressPercent || 78);
 
   const attentionCount = clarificationRequiredCount > 0 ? clarificationRequiredCount : missingMandatoryCount;
-
-  // Dynamic metrics for the Overall Progress card module toggle
-  const currentCardDisplay = useMemo(() => {
-    switch (selectedProgressModule) {
-      case 'questionnaire': {
-        const total = questionnaireTotal || 32;
-        const completed = questionnaireLocked ? total : questionnaireAnswered;
-        const percent = questionnaireLocked ? 100 : (total > 0 ? Math.round((completed / total) * 100) : 0);
-        return {
-          title: 'Business Questionnaire',
-          buttonLabel: 'Questionnaire',
-          percent,
-          subtext: `${completed} / ${total} completed`
-        };
-      }
-      case 'irl': {
-        const total = iirRequests.length || totalItemsCount;
-        const completed = completedItemsCount;
-        const percent = total > 0 ? Math.round((completed / total) * 100) : 0;
-        return {
-          title: 'IRL',
-          buttonLabel: 'IRL',
-          percent,
-          subtext: `${completed} / ${total} completed`
-        };
-      }
-      case 'sampling': {
-        return {
-          title: 'Sampling',
-          buttonLabel: 'Sampling',
-          percent: samplingMetrics.percent,
-          subtext: `${samplingMetrics.completed} / ${samplingMetrics.total} completed`
-        };
-      }
-      case 'overall':
-      default:
-        return {
-          title: 'Overall Progress',
-          buttonLabel: 'Overall',
-          percent: overallProgressPercent,
-          subtext: `${completedItemsCount} of ${totalItemsCount} requests`
-        };
-    }
-  }, [
-    selectedProgressModule,
-    overallProgressPercent,
-    completedItemsCount,
-    totalItemsCount,
-    questionnaireTotal,
-    questionnaireAnswered,
-    questionnaireLocked,
-    iirRequests.length,
-    samplingMetrics
-  ]);
 
   // Timeline activities derived from real data
   const timelineActivities = useMemo(() => {
@@ -697,96 +508,27 @@ export const DistributorExecutiveDashboard: React.FC<DistributorExecutiveDashboa
 
       {/* 3. 5 SUMMARY CARDS ROW */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2.5">
-        {/* Card 1: Overall Progress with Module Selector */}
-        <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 hover:border-indigo-500/40 transition-all flex flex-col justify-between shadow-sm relative">
-          <div className="flex justify-between items-center gap-1.5">
-            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 truncate" title={currentCardDisplay.title}>
-              {currentCardDisplay.title}
-            </span>
-
-            {/* Module Selector Toggle/Dropdown */}
-            <div className="relative shrink-0" ref={progressDropdownRef}>
-              <button
-                type="button"
-                onClick={() => setIsProgressDropdownOpen(prev => !prev)}
-                className="flex items-center gap-1 text-[10px] font-semibold bg-slate-800/90 hover:bg-slate-700 text-indigo-300 hover:text-indigo-200 border border-slate-700/80 hover:border-indigo-500/40 rounded px-1.5 py-0.5 transition-colors cursor-pointer"
-                title="Switch module progress"
-              >
-                <span>{currentCardDisplay.buttonLabel}</span>
-                <ChevronDown className={`h-2.5 w-2.5 text-slate-400 transition-transform duration-150 ${isProgressDropdownOpen ? 'rotate-180' : ''}`} />
-              </button>
-
-              {isProgressDropdownOpen && (
-                <div className="absolute right-0 top-full mt-1 z-40 w-44 bg-slate-900 border border-slate-700 rounded-lg shadow-2xl py-1 text-xs backdrop-blur-sm">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedProgressModule('overall');
-                      setIsProgressDropdownOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between hover:bg-slate-800 cursor-pointer ${
-                      selectedProgressModule === 'overall' ? 'text-indigo-400 font-semibold bg-slate-800/60' : 'text-slate-300'
-                    }`}
-                  >
-                    <span>Overall</span>
-                    {selectedProgressModule === 'overall' && <Check className="h-3.5 w-3.5 text-indigo-400 shrink-0" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedProgressModule('questionnaire');
-                      setIsProgressDropdownOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between hover:bg-slate-800 cursor-pointer ${
-                      selectedProgressModule === 'questionnaire' ? 'text-indigo-400 font-semibold bg-slate-800/60' : 'text-slate-300'
-                    }`}
-                  >
-                    <span>Business Questionnaire</span>
-                    {selectedProgressModule === 'questionnaire' && <Check className="h-3.5 w-3.5 text-indigo-400 shrink-0" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedProgressModule('irl');
-                      setIsProgressDropdownOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between hover:bg-slate-800 cursor-pointer ${
-                      selectedProgressModule === 'irl' ? 'text-indigo-400 font-semibold bg-slate-800/60' : 'text-slate-300'
-                    }`}
-                  >
-                    <span>IRL</span>
-                    {selectedProgressModule === 'irl' && <Check className="h-3.5 w-3.5 text-indigo-400 shrink-0" />}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedProgressModule('sampling');
-                      setIsProgressDropdownOpen(false);
-                    }}
-                    className={`w-full text-left px-2.5 py-1.5 text-xs flex items-center justify-between hover:bg-slate-800 cursor-pointer ${
-                      selectedProgressModule === 'sampling' ? 'text-indigo-400 font-semibold bg-slate-800/60' : 'text-slate-300'
-                    }`}
-                  >
-                    <span>Sampling</span>
-                    {selectedProgressModule === 'sampling' && <Check className="h-3.5 w-3.5 text-indigo-400 shrink-0" />}
-                  </button>
-                </div>
-              )}
+        {/* Card 1: Overall Progress */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 hover:border-indigo-500/40 transition-all flex flex-col justify-between shadow-sm">
+          <div className="flex justify-between items-start">
+            <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Overall Progress</span>
+            <div className="p-1 rounded bg-indigo-500/10 text-indigo-400">
+              <BarChart3 className="h-3.5 w-3.5" />
             </div>
           </div>
           <div className="mt-1">
             <div className="flex items-baseline gap-1">
-              <span className="text-xl sm:text-2xl font-extrabold text-white">{currentCardDisplay.percent}%</span>
+              <span className="text-xl sm:text-2xl font-extrabold text-white">{overallProgressPercent}%</span>
               <span className="text-[10px] text-slate-400">Complete</span>
             </div>
             <div className="w-full bg-slate-800 h-1.5 rounded-full mt-1.5 overflow-hidden">
               <div
-                className="bg-indigo-500 h-full rounded-full transition-all duration-300"
-                style={{ width: `${Math.min(100, Math.max(0, currentCardDisplay.percent))}%` }}
+                className="bg-indigo-500 h-full rounded-full"
+                style={{ width: `${Math.min(100, Math.max(0, overallProgressPercent))}%` }}
               />
             </div>
             <p className="text-[10px] text-slate-400 mt-1">
-              {currentCardDisplay.subtext}
+              {completedItemsCount} of {totalItemsCount} requests
             </p>
           </div>
         </div>
