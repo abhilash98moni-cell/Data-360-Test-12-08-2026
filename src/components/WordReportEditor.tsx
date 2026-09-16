@@ -1394,6 +1394,7 @@ export const WordReportEditor: React.FC<WordReportEditorProps> = ({
               letter-spacing: 1.5px;
               user-select: none;
             }
+          @media print { .hide-on-print { display: none !important; } }
           `}</style>
 
           {/* Standard Word-like Document Pages Column (Letter / 8.5in x 11in) */}

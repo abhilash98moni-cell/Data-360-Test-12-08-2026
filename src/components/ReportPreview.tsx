@@ -117,6 +117,7 @@ export const generateReportHTML = (
         p { margin-bottom: 0.75rem; }
         ul, ol { padding-left: 1.5rem; margin-bottom: 1rem; }
         hr { display: none; }
+        @media print { .hide-on-print { display: none !important; } }
         img { max-width: 100%; height: auto; }
         .word-page-break {
           page-break-after: always;

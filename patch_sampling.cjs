@@ -2,7 +2,7 @@ const fs = require('fs');
 let code = fs.readFileSync('src/components/SamplingView.tsx', 'utf-8');
 
 // 1. isDistributor
-if (!code.includes('const isDistributor = currentUser?.role')) {
+if (!code.includes('const isDistributor')) {
     code = code.replace(
         'onFindingCreated\n}) => {',
         "onFindingCreated\n}) => {\n  const isDistributor = currentUser?.role === 'Distributor';"
@@ -19,7 +19,7 @@ code = code.replace(
 
 // 4. Update the Table Headers for GL
 code = code.replace(
-    /<th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-\[10px\] text-right">Credit<\/th>\s*<th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-\[10px\] bg-slate-900">Testing Classification<\/th>/,
+    '<th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Credit</th>\n            <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] bg-slate-900">Testing Classification</th>',
     '<th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] text-right">Credit</th>\n            {!isDistributor && <th className="py-3 px-4 font-extrabold text-slate-500 uppercase tracking-wider text-[10px] bg-slate-900">Testing Classification</th>}'
 );
 
@@ -44,7 +44,7 @@ code = code.replace(
 
 // 6. Hide sub-tabs for distributor (Testing Attributes)
 code = code.replace(
-    /<button \s*onClick={\(\) => setActiveSubTab\('Attributes'\)}[\s\S]*?<\/button>/,
+    /<button \n            onClick={\(\) => setActiveSubTab\('Attributes'\)}[\s\S]*?<\/button>/,
     `{!isDistributor && (
              <button 
                onClick={() => setActiveSubTab('Attributes')}
@@ -60,6 +60,10 @@ code = code.replace(
     "{activeSubTab === 'Attributes' && renderAttributesTab()}",
     "{activeSubTab === 'Attributes' && !isDistributor && renderAttributesTab()}"
 );
+
+// 8. Wait, is that all for SamplingView?
+// The Add Question, Edit Question, Delete Question inside RequiredDataQuestionnaire is in another file!
+// RequiredDataQuestionnaire.tsx handles the Questionnaire!
 
 fs.writeFileSync('src/components/SamplingView.tsx', code);
 console.log('SamplingView patched successfully');
